@@ -53,6 +53,7 @@ pub struct ControlServer {
     pub reload_requested: Arc<AtomicBool>,
     pub stop_requested: Arc<AtomicBool>,
     pub pause_requested: Arc<AtomicBool>,
+    admission: Arc<Mutex<ControlAdmissionState>>,
     /// Number of accepted connections rejected because all request workers
     /// were occupied. This is deliberately separate from reactor metrics so
     /// control-plane overload cannot consume keyboard data-plane capacity.
@@ -140,6 +141,7 @@ impl ControlServer {
             reload_requested: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::new(AtomicBool::new(false)),
             pause_requested: Arc::new(AtomicBool::new(false)),
+            admission: Arc::new(Mutex::new(ControlAdmissionState::default())),
             control_rejected_total: Arc::new(AtomicU64::new(0)),
             insert_requested: Arc::new(Mutex::new(None)),
             focus_snapshot: Arc::new(Mutex::new(FocusSnapshot::default())),
@@ -240,6 +242,7 @@ impl ControlServer {
         let reload_requested = Arc::new(AtomicBool::new(false));
         let stop_requested = Arc::new(AtomicBool::new(false));
         let pause_requested = Arc::new(AtomicBool::new(false));
+        let admission = Arc::new(Mutex::new(ControlAdmissionState::default()));
         let control_rejected_total = Arc::new(AtomicU64::new(0));
         let insert_requested = Arc::new(Mutex::new(None));
         let focus_snapshot = Arc::new(Mutex::new(FocusSnapshot::default()));
@@ -270,6 +273,7 @@ impl ControlServer {
         let waker_slot = Arc::clone(&waker);
         let reload_flag = Arc::clone(&reload_requested);
         let stop_flag = Arc::clone(&stop_requested);
+        let admission_for_listener = Arc::clone(&admission);
         let pause_flag = Arc::clone(&pause_requested);
         let insert_slot = Arc::clone(&insert_requested);
         let focus_slot = Arc::clone(&focus_snapshot);
@@ -310,9 +314,16 @@ impl ControlServer {
                     if stop_flag.load(Ordering::Acquire) {
                         break;
                     }
+                    // Admission and shutdown share a mutex-backed state
+                    // transition. A flag-only check here could race with
+                    // shutdown between the check and worker creation.
+                    if !control_request_admitted(&admission_for_listener) {
+                        break;
+                    }
                     let flags = Flags {
                         reload: Arc::clone(&reload_flag),
                         stop: Arc::clone(&stop_flag),
+                        admission: Arc::clone(&admission_for_listener),
                         pause: Arc::clone(&pause_flag),
                         insert: Arc::clone(&insert_slot),
                         require_verified_insert,
@@ -383,6 +394,7 @@ impl ControlServer {
             reload_requested,
             stop_requested,
             pause_requested,
+            admission,
             control_rejected_total,
             insert_requested,
             focus_snapshot,
@@ -463,6 +475,7 @@ impl ControlServer {
 
 impl Drop for ControlServer {
     fn drop(&mut self) {
+        close_control_admission(&self.admission);
         self.stop_requested.store(true, Ordering::Release);
         // `incoming()` blocks in accept. Shutting the listening socket down
         // makes accept fail at once, even when the socket path is gone (a
@@ -573,6 +586,7 @@ fn has_complete_priority_request(stream: &UnixStream, wait_for_initial_bytes: bo
 struct Flags {
     reload: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    admission: Arc<Mutex<ControlAdmissionState>>,
     pause: Arc<AtomicBool>,
     insert: Arc<Mutex<Option<InsertRequest>>>,
     require_verified_insert: bool,
@@ -583,6 +597,69 @@ struct Flags {
     status: Arc<Mutex<String>>,
     session_context: Arc<Mutex<crate::session_context::SessionContextStore>>,
     waker: crate::waker::WakerSlot,
+}
+
+#[derive(Default)]
+struct ControlAdmissionState {
+    closed: bool,
+}
+
+impl ControlAdmissionState {
+    fn try_admit(&self) -> bool {
+        !self.closed
+    }
+
+    fn close(&mut self) {
+        self.closed = true;
+    }
+}
+
+fn control_request_admitted(admission: &Mutex<ControlAdmissionState>) -> bool {
+    admission
+        .lock()
+        .map(|state| state.try_admit())
+        .unwrap_or(false)
+}
+
+fn close_control_admission(admission: &Mutex<ControlAdmissionState>) {
+    match admission.lock() {
+        Ok(mut state) => state.close(),
+        Err(poisoned) => poisoned.into_inner().close(),
+    }
+}
+
+#[cfg(all(test, feature = "loom-tests"))]
+mod control_admission_loom {
+    use super::ControlAdmissionState;
+    use loom::sync::{Arc, Mutex};
+    use loom::thread;
+
+    /// Shutdown and request admission use the same state transition. Across
+    /// every scheduler ordering, a request is either admitted before closure
+    /// or refused after closure; a post-close probe must never be admitted.
+    #[test]
+    fn shutdown_closes_control_request_admission() {
+        loom::model(|| {
+            let state = Arc::new(Mutex::new(ControlAdmissionState::default()));
+            let request_state = Arc::clone(&state);
+            let request = thread::spawn(move || request_state.lock().unwrap().try_admit());
+
+            let shutdown_state = Arc::clone(&state);
+            let shutdown = thread::spawn(move || {
+                shutdown_state.lock().unwrap().close();
+                assert!(
+                    !shutdown_state.lock().unwrap().try_admit(),
+                    "a request observed open admission after shutdown closure"
+                );
+            });
+
+            // A true result means the request acquired the shared state
+            // before shutdown closed it; a false result means closure won.
+            let _admitted_before_close = request.join().unwrap();
+            shutdown.join().unwrap();
+            assert!(!state.lock().unwrap().try_admit());
+        });
+    }
 }
 
 fn reject_busy(mut stream: UnixStream, rejected_total: &AtomicU64) {
@@ -1077,6 +1154,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
     let Flags {
         reload,
         stop,
+        admission,
         pause,
         insert,
         require_verified_insert,
@@ -1215,6 +1293,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
             "reload scheduled\n".to_string()
         }
         "stop" => {
+            close_control_admission(&admission);
             stop.store(true, Ordering::Release);
             crate::waker::wake_slot(&waker);
             "stopping\n".to_string()
@@ -1655,6 +1734,7 @@ mod tests {
         let flags = Flags {
             reload: Arc::new(AtomicBool::new(false)),
             stop: Arc::new(AtomicBool::new(false)),
+            admission: Arc::new(Mutex::new(ControlAdmissionState::default())),
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::clone(&insert),
             require_verified_insert: true,
@@ -1711,6 +1791,7 @@ mod tests {
         let flags = Flags {
             reload: Arc::new(AtomicBool::new(false)),
             stop: Arc::new(AtomicBool::new(false)),
+            admission: Arc::new(Mutex::new(ControlAdmissionState::default())),
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::clone(&insert),
             require_verified_insert: true,
@@ -1747,6 +1828,18 @@ mod tests {
             "focus_generation=9\nfocus_token=deadbeef\nfocus_identity=exact\natomic_replace=true\nverified_replace=true\n"
         );
         assert_eq!(send("focused-app-id\n"), "focused_app_id=org.kde.konsole\n");
+        *flags.focus.lock().unwrap() = FocusSnapshot {
+            diagnostic_app_id: Some("process-executable:/usr/bin/konsole".into()),
+            ..FocusSnapshot::default()
+        };
+        assert_eq!(
+            send("focused-app-id\n"),
+            "focused_app_id=process-executable:/usr/bin/konsole\n"
+        );
+        assert!(
+            !send("status\n").contains("/usr/bin/konsole"),
+            "process paths are exposed only through the explicit focused-app diagnostic"
+        );
         assert_eq!(
             send("insert-target 9 deadbeef ;sig\n"),
             "insert scheduled\n"
@@ -1832,6 +1925,24 @@ mod tests {
         pause: &Arc<AtomicBool>,
         status: &Arc<Mutex<String>>,
     ) -> String {
+        request_with_admission(
+            command,
+            reload,
+            stop,
+            pause,
+            status,
+            Arc::new(Mutex::new(ControlAdmissionState::default())),
+        )
+    }
+
+    fn request_with_admission(
+        command: &str,
+        reload: &Arc<AtomicBool>,
+        stop: &Arc<AtomicBool>,
+        pause: &Arc<AtomicBool>,
+        status: &Arc<Mutex<String>>,
+        admission: Arc<Mutex<ControlAdmissionState>>,
+    ) -> String {
         let (mut client, server) = UnixStream::pair().unwrap();
         let reload_worker = Arc::clone(reload);
         let stop_worker = Arc::clone(stop);
@@ -1845,6 +1956,7 @@ mod tests {
                 Flags {
                     reload: reload_worker,
                     stop: stop_worker,
+                    admission,
                     pause: pause_worker,
                     insert,
                     require_verified_insert: false,
@@ -1874,6 +1986,7 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(false));
         let pause = Arc::new(AtomicBool::new(false));
         let status = Arc::new(Mutex::new("source=stdin\nbackend=none".into()));
+        let admission = Arc::new(Mutex::new(ControlAdmissionState::default()));
         assert_eq!(
             request("status\n", &reload, &stop, &pause, &status),
             "running\nsource=stdin\nbackend=none\n"
@@ -1894,10 +2007,21 @@ mod tests {
         );
         assert!(!pause.load(Ordering::Acquire));
         assert_eq!(
-            request("stop\n", &reload, &stop, &pause, &status),
+            request_with_admission(
+                "stop\n",
+                &reload,
+                &stop,
+                &pause,
+                &status,
+                Arc::clone(&admission),
+            ),
             "stopping\n"
         );
         assert!(stop.load(Ordering::Acquire));
+        assert!(
+            !control_request_admitted(&admission),
+            "stop must close control-request admission"
+        );
     }
 
     #[test]
@@ -1906,6 +2030,7 @@ mod tests {
         let flags = Flags {
             reload: Arc::new(AtomicBool::new(false)),
             stop: Arc::new(AtomicBool::new(false)),
+            admission: Arc::new(Mutex::new(ControlAdmissionState::default())),
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::clone(&insert),
             require_verified_insert: true,
@@ -1949,6 +2074,7 @@ mod tests {
         let flags = Flags {
             reload,
             stop,
+            admission: Arc::new(Mutex::new(ControlAdmissionState::default())),
             pause,
             insert: Arc::clone(&insert),
             require_verified_insert: false,
@@ -2351,6 +2477,7 @@ mod tests {
         let flags = Flags {
             reload: Arc::new(AtomicBool::new(false)),
             stop: Arc::new(AtomicBool::new(false)),
+            admission: Arc::new(Mutex::new(ControlAdmissionState::default())),
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::new(Mutex::new(None)),
             require_verified_insert: false,

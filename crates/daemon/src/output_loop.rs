@@ -47,6 +47,16 @@ const ASYNC_OUTPUT_QUEUE_CAPACITY: usize = 64;
 /// that up indefinitely.
 const OUTPUT_COMPLETION_BASE: Duration = Duration::from_secs(5);
 
+/// A replacement output route may be created only after every retired route
+/// has acknowledged that its worker stopped. Keep this predicate shared with
+/// the Loom model: a timed-out worker is still an owner of compositor-facing
+/// resources, even after its injector handle has been dropped.
+pub(crate) fn output_reconnect_allowed(
+    retiring_worker_running: impl IntoIterator<Item = bool>,
+) -> bool {
+    !retiring_worker_running.into_iter().any(|running| running)
+}
+
 /// How long to wait for one operation that types `chars` characters. Paced
 /// modes (libei keysym fallback) get twice their advertised typing time.
 fn completion_deadline(capabilities: &InjectorCapabilities, chars: usize) -> Duration {
@@ -330,6 +340,7 @@ struct AsyncInjector {
     transaction_cancel: Arc<AtomicBool>,
     failure_sender: SyncSender<OutputFailure>,
     capabilities: InjectorCapabilities,
+    paced_synthetic_output: bool,
     output_checkpoint: wayexpand_core::OutputCheckpoint,
     replace_error_may_have_applied: bool,
     name: &'static str,
@@ -403,12 +414,26 @@ fn enqueue_command(
 
 /// Move a connected output backend behind a bounded actor. The receiver is
 /// drained by the daemon reactor so worker failures trigger normal recovery.
-pub fn spawn_async_injector(
+#[cfg(test)]
+pub(crate) fn spawn_async_injector(
     backend: Box<dyn TextInjector>,
     waker: Option<crate::waker::Waker>,
 ) -> std::result::Result<AsyncInjectorHandle, OutputConnectError> {
+    spawn_async_injector_with_stdin_monitor(backend, waker, None)
+}
+
+/// Like `spawn_async_injector`, with an optional stdin generation checkpoint.
+/// This is used by the pipe-driven test/CLI source, whose reactor waits
+/// synchronously for output acknowledgements and otherwise cannot observe a
+/// second input line until a long non-atomic insertion has finished.
+pub(crate) fn spawn_async_injector_with_stdin_monitor(
+    backend: Box<dyn TextInjector>,
+    waker: Option<crate::waker::Waker>,
+    stdin_monitor: Option<crate::input_loop::StdinInputMonitor>,
+) -> std::result::Result<AsyncInjectorHandle, OutputConnectError> {
     let mut backend = backend;
     let capabilities = backend.capabilities();
+    let paced_synthetic_output = backend.uses_paced_synthetic_output();
     let replace_error_may_have_applied = backend.replace_error_may_have_applied();
     let name = backend.name();
     let status_detail = backend.status_detail();
@@ -423,11 +448,17 @@ pub fn spawn_async_injector(
     // commands still queued behind it.
     let checkpoint_cancel = Arc::clone(&worker_stop);
     let checkpoint_transaction_cancel = Arc::clone(&transaction_cancel);
+    let checkpoint_stdin_monitor = stdin_monitor;
     let output_checkpoint = wayexpand_core::OutputCheckpoint::new(move || {
         if checkpoint_cancel.load(Ordering::Acquire)
             || checkpoint_transaction_cancel.load(Ordering::Acquire)
         {
             Err("output was cancelled while in progress; the application may contain a partial replacement".into())
+        } else if checkpoint_stdin_monitor
+            .as_ref()
+            .is_some_and(crate::input_loop::StdinInputMonitor::interrupted)
+        {
+            Err(InjectorError::input_interrupted_message().into())
         } else {
             Ok(())
         }
@@ -550,6 +581,7 @@ pub fn spawn_async_injector(
         transaction_cancel,
         failure_sender,
         capabilities,
+        paced_synthetic_output,
         output_checkpoint,
         replace_error_may_have_applied,
         name,
@@ -587,6 +619,10 @@ impl TextInjector for AsyncInjector {
             capabilities.max_text_chars = wayexpand_core::keystroke_max_chars();
         }
         capabilities
+    }
+
+    fn uses_paced_synthetic_output(&self) -> bool {
+        self.paced_synthetic_output
     }
 
     fn status_detail(&self) -> &'static str {
@@ -816,6 +852,14 @@ mod tests {
     use super::*;
     use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
+    #[test]
+    fn output_reconnect_waits_for_every_retired_worker() {
+        assert!(output_reconnect_allowed([]));
+        assert!(output_reconnect_allowed([false, false, false]));
+        assert!(!output_reconnect_allowed([false, true, false]));
+        assert!(!output_reconnect_allowed([true, true]));
+    }
+
     struct SlowInjector {
         calls: Arc<Mutex<Vec<String>>>,
     }
@@ -870,6 +914,50 @@ mod tests {
     struct GateInjector {
         started: Arc<AtomicBool>,
         release: Arc<AtomicBool>,
+    }
+
+    struct StdinCheckpointInjector {
+        monitor: crate::input_loop::StdinInputMonitor,
+        entered: Arc<AtomicBool>,
+        checkpoint: wayexpand_core::OutputCheckpoint,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl TextInjector for StdinCheckpointInjector {
+        fn name(&self) -> &'static str {
+            "stdin-checkpoint-test"
+        }
+
+        fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
+            self.entered.store(true, Ordering::Release);
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            while !self.monitor.interrupted() {
+                assert!(std::time::Instant::now() < deadline, "input did not arrive");
+                thread::yield_now();
+            }
+            self.checkpoint.check().map_err(|message| InjectorError {
+                backend: self.name(),
+                message,
+                retryable: false,
+            })?;
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{trigger}->{text}"));
+            Ok(())
+        }
+
+        fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn set_output_checkpoint(&mut self, checkpoint: wayexpand_core::OutputCheckpoint) {
+            self.checkpoint = checkpoint;
+        }
     }
 
     impl TextInjector for GateInjector {
@@ -947,14 +1035,14 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("the in-flight transaction completes")
             .1
-            .is_applied());
+            .is_output_acknowledged());
         for transaction in queued {
             assert!(transaction
                 .outcome
                 .recv_timeout(Duration::from_secs(2))
                 .expect("each admitted transaction completes")
                 .1
-                .is_applied());
+                .is_output_acknowledged());
         }
         assert!(
             failures.try_recv().is_err(),
@@ -969,7 +1057,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("fresh work completes")
             .1
-            .is_applied());
+            .is_output_acknowledged());
     }
 
     /// Rejects the first replacement as a sensitive target, then succeeds.
@@ -1176,7 +1264,7 @@ mod tests {
             .outcome
             .recv_timeout(Duration::from_secs(2))
             .expect("the worker reports the interrupted transaction");
-        assert!(!outcome.1.is_applied(), "{}", outcome.1);
+        assert!(!outcome.1.is_output_acknowledged(), "{}", outcome.1);
         // At most the character already being typed may follow cancellation.
         let typed_after = typed.lock().unwrap().len();
         assert!(
@@ -1305,7 +1393,7 @@ mod tests {
             .outcome
             .recv_timeout(Duration::from_secs(2))
             .expect("the worker should accept the next transaction");
-        assert!(next.1.is_applied(), "{}", next.1);
+        assert!(next.1.is_output_acknowledged(), "{}", next.1);
         assert_eq!(*typed.lock().unwrap(), "repdone");
         assert!(failures.try_recv().is_err());
     }
@@ -1366,7 +1454,7 @@ mod tests {
             .outcome
             .recv_timeout(Duration::from_secs(2))
             .expect("the worker returns the transaction payload with its outcome");
-        assert!(outcome.is_applied());
+        assert!(outcome.is_output_acknowledged());
         assert_eq!(returned.insert.as_ptr(), insert_ptr);
         assert!(!trace_id.is_empty());
     }
@@ -1389,6 +1477,39 @@ mod tests {
             *calls.lock().unwrap(),
             vec![":a->replacement", ":b->second"]
         );
+    }
+
+    #[test]
+    fn a_later_stdin_generation_interrupts_the_live_output_checkpoint() {
+        let monitor = crate::input_loop::StdinInputMonitor::default();
+        let first_generation = monitor.next_generation();
+        monitor.begin_line(first_generation);
+        let entered = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let backend = StdinCheckpointInjector {
+            monitor: monitor.clone(),
+            entered: Arc::clone(&entered),
+            checkpoint: wayexpand_core::OutputCheckpoint::default(),
+            calls: Arc::clone(&calls),
+        };
+        let (mut injector, _failures, _worker) =
+            spawn_async_injector_with_stdin_monitor(Box::new(backend), None, Some(monitor.clone()))
+                .unwrap();
+        let output = thread::spawn(move || injector.replace(";trigger", "replacement"));
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !entered.load(Ordering::Acquire) {
+            assert!(std::time::Instant::now() < deadline, "output did not start");
+            thread::yield_now();
+        }
+        monitor.next_generation();
+
+        let error = output
+            .join()
+            .expect("output worker caller panicked")
+            .expect_err("new stdin input must invalidate the checkpoint");
+        assert_eq!(error.kind(), InjectorErrorKind::InputInterrupted);
+        assert!(calls.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1552,5 +1673,153 @@ mod tests {
             completed.shutdown_workers_acknowledged_total
                 >= before.shutdown_workers_acknowledged_total + 8
         );
+    }
+}
+
+#[cfg(all(test, feature = "loom-tests"))]
+mod loom_models {
+    use loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use loom::sync::Arc;
+    use loom::thread;
+
+    use super::output_reconnect_allowed;
+    use crate::pending_output::{output_continuation, OutputContinuation, OutputOrigin};
+
+    /// Model cancellation racing with a paced injector's checkpoint/send
+    /// boundary. One already-authorized event may finish after cancellation;
+    /// the next checkpoint must stop the stream. The reactor's production
+    /// integrity gate must then quarantine the transaction regardless of
+    /// whether the worker had completed some or all output.
+    #[test]
+    fn physical_input_race_bounds_in_flight_output_and_forbids_continuation() {
+        loom::model(|| {
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let emitted = Arc::new(AtomicUsize::new(0));
+            let emitted_after_cancel = Arc::new(AtomicUsize::new(0));
+            let physical_input_seen = Arc::new(AtomicBool::new(false));
+            let worker_cancelled = Arc::clone(&cancelled);
+            let worker_emitted = Arc::clone(&emitted);
+            let worker_emitted_after_cancel = Arc::clone(&emitted_after_cancel);
+            let total_events = 3;
+
+            let worker = thread::spawn(move || {
+                for _ in 0..total_events {
+                    if worker_cancelled.load(Ordering::Acquire) {
+                        return;
+                    }
+                    // This yield models the backend work between its
+                    // cancellation checkpoint and sending one key event.
+                    thread::yield_now();
+                    worker_emitted.fetch_add(1, Ordering::Release);
+                    if worker_cancelled.load(Ordering::Acquire) {
+                        worker_emitted_after_cancel.fetch_add(1, Ordering::Release);
+                    }
+                }
+            });
+
+            let input_cancelled = Arc::clone(&cancelled);
+            let input_seen = Arc::clone(&physical_input_seen);
+            let input = thread::spawn(move || {
+                thread::yield_now();
+                input_seen.store(true, Ordering::Release);
+                input_cancelled.store(true, Ordering::Release);
+            });
+
+            worker.join().expect("modeled output worker panicked");
+            input.join().expect("modeled input monitor panicked");
+
+            let final_count = emitted.load(Ordering::Acquire);
+            let late_count = emitted_after_cancel.load(Ordering::Acquire);
+            assert!(
+                late_count <= 1,
+                "only one already-authorized output event may follow cancellation"
+            );
+            let input_seen = physical_input_seen.load(Ordering::Acquire);
+            let mut integrity = crate::pending_output::OutputIntegrityGate::default();
+            if input_seen {
+                integrity.interrupt_for_physical_input();
+            }
+            let outcome_uncertain = final_count != total_events || late_count != 0;
+            let quarantine = integrity.resolve(outcome_uncertain);
+            assert_eq!(quarantine, input_seen || outcome_uncertain);
+            let continuation = output_continuation(
+                OutputOrigin::Typed,
+                quarantine,
+                final_count == total_events && late_count == 0,
+            );
+            assert!(
+                !input_seen || continuation == OutputContinuation::Quarantine,
+                "observed physical input must prevent continuation even if all output was emitted"
+            );
+            if input_seen || outcome_uncertain {
+                assert_eq!(continuation, OutputContinuation::Quarantine);
+            } else {
+                assert_eq!(continuation, OutputContinuation::AdvanceBatch);
+            }
+        });
+    }
+
+    /// A timed-out backend teardown stays part of the retiring set until its
+    /// worker acknowledges exit. Reconnect is permitted only after the old
+    /// backend operation is no longer active, so old and new output routes
+    /// cannot operate on the same compositor session concurrently.
+    #[test]
+    fn retired_backend_blocks_reconnect_until_shutdown_acknowledgement() {
+        loom::model(|| {
+            let running = Arc::new(AtomicBool::new(true));
+            let operation_active = Arc::new(AtomicBool::new(true));
+            let retired = Arc::new(AtomicBool::new(false));
+            let release_shutdown = Arc::new(AtomicBool::new(false));
+            let reconnect_started = Arc::new(AtomicBool::new(false));
+            let overlap = Arc::new(AtomicBool::new(false));
+
+            let worker_running = Arc::clone(&running);
+            let worker_active = Arc::clone(&operation_active);
+            let worker_retired = Arc::clone(&retired);
+            let worker_release = Arc::clone(&release_shutdown);
+            let worker = thread::spawn(move || {
+                while !worker_retired.load(Ordering::Acquire) {
+                    thread::yield_now();
+                }
+                while !worker_release.load(Ordering::Acquire) {
+                    thread::yield_now();
+                }
+                worker_active.store(false, Ordering::Release);
+                worker_running.store(false, Ordering::Release);
+            });
+
+            let reactor_running = Arc::clone(&running);
+            let reactor_active = Arc::clone(&operation_active);
+            let reactor_retired = Arc::clone(&retired);
+            let reactor_release = Arc::clone(&release_shutdown);
+            let reactor_reconnect = Arc::clone(&reconnect_started);
+            let reactor_overlap = Arc::clone(&overlap);
+            let reactor = thread::spawn(move || {
+                reactor_retired.store(true, Ordering::Release);
+                // This is the bounded wait expiring: retain the worker and
+                // defer reconnection while it is still in backend teardown.
+                if !output_reconnect_allowed([reactor_running.load(Ordering::Acquire)]) {
+                    assert!(reactor_active.load(Ordering::Acquire));
+                    assert!(!reactor_reconnect.load(Ordering::Acquire));
+                }
+                reactor_release.store(true, Ordering::Release);
+                while reactor_running.load(Ordering::Acquire) {
+                    thread::yield_now();
+                }
+                assert!(output_reconnect_allowed([
+                    reactor_running.load(Ordering::Acquire)
+                ]));
+                reactor_reconnect.store(true, Ordering::Release);
+                if reactor_active.load(Ordering::Acquire) {
+                    reactor_overlap.store(true, Ordering::Release);
+                }
+            });
+
+            worker.join().expect("shutdown worker panicked");
+            reactor.join().expect("reactor panicked");
+            assert!(reconnect_started.load(Ordering::Acquire));
+            assert!(!operation_active.load(Ordering::Acquire));
+            assert!(!overlap.load(Ordering::Acquire));
+        });
     }
 }

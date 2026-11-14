@@ -80,8 +80,14 @@ impl LibeiSession {
     }
 
     pub(super) fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
+        let erase_count = erase_grapheme_count(trigger);
+        super::ensure_paced_key_event_budget(erase_count).map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: false,
+        })?;
         self.sync_server_state()
-            .and_then(|()| self.send_backspaces(erase_grapheme_count(trigger)))
+            .and_then(|()| self.send_backspaces(erase_count))
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),
@@ -115,6 +121,7 @@ impl LibeiSession {
             message: error.to_string(),
             retryable: error.is_retryable(),
         })?;
+        let mut fcitx_fallback = false;
         if let Some(client) = &self.fcitx5 {
             self.checkpoint.check().map_err(|message| InjectorError {
                 backend: BACKEND_NAME,
@@ -124,6 +131,7 @@ impl LibeiSession {
             match client.replace(trigger, text) {
                 fcitx5::ReplaceResult::Committed => return Ok(()),
                 fcitx5::ReplaceResult::FallbackAllowed(_) => {
+                    fcitx_fallback = true;
                     self.sync_server_state().map_err(|error| InjectorError {
                         backend: BACKEND_NAME,
                         message: error.to_string(),
@@ -156,7 +164,21 @@ impl LibeiSession {
                 message: error.to_string(),
                 retryable: error.is_retryable(),
             })?;
-        self.send_backspaces(erase_grapheme_count(trigger))
+        let erase_events = erase_grapheme_count(trigger);
+        super::ensure_paced_key_event_budget(erase_events).map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: false,
+        })?;
+        if fcitx_fallback && matches!(self.mode, TextMode::Keysym(_)) {
+            let events = erase_events.saturating_add(text.chars().count());
+            super::ensure_paced_key_event_budget(events).map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: false,
+            })?;
+        }
+        self.send_backspaces(erase_events)
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),
@@ -187,6 +209,11 @@ impl LibeiSession {
     }
 
     pub(super) fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
+        super::ensure_paced_key_event_budget(count).map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: false,
+        })?;
         // Cursor keys follow the typed text; they must not reach a window
         // that took focus while the text was being typed.
         self.checkpoint

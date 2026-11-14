@@ -119,10 +119,39 @@ fn queue_window() -> &'static Mutex<Window> {
     WINDOW.get_or_init(|| Mutex::new(Window::default()))
 }
 
+fn interruption_window() -> &'static Mutex<Window> {
+    static WINDOW: OnceLock<Mutex<Window>> = OnceLock::new();
+    WINDOW.get_or_init(|| Mutex::new(Window::default()))
+}
+
 static MATCHER_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static OUTPUT_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static PROFILE_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static QUEUE_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static INTERRUPTION_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
+
+/// Record the interval between daemon observation of overlapping input and
+/// the backend transaction call returning. It does not measure physical-key
+/// delivery or target-application rendering.
+pub(crate) fn record_interrupt_to_backend_return(elapsed: Duration) {
+    record_nonblocking(
+        interruption_window(),
+        elapsed.as_nanos().min(u64::MAX as u128) as u64,
+        &INTERRUPTION_DROPPED_SAMPLES,
+    );
+}
+
+pub(crate) fn interruption_snapshot() -> Snapshot {
+    static CACHE: OnceLock<Mutex<Snapshot>> = OnceLock::new();
+    nonblocking_snapshot(
+        interruption_window(),
+        CACHE.get_or_init(|| Mutex::new(Snapshot::default())),
+    )
+}
+
+pub(crate) fn interruption_dropped_samples() -> u64 {
+    INTERRUPTION_DROPPED_SAMPLES.load(Ordering::Relaxed)
+}
 
 /// Number of matcher timing samples skipped because a diagnostics reader held
 /// the rolling-window lock. Recording is best-effort so metrics never delay
@@ -232,7 +261,9 @@ pub(crate) fn apply_with_trace_id(
 ) -> (TransactionOutcome, String) {
     let mode = output_mode(injector.status_detail());
     let size = output_size_bucket(result.insert.chars().count());
-    let mut traced = crate::failure_trace::TracedInjector::new(injector);
+    let expected_insert_units =
+        result.insert.chars().count() + usize::from(result.reinsert_after.is_some());
+    let mut traced = crate::failure_trace::TracedInjector::new(injector, expected_insert_units);
     let report = measure(mode, size, || {
         ExpansionEngine::apply_with_report(&mut traced, result)
     });

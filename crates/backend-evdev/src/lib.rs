@@ -460,14 +460,20 @@ impl EvdevSource {
             return Ok(true);
         }
         if self.has_buffered_raw_events() {
-            let (key_activity, _) = self.process_buffered_raw_events(MAX_RAW_EVENTS_PER_SLICE);
-            if key_activity {
-                self.pending.pop_front();
+            // During an in-flight non-atomic replacement, any physical key
+            // activity is an interruption. Scan the already-buffered raw
+            // slice before translating it: processing up to an event budget
+            // first only delays cancellation and creates matcher events that
+            // will be quarantined anyway. Leave the buffer untouched so the
+            // normal post-interruption quiet-window path can discard it.
+            if self.raw_events[self.raw_event_cursor..]
+                .iter()
+                .any(|event| matches!(event.destructure(), evdev::EventSummary::Key(..)))
+            {
                 return Ok(true);
             }
-            return Ok(self.raw_events[self.raw_event_cursor..]
-                .iter()
-                .any(|event| matches!(event.destructure(), evdev::EventSummary::Key(..))));
+            self.process_buffered_raw_events(MAX_RAW_EVENTS_PER_SLICE);
+            return Ok(false);
         }
         let mut key_activity = self
             .poll_once(timeout, true)

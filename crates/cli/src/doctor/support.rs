@@ -517,14 +517,20 @@ pub(crate) fn summarize_reports(
             "output_backend_restarts": number(status, "output_reconnect_total"),
             "uncertain_injections": number(status, "output_uncertain_total"),
             "partial_injections": number(status, "partial_write_total"),
-            "recent_successful_expansions": status.get("recent_expansion_outcomes").and_then(serde_json::Value::as_array)
-                .map_or(0, |outcomes| outcomes.iter().filter(|item| item.get("completion").and_then(serde_json::Value::as_str) == Some("applied")).count() as u64),
+            "recent_output_acknowledgements": status.get("recent_expansion_outcomes").and_then(serde_json::Value::as_array)
+                .map_or(0, |outcomes| outcomes.iter().filter(|item| {
+                    match item.get("application_result").and_then(serde_json::Value::as_str) {
+                        Some("unverified") => true,
+                        Some(_) => false,
+                        None => item.get("completion").and_then(serde_json::Value::as_str) == Some("applied"),
+                    }
+                }).count() as u64),
             "suppressed_expansions": number(status, "suppressed_expansions_total"),
         }),
     );
     let diagnostics = diagnostic_summaries(doctor, services);
     serde_json::json!({
-        "schema": 3,
+        "schema": 4,
         "generated_at_unix": SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -834,7 +840,7 @@ mod tests {
         let status = serde_json::json!({
             "input_reconnect_total":2,"output_reconnect_total":3,"output_uncertain_total":1,"partial_write_total":1,
             "suppressed_expansions_total":4,
-            "recent_expansion_outcomes":[{"completion":"applied","trigger":"private"}]
+            "recent_expansion_outcomes":[{"completion":"applied","application_result":"unverified","trigger":"private"}]
         });
         let summary = summarize_reports(&doctor, &certification, Some(&status), &services);
         let serialized = summary.to_string();
@@ -868,11 +874,18 @@ mod tests {
             summary["protocol_probes"]["input_method_v2"]["status"],
             "unavailable"
         );
-        assert_eq!(summary["schema"], 3);
+        assert_eq!(summary["schema"], 4);
         assert_eq!(summary["services"]["units"][0]["restart_count"], 3);
         assert_eq!(summary["services"]["units"][0]["exit_code"], 1);
         assert_eq!(summary["recent_events"]["input_backend_restarts"], 2);
         assert_eq!(summary["recent_events"]["output_backend_restarts"], 3);
+        assert_eq!(
+            summary["recent_events"]["recent_output_acknowledgements"],
+            1
+        );
+        assert!(summary["recent_events"]
+            .get("recent_successful_expansions")
+            .is_none());
         assert!(summary["diagnostics"]
             .as_array()
             .unwrap()

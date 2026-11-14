@@ -22,6 +22,12 @@ fn libei_refusal_diagnostics_are_content_free_and_actionable() {
         backend_refusal_category("multiple keyboard layouts detected (2)"),
         Some("active-layout-unavailable")
     );
+    assert_eq!(
+        backend_refusal_category(
+            "paced transaction exceeds interactive budget: estimated 109 ms, limit 100 ms"
+        ),
+        Some("paced-interactive-limit")
+    );
     assert_eq!(backend_refusal_category("unrelated backend error"), None);
 }
 
@@ -83,7 +89,6 @@ fn daemon_status_body_matches_documented_stable_contract() {
         latency::Snapshot::default(),
         InputSourceCapabilities::INPUT_METHOD_V2,
         InjectorCapabilities {
-            atomic_replace: true,
             full_unicode: true,
             ..InjectorCapabilities::default()
         },
@@ -113,10 +118,23 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match tests/contracts/status-json.json"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=34\ndaemon_commit={}\ndaemon_version={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=43\ndaemon_commit={}\ndaemon_version={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\nbackend_policy_blocked=false\npaused=false\n",
         super::build_info::COMMIT,
         super::build_info::VERSION
     )));
+    let value = |name: &str| {
+        body.lines()
+            .find_map(|line| line.strip_prefix(&format!("{name}=")))
+            .unwrap_or_else(|| panic!("missing status field {name}"))
+    };
+    // This is process-global telemetry and other tests in this binary may
+    // update it concurrently. The contract test validates shape and type;
+    // zeroing a shared counter here would make the suite order-dependent.
+    assert!(value("expansion_output_acknowledgements_total")
+        .parse::<u64>()
+        .is_ok());
+    assert!(!body.contains("expansions_applied_total="));
+    assert!(!body.contains("last_successful_insertion_unix="));
     for field in [
         "injection_latency_sample_count",
         "injection_latency_window_count",
@@ -154,6 +172,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "window_tracker_last_failure_reason",
         "window_tracker_last_connected_unix",
         "window_tracker_reconnect_backoff_ms",
+        "window_tracker_identity_source",
     ] {
         assert!(body
             .lines()
@@ -266,6 +285,7 @@ impl TextInjector for AtomicFailingInjector {
     fn capabilities(&self) -> InjectorCapabilities {
         InjectorCapabilities {
             atomic_replace: true,
+            replacement_guarantee: wayexpand_core::ReplacementGuarantee::Atomic,
             ..InjectorCapabilities::default()
         }
     }
@@ -566,7 +586,7 @@ fn deferred_command_output_over_organization_limit_is_not_injected() {
     loop {
         let completed = engine.drain_completed_commands();
         for result in &completed {
-            assert!(ExpansionEngine::apply(&mut injector, result).is_applied());
+            assert!(ExpansionEngine::apply(&mut injector, result).is_output_acknowledged());
         }
         let metrics = engine.command_metrics();
         if marker.exists() && metrics.command_queue_depth == 0 && metrics.command_in_flight == 0 {
@@ -625,7 +645,7 @@ fn deferred_command_does_not_block_daemon_input_processing() {
         let results = engine.drain_completed_commands();
         if !results.is_empty() {
             for result in &results {
-                assert!(ExpansionEngine::apply(&mut injector, result).is_applied());
+                assert!(ExpansionEngine::apply(&mut injector, result).is_output_acknowledged());
             }
             break;
         }
@@ -722,7 +742,7 @@ fn process_event_can_match_without_an_injector() {
 }
 
 #[test]
-fn undo_is_not_consumed_when_injector_is_unavailable() {
+fn undo_is_unavailable_after_an_unverified_output_acknowledgement() {
     let config = Config::parse(
         r#"
         [settings]
@@ -763,14 +783,14 @@ fn undo_is_not_consumed_when_injector_is_unavailable() {
     )
     .unwrap();
 
-    assert_eq!(
-        injector.calls,
-        ["erase::x", "insert:ok", "erase:ok", "insert::x"]
-    );
+    assert_eq!(injector.calls, ["erase::x", "insert:ok"]);
+    assert!(engine
+        .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
+        .is_none());
 }
 
 #[test]
-fn undo_is_not_consumed_when_injection_fails() {
+fn undo_is_not_attempted_for_an_unverified_output() {
     let config = Config::parse(
         r#"
         [settings]
@@ -794,65 +814,14 @@ fn undo_is_not_consumed_when_injection_fails() {
     )
     .unwrap();
 
-    let error = process_event(
+    process_event(
         &mut engine,
         InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
         Some(&mut AtomicFailingInjector),
         &policy,
         "libei",
     )
-    .unwrap_err();
-    assert!(error.retryable());
-
-    let mut retry_injector = RecordingInjector { calls: Vec::new() };
-    process_event(
-        &mut engine,
-        InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
-        Some(&mut retry_injector),
-        &policy,
-        "libei",
-    )
     .unwrap();
-    assert_eq!(retry_injector.calls, ["erase:ok", "insert::x"]);
-}
-
-#[test]
-fn possibly_partial_undo_failure_drops_the_undo_record() {
-    let config = Config::parse(
-        r#"
-        [settings]
-        undo_chord = "Ctrl+Z"
-
-        [[expansion]]
-        trigger = ":x"
-        replacement = "ok"
-        "#,
-    )
-    .unwrap();
-    let mut engine = ExpansionEngine::new(config).unwrap();
-    let policy = wayexpand_core::OrganizationPolicy::default();
-    let mut initial_injector = RecordingInjector { calls: Vec::new() };
-    process_event(
-        &mut engine,
-        InputEvent::Text(":x".into()),
-        Some(&mut initial_injector),
-        &policy,
-        "libei",
-    )
-    .unwrap();
-
-    // A non-atomic backend may have erased part of the text before
-    // failing; the session still reconnects, but the undo must not be
-    // replayed against text in an unknown state.
-    let error = process_event(
-        &mut engine,
-        InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
-        Some(&mut FailingInjector),
-        &policy,
-        "libei",
-    )
-    .unwrap_err();
-    assert!(error.retryable());
 
     let mut retry_injector = RecordingInjector { calls: Vec::new() };
     process_event(
@@ -867,7 +836,7 @@ fn possibly_partial_undo_failure_drops_the_undo_record() {
 }
 
 #[test]
-fn undo_is_preserved_only_by_undo_chord() {
+fn unverified_output_never_creates_an_undo_that_can_partially_fail() {
     let config = Config::parse(
         r#"
         [settings]
@@ -880,52 +849,42 @@ fn undo_is_preserved_only_by_undo_chord() {
     )
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
-    let mut injector = RecordingInjector { calls: Vec::new() };
-    let policy = wayexpand_core::OrganizationPolicy {
-        safe_mode: true,
-        disable_hotkeys: true,
-        ..Default::default()
-    };
-
-    // Expand :x to "ok"
+    let policy = wayexpand_core::OrganizationPolicy::default();
+    let mut initial_injector = RecordingInjector { calls: Vec::new() };
     process_event(
         &mut engine,
         InputEvent::Text(":x".into()),
-        Some(&mut injector),
+        Some(&mut initial_injector),
         &policy,
         "libei",
     )
     .unwrap();
-    // Non-undo key presses (A) should invalidate undo transaction
-    // because they may move the cursor or change text
-    process_event(
-        &mut engine,
-        InputEvent::Key(wayexpand_core::KeyChord::parse("A").unwrap()),
-        Some(&mut injector),
-        &policy,
-        "libei",
-    )
-    .unwrap();
-    // Ctrl+Z should NOT undo now because the undo transaction was invalidated
+
+    // There is no undo transaction to send: the original application result
+    // was not verified, so retrying an inverse edit could erase unrelated text.
     process_event(
         &mut engine,
         InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
-        Some(&mut injector),
+        Some(&mut FailingInjector),
         &policy,
         "libei",
     )
     .unwrap();
 
-    // Should only have the expansion, no undo
-    assert_eq!(
-        injector.calls,
-        ["erase::x", "insert:ok"],
-        "non-undo key should invalidate undo transaction"
-    );
+    let mut retry_injector = RecordingInjector { calls: Vec::new() };
+    process_event(
+        &mut engine,
+        InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
+        Some(&mut retry_injector),
+        &policy,
+        "libei",
+    )
+    .unwrap();
+    assert!(retry_injector.calls.is_empty());
 }
 
 #[test]
-fn undo_works_immediately_after_expansion() {
+fn unverified_expansion_does_not_offer_undo_immediately() {
     let config = Config::parse(
         r#"
         [settings]
@@ -960,78 +919,16 @@ fn undo_works_immediately_after_expansion() {
     )
     .unwrap();
 
-    // Should have both expansion and undo
+    // Backend acknowledgment is not application-level verification, so only
+    // the original expansion was submitted and Ctrl+Z did not emit an inverse.
     assert_eq!(
         injector.calls,
-        ["erase::x", "insert:ok", "erase:ok", "insert::x"],
-        "undo chord should preserve undo transaction immediately after expansion"
+        ["erase::x", "insert:ok"],
+        "unverified output must not create an undo transaction"
     );
-}
-
-#[test]
-fn undo_is_invalidated_by_navigation_keys() {
-    // Regression test: undo must be invalidated by navigation keys
-    // (Left, Right, Home, End) because they move the cursor.
-    let config = Config::parse(
-        r#"
-        [settings]
-        undo_chord = "Ctrl+Z"
-
-        [[expansion]]
-        trigger = ":x"
-        replacement = "ok"
-        "#,
-    )
-    .unwrap();
-    let _injector = RecordingInjector { calls: Vec::new() };
-    let policy = wayexpand_core::OrganizationPolicy {
-        safe_mode: true,
-        disable_hotkeys: true,
-        ..Default::default()
-    };
-
-    for nav_key in &["Left", "Right", "Home", "End"] {
-        let mut injector = RecordingInjector { calls: Vec::new() };
-        let mut engine = ExpansionEngine::new(config.clone()).unwrap();
-
-        // Expand :x to "ok"
-        process_event(
-            &mut engine,
-            InputEvent::Text(":x".into()),
-            Some(&mut injector),
-            &policy,
-            "libei",
-        )
-        .unwrap();
-
-        // Press navigation key - should invalidate undo
-        process_event(
-            &mut engine,
-            InputEvent::Key(wayexpand_core::KeyChord::parse(nav_key).unwrap()),
-            Some(&mut injector),
-            &policy,
-            "libei",
-        )
-        .unwrap();
-
-        // Try undo - should NOT work because transaction was invalidated
-        process_event(
-            &mut engine,
-            InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
-            Some(&mut injector),
-            &policy,
-            "libei",
-        )
-        .unwrap();
-
-        // Should only have expansion, not undo (no erase/insert of second pair)
-        assert_eq!(
-            injector.calls.len(),
-            2,
-            "{} key should invalidate undo transaction",
-            nav_key
-        );
-    }
+    assert!(engine
+        .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
+        .is_none());
 }
 
 #[cfg(unix)]
@@ -1296,6 +1193,34 @@ fn text_the_route_cannot_type_is_classified_as_unsupported() {
         },
     };
     assert_eq!(other.route_limit(&injector.capabilities()), None);
+}
+
+#[test]
+fn applied_cursor_failure_is_committed_and_not_misclassified_as_a_retry() {
+    let error = EventError {
+        result: wayexpand_core::ExpansionResult {
+            snippet_id: std::sync::Arc::from("test"),
+            trigger: std::sync::Arc::from(":x"),
+            matched_text: "x".into(),
+            insert: "replacement".into(),
+            cursor_offset: None,
+            reinsert_after: None,
+            command_backed: false,
+            undoable: false,
+            folded_suffix_chars: 0,
+        },
+        source: wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure {
+            source: InjectorError {
+                backend: "test",
+                message: "cursor operation rejected".into(),
+                retryable: false,
+            },
+        },
+    };
+
+    assert!(error.applied_with_cursor_position_failure());
+    assert!(!error.retryable());
+    assert_eq!(error.diagnostic_category(), "cursor_reposition_failed");
 }
 
 #[cfg(unix)]

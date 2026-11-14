@@ -13,21 +13,28 @@ packagers and source-build users need a compatible toolchain.
 
 ## Quick Reference
 
-**Publication status audited 2026-11-07:** the latest GitHub release (`1.3.4`)
-has no downloadable assets. The Launchpad PPA has an experimental daily
-`1.3.3` package for Ubuntu 26.04 (Resolute) and Ubuntu 26.10 (Stonking), amd64.
-Its Ubuntu 24.04 (Noble) and 22.04 (Jammy) publications are stale at `0.2.0`;
-do not treat them as current installation channels. No WayExpand Copr project
-is currently published, and the PKGBUILD has not been submitted to AUR. The
-PPA packages are not compositor-certified; certified releases remain gated on
-compositor certification.
+<!-- generated-install-status:start -->
+**Publication status from the shared manifest (audited 2026-11-11):** GitHub 1.3.3 binary assets published: False. Launchpad PPA: experimental daily builds for ['amd64'].
 
-The release payload is built on Ubuntu 24.04 and package-install CI covers
-Debian packages on Ubuntu 24.04 and 26.04 plus RPM packages on Fedora 45. These
-checks establish package installation compatibility only. The current
-package smoke test covers install, reinstall, and removal, but not an upgrade
-from a previous package version. These checks do not establish desktop input
-certification or a stable distro repository. GitHub release artifacts receive
+| Distribution | PPA package status |
+|---|---|
+| Ubuntu 26.04 (Resolute) | 1.3.3 — current |
+| Ubuntu 26.10 (Stonking) | 1.3.3 — current |
+| Ubuntu 24.04 (Noble) | not published — unavailable |
+| Ubuntu 22.04 (Jammy) | not published — unavailable |
+
+Fedora Copr published: False; Arch AUR submitted: False. Package CI targets: Ubuntu 24.04, Ubuntu 26.04, Fedora 45. Physical desktop certification: False. Previous-package upgrade CI passed: False.
+<!-- generated-install-status:end -->
+
+The release payload is built on Ubuntu 24.04. Package lifecycle CI is
+configured to install a 1.3.2 package fixture, upgrade to the candidate, roll
+back to 1.3.2, re-upgrade, reinstall, and remove it on the listed package
+targets. The previous package is deliberately older than the current 1.3.3
+candidate. This checks package-manager migration and files, not GNOME session
+behavior; the configured test remains unverified until a complete CI run passes.
+A GNOME session after package upgrade still requires the separate desktop
+acceptance gate; package CI does not establish desktop input certification or a
+stable distro repository. GitHub release artifacts receive
 build-provenance attestations and checksums; repositories must use their
 distribution signing infrastructure before they are advertised as official
 channels. CI does not yet compare independently rebuilt `.deb`/`.rpm` files,
@@ -52,12 +59,12 @@ for amd64 on Resolute and Stonking on 2026-11-07 ([Resolute build
 
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|
-| Arch Linux | `wayexpand` | Build locally | Packaging preview; not submitted to AUR |
-| Ubuntu 24.04 LTS | `.deb` | Release build baseline and package-install CI target | Current PPA publication is stale (`0.2.0`); no certified release asset |
-| Ubuntu 26.04 LTS | `wayexpand` | Experimental daily PPA package; `.deb` package-install CI target | Current daily package published for amd64; not compositor-certified |
-| Debian | `.deb` | Build locally from source | No release asset or APT repository currently published |
-| Fedora 45 | `.rpm` | RPM package-install CI target | No certified release asset or Copr repository currently published |
-| aarch64 | `wayexpand` | Build locally from source | No release archive currently published |
+| Arch Linux | `wayexpand` | Build locally | See shared publication status above |
+| Ubuntu 24.04 LTS | `.deb` | Release build baseline and package lifecycle CI target | See shared publication status above |
+| Ubuntu 26.04 LTS | `wayexpand` | Experimental daily PPA package; `.deb` package lifecycle CI target | See shared publication status above |
+| Debian | `.deb` | Build locally from source | See shared publication status above |
+| Fedora 45 | `.rpm` | RPM package lifecycle CI target | See shared publication status above |
+| aarch64 | `wayexpand` | Build locally from source | See shared publication status above |
 
 The Ubuntu 24.04 and Fedora 45 entries describe package build/install coverage,
 not a claim that a stable distribution channel or compositor-certified route
@@ -126,10 +133,11 @@ dpkg-buildpackage -b
 sudo dpkg -i ../wayexpand_${VERSION}-1_amd64.deb
 ```
 
-This documents a local packaging path. An experimental daily package is
-currently published for Ubuntu 26.04 (Resolute), amd64; check the PPA for the
-latest package and build state before installing. The daily package is not a
-certified release. The GitHub release workflow only publishes release
+This documents a local packaging path. Experimental daily packages are
+currently published for Ubuntu 26.04 (Resolute) and Ubuntu 26.10 (Stonking),
+amd64; check the shared publication status above and the PPA for the latest
+package and build state before installing. These daily packages are not
+certified releases. The GitHub release workflow only publishes release
 artifacts after its certification gates pass. CI also verifies package
 installation on Ubuntu 24.04 LTS and 26.04 LTS.
 
@@ -227,8 +235,9 @@ git push
 
 ### Ubuntu PPA
 
-The experimental daily package is currently published for Ubuntu 26.04
-(Resolute) on amd64. To install it:
+Experimental daily packages are currently published for Ubuntu 26.04
+(Resolute) and Ubuntu 26.10 (Stonking) on amd64. Check the shared publication
+status above before installing. To install a supported series:
 
 ```bash
 sudo add-apt-repository ppa:cyberducttape/ppa
@@ -355,9 +364,9 @@ Potential future work, not active publication paths:
 - **Copr webhook** after an official Copr repository is created
 - **Additional Ubuntu PPA series and architectures** after their build dependencies and Launchpad results are verified
 
-GitHub release artifacts remain gated on certification. Ubuntu 26.04's daily
-PPA build is published but remains experimental; do not treat its successful
-package build as desktop certification.
+GitHub release artifacts remain gated on certification. The published daily
+PPA builds remain experimental; do not treat a successful package build as
+desktop certification.
 
 ---
 

@@ -50,18 +50,15 @@ local, offline, no account, no telemetry.
 | Linux architectures | x86_64 and aarch64 build paths |
 | Desktop integration | Wayland backends available; compositor support varies |
 | Production certification | No compositor has accepted physical-session certification; see the [certification matrix](docs/CERTIFICATION_MATRIX.md) |
-| Distribution packages | Ubuntu 26.04 amd64 daily PPA package; no published GitHub release and no published Fedora Copr repository; certification pending |
+| Distribution packages | Experimental Ubuntu PPA builds; see generated availability details below; certification pending |
 
 ## Install
 
 ### Distribution packages
 
-The currently published package channel is an experimental daily PPA build
-for Ubuntu 26.04 amd64. No GitHub release is currently published, and no
-Fedora Copr repository is published. Package recipes and CI
-install tests exist for Ubuntu 24.04/26.04 and Fedora 45, but that does not
-mean installable release packages are available for those distributions.
-The Ubuntu daily package is not compositor-certified.
+<!-- generated-install-status:start -->
+**Package availability (audited 2026-11-11):** experimental daily builds for Ubuntu 26.04 (Resolute) (amd64), Ubuntu 26.10 (Stonking) (amd64). GitHub release 1.3.3 has no uploaded binary assets. No PPA packages are published for Ubuntu 24.04 (Noble), Ubuntu 22.04 (Jammy). Fedora Copr published: False. Package availability is separate from desktop certification.
+<!-- generated-install-status:end -->
 
 ```sh
 sudo add-apt-repository ppa:cyberducttape/ppa
@@ -70,10 +67,8 @@ sudo apt install wayexpand
 # Arch packaging preview: see docs/PACKAGING.md#arch-linux-packaging-preview
 ```
 
-The PPA currently publishes current daily builds for Ubuntu 26.04 (Resolute)
-amd64. Ubuntu 24.04's PPA package is stale. Read the [packaging status](docs/PACKAGING.md)
-before choosing an installation method; do not assume CI artifacts are
-published packages.
+Read the [packaging status](docs/PACKAGING.md) before choosing an installation
+method; do not assume CI artifacts are published packages.
 
 Launch **WayExpand** from the desktop application menu or run `wayexpand-gui`.
 Its first-run guide checks the installation and route, then asks you to verify
@@ -82,8 +77,8 @@ an exact insertion in a real application before it records setup as working.
 enabling raw keyboard capture. If automatic expansion cannot be verified yet,
 the guide offers a copy-only Quick Picker for manual paste.
 
-Ubuntu 26.04 (Resolute) users can also install the experimental daily package
-from the [WayExpand PPA](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa):
+Users of Ubuntu series listed as current in the availability report can install
+the experimental daily package from the [WayExpand PPA](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa):
 
 ```sh
 sudo add-apt-repository ppa:cyberducttape/ppa
@@ -91,9 +86,8 @@ sudo apt update
 sudo apt install wayexpand
 ```
 
-The PPA is currently limited to Ubuntu 26.04 amd64 and is not
-compositor-certified. Check the PPA page and [packaging status](docs/PACKAGING.md)
-before installing.
+The PPA is not compositor-certified. Check the PPA page and
+[packaging status](docs/PACKAGING.md) before installing.
 
 ### Developer installs
 

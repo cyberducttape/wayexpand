@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use unicode_general_category::{get_general_category, GeneralCategory};
 
-use super::{ExpansionEngine, MatchPlan, SensitiveText};
+use super::{input_generation_matches, ExpansionEngine, MatchPlan, SensitiveText};
 use crate::config::capitalize_first_letter;
 use crate::{AppFilter, ExpansionConfig, MatchMode};
 
@@ -272,7 +272,7 @@ impl ExpansionEngine {
         if max_size > 0 && output.len() > max_size {
             return false;
         }
-        if generation != self.input_generation {
+        if !input_generation_matches(generation, self.input_generation) {
             return false;
         }
         !self.sensitive_focus && !self.user_paused
@@ -362,9 +362,26 @@ impl ExpansionEngine {
         self.terminal_app_scope
             .iter()
             .any(|(filter, glob)| match filter {
-                AppFilter::AppIdExact(expected) => app_id == expected,
-                AppFilter::AppIdGlob(_) => glob.as_ref().is_some_and(|glob| glob.matches(app_id)),
+                AppFilter::AppIdExact(expected)
+                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
+                {
+                    app_id == expected
+                }
+                AppFilter::AppIdGlob(_)
+                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
+                {
+                    glob.as_ref().is_some_and(|glob| glob.matches(app_id))
+                }
+                AppFilter::ProcessExecutableExact(expected) => app_id
+                    .strip_prefix(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                    .is_some_and(|path| path == expected),
+                AppFilter::ProcessNameExact(expected) => app_id
+                    .strip_prefix(crate::PROCESS_NAME_APP_ID_PREFIX)
+                    .is_some_and(|name| name == expected),
                 AppFilter::TitleContains(_) => false,
+                _ => false,
             })
     }
 
@@ -385,15 +402,35 @@ impl ExpansionEngine {
             .iter()
             .enumerate()
             .any(|(filter_index, filter)| match filter {
-                AppFilter::AppIdExact(app_id_filter) => window
+                AppFilter::AppIdExact(app_id_filter) => {
+                    window.app_id.as_deref().is_some_and(|app_id| {
+                        !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                            && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX)
+                            && app_id == app_id_filter
+                    })
+                }
+                AppFilter::AppIdGlob(_) => window
                     .app_id
                     .as_deref()
-                    .is_some_and(|app_id| app_id == app_id_filter),
-                AppFilter::AppIdGlob(_) => window.app_id.as_deref().is_some_and(|app_id| {
-                    self.app_filter_globs[config_index][filter_index]
-                        .as_ref()
-                        .is_some_and(|pattern| pattern.matches(app_id))
-                }),
+                    .filter(|app_id| {
+                        !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                            && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX)
+                    })
+                    .is_some_and(|app_id| {
+                        self.app_filter_globs[config_index][filter_index]
+                            .as_ref()
+                            .is_some_and(|pattern| pattern.matches(app_id))
+                    }),
+                AppFilter::ProcessExecutableExact(expected) => window
+                    .app_id
+                    .as_deref()
+                    .and_then(|app_id| app_id.strip_prefix(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX))
+                    .is_some_and(|path| path == expected),
+                AppFilter::ProcessNameExact(expected) => window
+                    .app_id
+                    .as_deref()
+                    .and_then(|app_id| app_id.strip_prefix(crate::PROCESS_NAME_APP_ID_PREFIX))
+                    .is_some_and(|name| name == expected),
                 AppFilter::TitleContains(title_filter) => {
                     if self.runtime_policy.disable_title_matching {
                         false

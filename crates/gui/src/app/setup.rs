@@ -10,6 +10,7 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 const MAX_SETUP_OUTPUT_BYTES: usize = 128 * 1024;
 const SETUP_OUTPUT_READS_PER_DRAIN: usize = 64;
+const NON_ATOMIC_SETUP_WARNING: &str = "Text replacement is not atomic: WayExpand checks and removes the trigger, then inserts the snippet separately. If you keep typing, your keys can interleave with the snippet and leave partial or corrupted text. Focus changes or backend failures can also leave text that cannot be rolled back. WayExpand will not retry an uncertain result. Headless tests do not certify physical-session target integrity; there is no accepted physical-session certification for this route.";
 
 fn ibus_registration_needed(report: &serde_json::Value) -> Option<bool> {
     let checks = report.get("checks")?.as_array()?;
@@ -1071,10 +1072,10 @@ impl GuiApp {
                     == wayexpand_core::CompatibilityMode::Off
                 {
                     ui.add_space(8.0);
-                    ui.label("Text replacement is not atomic: WayExpand removes a recognized trigger and then inserts its snippet. If the application loses focus or insertion is interrupted, already-sent text cannot be rolled back.");
+                    ui.label(NON_ATOMIC_SETUP_WARNING);
                     ui.checkbox(
                         &mut self.setup_consent_acknowledged,
-                        "I understand and want to enable tracked-focus text replacement.",
+                        "I understand the interleaving and partial-write risk and want to enable tracked-focus replacement.",
                     );
                 } else {
                     ui.add_space(8.0);
@@ -1182,6 +1183,24 @@ pub(crate) fn onboarding_step(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_run_consent_explains_interleaving_partial_writes_and_no_retry() {
+        for required_warning in [
+            "If you keep typing",
+            "interleave with the snippet",
+            "partial or corrupted text",
+            "cannot be rolled back",
+            "will not retry an uncertain result",
+            "Headless tests do not certify physical-session target integrity",
+            "no accepted physical-session certification for this route",
+        ] {
+            assert!(
+                NON_ATOMIC_SETUP_WARNING.contains(required_warning),
+                "missing consent warning: {required_warning}"
+            );
+        }
+    }
 
     #[test]
     fn gui_cli_tasks_use_the_active_config_for_restart_resume() {

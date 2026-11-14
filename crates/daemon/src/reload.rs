@@ -25,7 +25,7 @@ use std::{
 use tracing::{error, info, warn};
 use wayexpand_core::{
     limits::MAX_CONFIG_BYTES, Config, ConfigError, ExpansionEngine, FleetConfig, FleetError,
-    OrganizationPolicy,
+    InjectorCapabilities, InputSourceCapabilities, OrganizationPolicy,
 };
 
 const MAX_CONSISTENCY_ATTEMPTS: usize = 3;
@@ -115,6 +115,8 @@ pub struct ReloadableConfig {
     fleet: bool,
     fleet_signature: u64,
     policy: OrganizationPolicy,
+    route_injector: InjectorCapabilities,
+    route_source: InputSourceCapabilities,
     pub engine: ExpansionEngine,
     healthy: bool,
     /// The reload being read and built on a worker thread, if any.
@@ -163,6 +165,34 @@ struct BuiltConfig {
     /// edited while the build is running or before the reactor applies it,
     /// the next integrity check must still observe the change.
     fleet_signature: u64,
+}
+
+/// Whether a completed reload result still describes the active request and
+/// source state at the moment the reactor is about to publish it. Successful
+/// builds are checked against the snapshot they actually read; failed builds
+/// are relevant only if the original request's snapshot is still current.
+/// Keeping this decision in one predicate makes stale-result admission easy
+/// to exercise independently from filesystem timing.
+fn reload_snapshot_is_current<S: PartialEq>(
+    request_targets_active_path: bool,
+    requested_stamp: &S,
+    current_stamp: &S,
+    requested_fleet_signature: u64,
+    current_fleet_signature: u64,
+    built_snapshot: Option<(&S, u64)>,
+) -> bool {
+    if !request_targets_active_path {
+        return false;
+    }
+
+    match built_snapshot {
+        Some((built_stamp, built_fleet_signature)) => {
+            built_stamp == current_stamp && built_fleet_signature == current_fleet_signature
+        }
+        None => {
+            requested_stamp == current_stamp && requested_fleet_signature == current_fleet_signature
+        }
+    }
 }
 
 enum BuildFailure {
@@ -304,6 +334,8 @@ impl ReloadableConfig {
             fleet,
             fleet_signature,
             policy,
+            route_injector: InjectorCapabilities::default(),
+            route_source: InputSourceCapabilities::default(),
             engine,
             healthy: true,
             in_flight: None,
@@ -320,6 +352,29 @@ impl ReloadableConfig {
     /// Wake the reactor through `waker` when a background reload finishes.
     pub fn set_waker(&mut self, waker: crate::waker::Waker) {
         self.waker = Some(waker);
+    }
+
+    /// Store the negotiated route contract and apply it to the active policy.
+    /// Every future reload is checked against this same live route before its
+    /// engine is published.
+    pub fn set_route_capabilities(
+        &mut self,
+        injector: InjectorCapabilities,
+        source: InputSourceCapabilities,
+    ) {
+        self.route_injector = injector;
+        self.route_source = source;
+        self.refresh_backend_policy_gate();
+    }
+
+    fn refresh_backend_policy_gate(&mut self) {
+        let violation = self
+            .engine
+            .capability_violation_for_source(self.route_injector, self.route_source);
+        self.engine.set_backend_policy_blocked(violation.is_some());
+        if let Some(violation) = violation {
+            warn!(reason = %violation, "active backend cannot satisfy effective policy; automatic expansion is disabled");
+        }
     }
 
     /// Run command snippets and hotkey actions on worker threads, now and
@@ -543,15 +598,18 @@ impl ReloadableConfig {
             } else {
                 0
             };
-            let built_snapshot_is_current = match &built {
-                Ok(built) => {
-                    built.stamp == current_stamp && built.fleet_signature == current_fleet_signature
-                }
-                Err(_) => {
-                    current == current_stamp && requested_fleet_signature == current_fleet_signature
-                }
-            };
-            if built_snapshot_is_current {
+            let built_snapshot = built
+                .as_ref()
+                .ok()
+                .map(|built| (&built.stamp, built.fleet_signature));
+            if reload_snapshot_is_current(
+                true,
+                &current,
+                &current_stamp,
+                requested_fleet_signature,
+                current_fleet_signature,
+                built_snapshot,
+            ) {
                 self.apply_reload(built, current);
             } else {
                 // A validated build can still become stale before the reactor
@@ -600,6 +658,12 @@ impl ReloadableConfig {
                 // now rather than when the build started; losing any of them
                 // would, for example, resume matching inside a password field.
                 engine.inherit_runtime_state(&self.engine);
+                let capability_violation =
+                    engine.capability_violation_for_source(self.route_injector, self.route_source);
+                engine.set_backend_policy_blocked(capability_violation.is_some());
+                if let Some(violation) = capability_violation {
+                    warn!(reason = %violation, "reloaded policy requires capabilities unavailable on the active backend; automatic expansion is disabled");
+                }
                 // A host that enabled workers on the engine directly wants
                 // them after the reload too.
                 self.async_workers |= self.engine.async_commands_enabled();
@@ -855,3 +919,296 @@ fn standard_fleet_content_signature() -> u64 {
 
 #[cfg(test)]
 mod tests;
+
+/// Scheduler model for the reload/async-completion handoff. ReloadableConfig
+/// promotes engines and drains completions on the same reactor; each engine
+/// owns its completion queue, so a retired engine's result cannot be consumed
+/// by the replacement engine. The model uses separate per-epoch mailboxes to
+/// exercise that ownership boundary while invoking the production reload
+/// snapshot admission predicate.
+#[cfg(all(test, feature = "loom-tests"))]
+mod reload_async_loom {
+    use loom::sync::{Arc, Mutex};
+    use loom::thread;
+
+    use super::reload_snapshot_is_current;
+
+    #[derive(Default)]
+    struct ReactorState {
+        active_epoch: u8,
+        promoted: bool,
+        applied: Option<(u8, u8, bool)>,
+    }
+
+    #[test]
+    fn reload_promotion_never_applies_a_retired_engine_completion() {
+        loom::model(|| {
+            // The build and current file both describe snapshot 2. Stale file
+            // and fleet snapshots are exhaustively tested against this same
+            // production predicate by reload_admission_exhaustively... below.
+            let old_engine_completion = Arc::new(loom::sync::atomic::AtomicBool::new(false));
+            let replacement_engine_completion =
+                Arc::new(loom::sync::atomic::AtomicBool::new(false));
+            let reactor = Arc::new(Mutex::new(ReactorState {
+                active_epoch: 1,
+                ..ReactorState::default()
+            }));
+
+            let completion_mailbox = Arc::clone(&old_engine_completion);
+            let command_worker = thread::spawn(move || {
+                thread::yield_now();
+                // Completion remains in the mailbox owned by engine epoch 1.
+                completion_mailbox.store(true, loom::sync::atomic::Ordering::Release);
+            });
+
+            let promotion_state = Arc::clone(&reactor);
+            let promoter = thread::spawn(move || {
+                thread::yield_now();
+                // Reload promotion and completion draining are serialized by
+                // the production input reactor. File metadata can still
+                // change independently while the predicate is evaluated.
+                let mut state = promotion_state.lock().unwrap();
+                let still_current =
+                    reload_snapshot_is_current(true, &2_u8, &2_u8, 4, 4, Some((&2_u8, 4)));
+                if still_current {
+                    state.active_epoch = 2;
+                    state.promoted = true;
+                }
+            });
+
+            let drain_state = Arc::clone(&reactor);
+            let old_mailbox = Arc::clone(&old_engine_completion);
+            let new_mailbox = Arc::clone(&replacement_engine_completion);
+            let drainer = thread::spawn(move || {
+                thread::yield_now();
+                let mut state = drain_state.lock().unwrap();
+                let active_epoch = state.active_epoch;
+                let pending = match active_epoch {
+                    1 => old_mailbox.swap(false, loom::sync::atomic::Ordering::AcqRel),
+                    2 => new_mailbox.swap(false, loom::sync::atomic::Ordering::AcqRel),
+                    _ => unreachable!("model has exactly two runtime epochs"),
+                };
+                if pending {
+                    state.applied = Some((1, active_epoch, state.promoted));
+                }
+            });
+
+            command_worker.join().unwrap();
+            promoter.join().unwrap();
+            drainer.join().unwrap();
+
+            let state = reactor.lock().unwrap();
+            if let Some((completion_epoch, applied_epoch, promoted_before_apply)) = state.applied {
+                assert_eq!(completion_epoch, applied_epoch);
+                assert!(
+                    !promoted_before_apply,
+                    "a retired engine completion was applied after reload promotion"
+                );
+            }
+            if state.promoted {
+                assert_eq!(state.active_epoch, 2);
+                assert!(
+                    !replacement_engine_completion.load(loom::sync::atomic::Ordering::Acquire),
+                    "the replacement runtime must not inherit the retired completion"
+                );
+            }
+        });
+    }
+
+    /// Compose the boundaries exercised by the individual models: an old
+    /// output is in flight while the reactor changes target/consent, publishes
+    /// a new engine epoch, and starts shutdown. A late worker completion must
+    /// neither mutate the new engine nor make the uncertain output replayable.
+    #[test]
+    fn output_reload_focus_and_shutdown_interleaving_quarantines_stale_work() {
+        use loom::sync::Mutex;
+        use wayexpand_core::FocusCheck;
+
+        use crate::{
+            assurance::tracked_output_baseline_is_valid,
+            pending_output::{outcome_invalidates_context, OutputIntegrityGate},
+        };
+
+        const AUTHORIZED_MODE: u64 = (1 << 2) | 1;
+        const REVOKED_AND_REGRANTED_MODE: u64 = (3 << 2) | 1;
+
+        #[derive(Default)]
+        struct State {
+            active_epoch: u8,
+            focus_generation: u8,
+            mode_state: u64,
+            shutdown: bool,
+            output_events: usize,
+            output_events_after_invalidation: usize,
+            worker_completion_epoch: Option<u8>,
+            completion_applied: bool,
+            command_completion_epoch: Option<u8>,
+            command_completion_applied: bool,
+            partial_injector_failure_seen: bool,
+            partial_failure_invalidates_context: bool,
+            quarantined: bool,
+            replay_count: usize,
+            integrity: OutputIntegrityGate,
+        }
+
+        // The additional command worker adds an independent completion
+        // actor. Bound scheduler preemptions while retaining exhaustive
+        // coverage of every transition point in this compact model.
+        let mut builder = loom::model::Builder::new();
+        builder.preemption_bound = Some(3);
+        builder.max_branches = 10_000;
+        builder.check(|| {
+            let state = Arc::new(Mutex::new(State {
+                active_epoch: 1,
+                focus_generation: 1,
+                mode_state: AUTHORIZED_MODE,
+                ..State::default()
+            }));
+
+            // This worker models a paced two-unit stream. There is a gap
+            // between each checkpoint and backend call. Invalidation may
+            // race with one admitted call but must stop the next checkpoint;
+            // already-emitted text cannot be retracted.
+            let worker_state = Arc::clone(&state);
+            let worker = thread::spawn(move || {
+                for _unit in 0..2 {
+                    let admitted = {
+                        let state = worker_state.lock().unwrap();
+                        let focus = if state.focus_generation == 1 {
+                            FocusCheck::Unchanged
+                        } else {
+                            FocusCheck::Changed
+                        };
+                        !state.shutdown && tracked_output_baseline_is_valid(state.mode_state, focus)
+                    };
+                    if !admitted {
+                        break;
+                    }
+                    thread::yield_now();
+
+                    let mut state = worker_state.lock().unwrap();
+                    state.output_events += 1;
+                    if state.shutdown
+                        || state.focus_generation != 1
+                        || state.mode_state != AUTHORIZED_MODE
+                    {
+                        state.output_events_after_invalidation += 1;
+                        state.integrity.interrupt_for_physical_input();
+                    }
+                }
+
+                let mut state = worker_state.lock().unwrap();
+                if state.output_events > 0 {
+                    // Model the injector failing after a previously submitted
+                    // output unit. The same production classifier used by the
+                    // reactor must make this result non-replayable.
+                    let outcome = wayexpand_core::TransactionOutcome::UnknownPartialFailure {
+                        source: wayexpand_core::InjectorError::input_interrupted("loom-model"),
+                    };
+                    state.partial_injector_failure_seen = true;
+                    state.partial_failure_invalidates_context =
+                        outcome_invalidates_context(&outcome);
+                }
+                // Completion belongs to runtime epoch 1 even if epoch 2 has
+                // already been promoted by the reactor.
+                state.worker_completion_epoch = Some(1);
+            });
+
+            // A command was admitted by the old engine before reload. Its
+            // completion remains tagged with that engine epoch even if it
+            // races the output worker and the reactor's reload transition.
+            let command_state = Arc::clone(&state);
+            let command_worker = thread::spawn(move || {
+                thread::yield_now();
+                command_state.lock().unwrap().command_completion_epoch = Some(1);
+            });
+
+            let reactor_state = Arc::clone(&state);
+            let reactor = thread::spawn(move || {
+                thread::yield_now();
+                let mut state = reactor_state.lock().unwrap();
+
+                // A→B→A still changes the identity generation; revoking then
+                // restoring consent also has a distinct generation.
+                state.focus_generation += 1;
+                state.mode_state = REVOKED_AND_REGRANTED_MODE;
+                state.integrity.interrupt_for_physical_input();
+
+                // Promote a validated replacement configuration and request
+                // shutdown while the previous worker may still be finishing.
+                let reload_is_current =
+                    reload_snapshot_is_current(true, &2_u8, &2_u8, 9, 9, Some((&2_u8, 9)));
+                if reload_is_current {
+                    state.active_epoch = 2;
+                }
+                state.shutdown = true;
+
+                if state.worker_completion_epoch == Some(state.active_epoch) {
+                    state.completion_applied = true;
+                }
+                if state.command_completion_epoch == Some(state.active_epoch) {
+                    state.command_completion_applied = true;
+                }
+            });
+
+            worker.join().unwrap();
+            command_worker.join().unwrap();
+            reactor.join().unwrap();
+
+            let mut state = state.lock().unwrap();
+            assert_eq!(state.active_epoch, 2);
+            assert_eq!(state.worker_completion_epoch, Some(1));
+            assert!(
+                !state.completion_applied,
+                "retired completion crossed the reload epoch"
+            );
+            assert_eq!(state.command_completion_epoch, Some(1));
+            assert!(
+                !state.command_completion_applied,
+                "a pending command completion crossed the reload epoch"
+            );
+            if state.partial_injector_failure_seen {
+                assert!(
+                    state.partial_failure_invalidates_context,
+                    "partial injector failure must invalidate output context"
+                );
+            }
+            // Resolve only after the output worker's terminal result is
+            // published. A partial injector failure uses the production
+            // classifier, while focus/consent/shutdown invalidation remains
+            // independently terminal.
+            let invalidate_context = state.partial_failure_invalidates_context
+                || state.focus_generation != 1
+                || state.mode_state != AUTHORIZED_MODE
+                || state.shutdown;
+            state.quarantined = state.integrity.resolve(invalidate_context);
+            let continuation = crate::pending_output::output_continuation(
+                crate::pending_output::OutputOrigin::Command,
+                state.quarantined,
+                false,
+            );
+            if continuation == crate::pending_output::OutputContinuation::ReplayFollowUp {
+                state.replay_count += 1;
+            }
+            if state.partial_injector_failure_seen {
+                assert_eq!(
+                    continuation,
+                    crate::pending_output::OutputContinuation::Quarantine,
+                    "uncertain command output must never be replayed"
+                );
+            }
+            assert!(
+                state.quarantined,
+                "invalidated output must quarantine the target context"
+            );
+            assert_eq!(
+                state.replay_count, 0,
+                "uncertain output must never be replayed"
+            );
+            assert!(
+                state.output_events_after_invalidation <= 1,
+                "only one backend call admitted before invalidation may still be in flight"
+            );
+        });
+    }
+}

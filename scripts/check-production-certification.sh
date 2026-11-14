@@ -54,6 +54,19 @@ if [ "$production_targets" -eq 0 ]; then
     exit 0
 fi
 
+project_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+if ! python3 "$project_root/scripts/validate-production-certification.py" \
+    "$matrix" "$project_root"; then
+    if [ -n "$summary_file" ]; then
+        {
+            printf '%s\n' '## Production compositor certification blocked'
+            printf '%s\n' 'At least one production-required route has missing, invalid, or incompatible real-session evidence.'
+            printf '%s\n' 'Compatibility and headless evidence cannot satisfy the production release gate.'
+        } >>"$summary_file"
+    fi
+    exit 1
+fi
+
 printf 'Production-required compositor routes: %s\n' "$production_targets"
 if [ -n "$summary_file" ]; then
     printf 'Production-required compositor routes: %s\n' "$production_targets" >>"$summary_file"

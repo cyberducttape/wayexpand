@@ -39,11 +39,13 @@ session evidence; unit tests alone do not satisfy them.
       compatibility setting is an experimental override for typed triggers;
       it never makes Quick Picker use non-atomic output.
 - [x] Keep paced keysym output bounded by a short default and preview route
-      strategy. The planner recommends atomic verified replacement first,
-      otherwise native text commit only under explicit compatibility consent,
-      paced keystrokes only for estimates within 100 ms, and clipboard/manual
-      paste when the active route cannot meet those conditions. The latency
-      threshold is a product objective, not certification evidence.
+      strategy. The runtime now refuses a paced transaction before trigger
+      erasure when the complete erase/insert/delimiter/cursor estimate exceeds
+      100 ms, even if `keystroke_max_chars` was raised. The planner recommends
+      atomic verified replacement first, native text commit only under
+      explicit compatibility consent, and clipboard/manual paste for output
+      beyond the paced budget. The throughput estimate is not certification
+      evidence.
 - [ ] Pass a compositor-specific integration matrix. See
       [CERTIFICATION_MATRIX](CERTIFICATION_MATRIX.md).
 - [ ] Record zero unintended deletions, duplicate insertions, or wrong-window
@@ -129,11 +131,40 @@ session evidence; unit tests alone do not satisfy them.
       [2026-10-29 report](evidence/kwin-overlap-reproduction-0803d915.json)
       and [2026-10-28 report](evidence/kwin-overlap-reproduction-2026-10-28.json)
       also record failures.
+      A rerun on 2026-11-11 against commit `9da90fb36d45` failed before the
+      paced-transaction budget was added;
+      the worktree was dirty. It observed only 26 acknowledged insertion units
+      out of 128, with 5 erased units, interleaved text, and
+      `output_partial_total=1`. The machine-readable record is
+      [here](evidence/kwin-overlap-reproduction-9da90fb3.json). Capture was
+      stdin-simulated, and the scenario explicitly raised the keysym limit
+      from its default of 8 to 250 characters to exercise a long replacement.
+      This confirms the libei output integrity failure under the opt-in long
+      output setting but does not certify or falsify physical-evdev interruption
+      handling.
+      After adding a full-transaction 100 ms preflight, the same headless KWin
+      environment passed `paced-output-budget-refuses-before-erasing`: a
+      128-character replacement estimated at 1603 ms was refused and the
+      original `;long` trigger remained unchanged. Its report is
+      [here](evidence/kwin-paced-budget-refusal-9da90fb3.json). This proves
+      safe refusal for that long paced transaction only; short non-atomic
+      replacements and physical-input overlap still require certification.
+      The headless `paced-refusal-preserves-follow-up-input` scenario was rerun
+      after that guard. It asserts the 128-character replacement is refused
+      before deletion, then verifies one subsequent input character remains
+      intact with zero uncertain or partial outcomes. It does not send a
+      second trigger during output. The result is
+      [here](evidence/kwin-paced-refusal-followup-9da90fb3.json). This closes
+      only the long-output preflight case; physical overlap and short output
+      integrity remain unverified. The required
+      `second-trigger-during-nonatomic-replacement` certification scenario
+      remains not tested.
       Keep this gate open until the current route passes the live target-integrity
       scenario with physical capture or automatic replacement is refused on
-      that route. The current-source private KWin smoke report
-      [9311e1e5be3f](evidence/doctor-certify-9311e1e5be3f.json) marks this
-      scenario `not-tested`; it does not close the gate.
+      that route. The latest current-source private KWin smoke report
+      [9da90fb36d45](evidence/kwin-e2e-current-dirty-9da90fb3.json) passes 16
+      headless scenarios, but explicitly records physical keyboard overlap as
+      untested; it does not close the gate.
 - [ ] Verify command completion never inserts into an unintended context in a
       real focus-switch test.
 - [ ] Verify fail-closed behavior in password and credential fields for each

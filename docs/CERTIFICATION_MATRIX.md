@@ -29,10 +29,10 @@ availability claims, and no target is certified without reviewed evidence.
 <!-- generated:desktop-certification-matrix:start -->
 | Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | Production certification |
 | --- | --- | --- | --- | --- | --- | --- |
-| `kde` | KDE Plasma / KWin | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
-| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei | WayExpand GNOME Shell extension (GNOME 45+) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
-| `sway` | Sway / wlroots | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
-| `hyprland` | Hyprland / wlroots | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
+| `kde` | KDE Plasma / KWin (wayland) | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
+| `gnome` | GNOME Shell / Mutter (wayland) | ibus, evdev+libei | WayExpand GNOME Shell extension (headless runtime gates: GNOME 46, 50, 51) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
+| `sway` | Sway / wlroots (wayland) | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
+| `hyprland` | Hyprland / wlroots (wayland) | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
 
 ## Release certification record — 1.3.3 line, revision 2026-11-02.1
@@ -43,6 +43,20 @@ new desktop evidence is reviewed. A release candidate must link its exact
 WayExpand commit and the raw machine-readable reports used for every result.
 “Not tested” means no qualifying physical-session evidence is recorded; it
 does not mean the route passed.
+
+The release gate validates each production-required target against its linked
+schema-5 report. It checks the declared backend and session, the complete
+required scenario × layout × application matrix, client-version evidence,
+live daemon probes, physical-session attestation, and observed sensitive-field
+handling. It also requires the route catalog to declare the route supported,
+atomic, verified, and certified for sensitive-field handling. Setting
+`production_certification_required` alone cannot make a route pass. The
+evidence file must remain inside the repository, identify a clean build of the
+currently checked-out commit, and match the target contract.
+Schema 5 requires a physical keyboard model, an explicit assertion that
+physical input was observed, a reviewer's identity, and a reference to the
+reviewed evidence. These are accountable human attestations; they do not
+machine-prove hardware use. Headless Wayland session evidence is rejected.
 
 | Desktop | Session evidence on record | Physical keyboard capture | Focused client and focus changes | Screen lock/unlock | Active layout changes | Suspend/resume | Portal revocation | Long-session soak | Release status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -63,12 +77,13 @@ passes by a green CI run.
 ### GNOME IBus install and application coverage
 
 GNOME Shell extension compatibility is also checked separately from desktop
-route certification. CI runs the shipped window-tracker extension inside the
-GNOME Shell 51 runtime from Fedora 45, verifies that Shell loads it, and checks
-its live build identity, D-Bus protocol, active input-source query, and US to
-German to US layout switching through GNOME's input-source manager. This does
-not certify physical keyboard delivery, text replacement, or a production
-GNOME route.
+route certification. The extension advertises only GNOME Shell 46, 50, and 51,
+the majors with version-pinned headless integration jobs. Each job checks the
+actual Shell major and exercises IBus source registration and selection,
+active-layout tracking, focus tracking, extension reload, and source persistence
+across the test session restart. CI rejects metadata that advertises a Shell
+major without a corresponding runtime job. These checks do not certify physical
+keyboard delivery, text replacement, or a production GNOME route.
 
 `tests/certification/gnome-ibus-matrix.json` defines the platform and client
 coverage required before making GNOME IBus support claims. It explicitly
@@ -85,8 +100,8 @@ reports without accepting missing or unsupported cells as passes. Each
 application result is a separate scenario × keyboard-profile cell and links to
 reviewable evidence. Report validation rejects headless sessions and requires
 a physical keyboard and reviewer identity. CI runs the headless GNOME IBus
-acceptance test on Ubuntu 24.04 and 26.04 and the extension runtime test on
-Fedora 45/GNOME 51. The Ubuntu headless test covers GTK 3 and GTK 4 text
+acceptance test on Ubuntu 24.04/GNOME 46, Ubuntu 26.04/GNOME 50, and
+Fedora 45/GNOME 51. The headless test covers GTK 3 and GTK 4 text
 replacement, Unicode, password-purpose pass-through, source switching between
 US, German, and French layouts, and Shell restart/extension upgrade behavior.
 It exercises Chromium's safe pass-through behavior. These hosted jobs validate
@@ -160,12 +175,12 @@ field contracts. A route without those guarantees stays experimental or
 refuses automatic replacement, regardless of its CI status.
 
 <!-- generated:route-contract:start -->
-| Route | Capture | Injection | Replacement assurance | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ibus` (IBus) | ibus | ibus | verified | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
-| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | unverified | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
-| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | unverified | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
-| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | verified | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
+| Route | Capture | Injection | Trigger precondition | Output transaction | Application result | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | App identity | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ibus` (IBus) | ibus | ibus | surrounding_text_matches_trigger | separate_delete_and_commit | unobservable | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
+| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | focus_checked_with_compatibility_consent | separate_delete_and_key_events | unobservable | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | none | separate_delete_and_key_events | unobservable | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
+| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | surrounding_text_matches_trigger | atomic_protocol_batch | unobservable | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
 ## Current evidence
@@ -179,6 +194,14 @@ hotplug during output, Unicode insertion, and suspend/resume remain untested.
 Twenty injector samples per size measured p95 12.865 ms (small), 779.381 ms
 (medium), and 3.130 s (large). This remains partial compatibility evidence,
 not route certification.
+
+A later validation on the dirty working tree at commit `9da90fb36d45` ran all
+16 private KWin output/focus scenarios successfully. The structured record is
+[`kwin-e2e-current-dirty-9da90fb3.json`](evidence/kwin-e2e-current-dirty-9da90fb3.json).
+It includes a passing paced-output refusal and a clean refusal after
+compatibility consent was absent. Capture remained stdin-simulated; this run
+does not establish physical-input overlap integrity or production
+certification.
 
 The latest focused private KWin real-client run is preserved in
 [`kwin-certification-8f6ab7cb0745.txt`](evidence/kwin-certification-8f6ab7cb0745.txt).
@@ -243,6 +266,18 @@ The latest clean-source concurrent-input failure is preserved separately in
 the [negative overlap report](evidence/kwin-overlap-reproduction-ad8f169c4402.json).
 It reproduces the prior corruption on commit `ad8f169c4402`, but uses simulated
 stdin capture and therefore does not test the evdev interruption monitor.
+
+The current dirty-tree overlap reproduction is also preserved in
+[`kwin-overlap-reproduction-9da90fb3.json`](evidence/kwin-overlap-reproduction-9da90fb3.json).
+On headless KWin 6.6.6 with stdin-simulated capture and the libei keysym
+fallback, entering a second trigger during a 128-unit non-atomic replacement
+left partial/corrupted text: only 26 insertion units were acknowledged and
+five trigger units had been erased. The application result remained unknown;
+the daemon reported one partial and uncertain output. This reproduces a
+current-source integrity failure, but the working tree was dirty and no
+physical keyboard was used, so it is not production certification evidence.
+It must nevertheless remain a release blocker: outcome reporting cannot
+restore text already delivered or prove what the application displayed.
 The generated tables above are authoritative: every listed desktop and route
 remains uncertified.
 Historical manual observations below do not establish current compatibility. See

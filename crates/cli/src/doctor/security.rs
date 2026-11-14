@@ -2,12 +2,15 @@
 
 use super::{
     broker::broker_diagnostics,
-    status::{read_daemon_status, status_as_json, upgrade_status_from_snapshot},
+    status::{
+        cli_install_identity, cli_install_recovery_advice, read_daemon_status, status_as_json,
+        upgrade_status_from_snapshot,
+    },
 };
 use crate::*;
 use std::os::unix::fs::MetadataExt;
 
-pub(crate) const SECURITY_REPORT_SCHEMA: u64 = 11;
+pub(crate) const SECURITY_REPORT_SCHEMA: u64 = 12;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProtectionProfile {
@@ -38,19 +41,30 @@ impl ProtectionProfile {
 }
 
 pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) -> Result<()> {
+    let cli_install = cli_install_identity();
     let config = Config::load(config_path);
     let config_permissions = config_permission_report(config_path, config.is_ok());
     let organization_policy = crate::doctor::policy::load_policy();
-    let policy_sensitive_focus_required = organization_policy
+    // Match the policy handoff used by the daemon. A valid embedded policy is
+    // effective when the system policy does not govern expansion; an active
+    // system policy replaces it. Looking only at /etc/wayexpand/policy.toml
+    // can otherwise report privacy as optional while the running engine
+    // refuses capture routes that lack sensitive-field awareness.
+    let privacy_policy = config
         .as_ref()
-        .is_ok_and(|policy| policy.safe_mode && policy.require_sensitive_focus);
-    // If the root-owned policy cannot be read or validated, the doctor cannot
-    // establish whether sensitive-field detection is mandatory. Report the
-    // privacy gate as required but incomplete instead of silently ignoring a
-    // potentially enforced requirement.
+        .ok()
+        .zip(organization_policy.as_ref().ok())
+        .and_then(|(config, administrator_policy)| {
+            effective_sensitive_focus_requirement(config, administrator_policy)
+        });
+    let policy_sensitive_focus_required = privacy_policy.is_some_and(|(_, enforced)| enforced);
+    // If the configuration and root-owned policy cannot be read, validated,
+    // and combined, the doctor cannot establish whether sensitive-field
+    // detection is mandatory. Require the gate and report it incomplete
+    // instead of silently ignoring a potentially enforced requirement.
     let input_privacy_required = profile == ProtectionProfile::Strict
         || policy_sensitive_focus_required
-        || organization_policy.is_err();
+        || privacy_policy.is_none();
     let broker = broker_diagnostics(config.as_ref().ok());
     let daemon = read_daemon_status()
         .and_then(|response| status_as_json(&response))
@@ -80,7 +94,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             capture_source,
             sensitive_field_detection,
             input_privacy_required,
-            organization_policy.is_ok(),
+            privacy_policy.is_some(),
         )
     } else {
         "incomplete"
@@ -89,18 +103,40 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let local_mount_ns = namespace_inode("mnt");
     let local_uts_ns = namespace_inode("uts");
     let local_tmp_mount = mount_id_for(Path::new("/tmp"));
+    // Compare the daemon's effective namespace state with a harmless probe
+    // from the doctor process. This does not treat host capability as proof
+    // that systemd applied its sandbox; it supplies evidence to distinguish a
+    // host restriction from a daemon/unit setup problem.
+    let host_security = wayexpand_process_supervisor::effective_security_snapshot();
+    let host_user_namespace_probe = serde_json::to_value(host_security.namespace_creation)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "unknown".to_owned());
+    let host_namespace_context = namespace_setup_context(
+        &host_user_namespace_probe,
+        read_kernel_setting("/proc/sys/kernel/unprivileged_userns_clone").as_deref(),
+        read_kernel_setting("/proc/sys/kernel/apparmor_restrict_unprivileged_userns").as_deref(),
+        sandbox["namespaces"]["mount"]
+            .as_u64()
+            .zip(local_mount_ns)
+            .map(|(daemon_ns, local_ns)| daemon_ns != local_ns),
+    );
     let mut checks = vec![
         check(
             "daemon_connected",
             !sandbox.is_null(),
             "The live daemon must provide its in-process security probes.",
         ),
-        daemon_status_schema_check(&daemon),
+        daemon_status_schema_check(
+            &daemon,
+            cli_install.cli_matches_active_user_install,
+        ),
         check(
             "config_permissions",
             config_permissions["safe"].as_bool(),
             "The configuration must be a valid regular file owned by this user or root and not group/world writable; Config loading also validates its ancestors.",
         ),
+        active_configuration_check(&daemon, config_path),
         check(
             "organization_policy_integrity",
             organization_policy.as_ref().ok().map(|_| true),
@@ -240,7 +276,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         capture_source,
         sensitive_field_detection,
         input_privacy_required,
-        organization_policy.is_ok(),
+        privacy_policy.is_some(),
     ));
 
     let broker_required = broker["required"].as_bool() == Some(true);
@@ -412,6 +448,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         "healthy": healthy,
         "daemon_pid": trusted_sandbox.get("pid"),
         "daemon_runtime": daemon_runtime_report(&daemon),
+        "host_namespace_context": host_namespace_context,
         "daemon": trusted_sandbox,
         "active_route": route,
         "input_privacy": {
@@ -419,20 +456,18 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             "sensitive_field_detection": sensitive_field_detection,
             "readiness": input_privacy_readiness,
             "required": input_privacy_required,
-            "organization_requirement": if organization_policy.is_err() {
+            "organization_requirement": if privacy_policy.is_none() {
                 "unavailable"
             } else if policy_sensitive_focus_required {
                 "enforced"
-            } else if organization_policy
-                .as_ref()
-                .is_ok_and(|policy| policy.require_sensitive_focus)
+            } else if privacy_policy.is_some_and(|(configured, _)| configured)
             {
                 "audit_only"
             } else {
                 "not_configured"
             },
-            "reason": if organization_policy.is_err() {
-                "organization policy could not be validated, so the effective privacy requirement is unknown"
+            "reason": if privacy_policy.is_none() {
+                "configuration and administrator policy could not be combined, so the effective privacy requirement is unknown"
             } else if input_privacy_readiness == "pass" {
                 "active capture route reports sensitive-field detection"
             } else if evdev_privacy {
@@ -496,6 +531,15 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             "Target integrity readiness: {}",
             target_integrity_readiness.to_ascii_uppercase()
         );
+        println!(
+            "Host unprivileged user-namespace probe: {}",
+            report["host_namespace_context"]["unprivileged_user_namespace_probe"]
+                .as_str()
+                .unwrap_or("unknown")
+        );
+        if let Some(diagnosis) = report["host_namespace_context"]["diagnosis"].as_str() {
+            println!("Namespace isolation diagnosis: {diagnosis}");
+        }
         println!("Daemon PID: {}", report["daemon_pid"]);
         println!(
             "Active route: source={}, backend={}, atomic_replace={}, replacement_assurance={}, compatibility_mode={}, focus_assurance={}",
@@ -567,6 +611,70 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     }
 }
 
+/// Return whether sensitive-field awareness is configured and enforced by the
+/// policy the daemon will use. This deliberately delegates precedence and
+/// validation to Config::apply_administrator_policy instead of maintaining a
+/// second policy-merging implementation in diagnostics.
+fn effective_sensitive_focus_requirement(
+    config: &Config,
+    administrator_policy: &OrganizationPolicy,
+) -> Option<(bool, bool)> {
+    let configured_policy = if administrator_policy.governs_expansion() {
+        administrator_policy
+    } else {
+        &config.organization
+    };
+    let configured = configured_policy.require_sensitive_focus;
+    let mut effective_config = config.clone();
+    effective_config
+        .apply_administrator_policy(administrator_policy)
+        .ok()?;
+    let enforced = effective_config.organization.safe_mode
+        && effective_config.organization.require_sensitive_focus;
+    Some((configured, enforced))
+}
+
+fn read_kernel_setting(path: &str) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn namespace_setup_context(
+    user_namespace_probe: &str,
+    unprivileged_userns_clone: Option<&str>,
+    apparmor_userns_restriction: Option<&str>,
+    daemon_mount_namespace_isolated: Option<bool>,
+) -> serde_json::Value {
+    let diagnosis = match (daemon_mount_namespace_isolated, user_namespace_probe) {
+        (Some(false), "blocked") => Some(
+            "The doctor process cannot create and map an unprivileged user namespace. Host policy may prevent a user service from establishing mount isolation; inspect the user-service journal and effective unit properties.",
+        ),
+        (Some(false), "allowed") => Some(
+            "The doctor process can create and map an unprivileged user namespace, but the daemon is not isolated. Inspect the effective unit properties, service journal, and daemon restart state.",
+        ),
+        (Some(false), _) => Some(
+            "The daemon is not isolated from the desktop mount namespace, and the host user-namespace probe was inconclusive. Inspect the effective unit properties and user-service journal.",
+        ),
+        (None, "blocked") => Some(
+            "The host probe cannot create and map an unprivileged user namespace, but daemon mount isolation could not be inspected. Host policy may prevent a user service from establishing mount isolation; check runtime daemon diagnostics after its status protocol is compatible.",
+        ),
+        (None, "allowed") => Some(
+            "The host probe can create and map an unprivileged user namespace, but daemon mount isolation could not be inspected. Check daemon runtime diagnostics after its status protocol is compatible.",
+        ),
+        _ => None,
+    };
+    serde_json::json!({
+        "unprivileged_user_namespace_probe": user_namespace_probe,
+        "kernel_unprivileged_userns_clone": unprivileged_userns_clone,
+        "kernel_apparmor_restrict_unprivileged_userns": apparmor_userns_restriction,
+        "daemon_mount_namespace_isolated": daemon_mount_namespace_isolated,
+        "diagnosis": diagnosis,
+        "note": "Host namespace capability and kernel settings are diagnostic evidence, not proof of systemd unit configuration or sandbox enforcement.",
+    })
+}
+
 fn active_route_summary(daemon: &serde_json::Value) -> serde_json::Value {
     if daemon.is_null() {
         return serde_json::json!({
@@ -625,16 +733,23 @@ fn daemon_runtime_report(daemon: &serde_json::Value) -> serde_json::Value {
     })
 }
 
-fn daemon_status_schema_check(daemon: &serde_json::Value) -> serde_json::Value {
+fn daemon_status_schema_check(
+    daemon: &serde_json::Value,
+    cli_matches_active_install: Option<bool>,
+) -> serde_json::Value {
     let compatible = daemon_status_schema_compatible(daemon);
+    let detail = if compatible {
+        "The running daemon exposes the current status contract.".to_owned()
+    } else {
+        format!(
+            "The running daemon does not expose the current status contract, so its sandbox and route capabilities cannot be verified. {}",
+            cli_install_recovery_advice(cli_matches_active_install)
+        )
+    };
     serde_json::json!({
         "name": "daemon_status_schema",
         "status": if compatible { "pass" } else { "unavailable" },
-        "detail": if compatible {
-            "The running daemon exposes the current status contract."
-        } else {
-            "The running daemon does not expose the current status contract; its sandbox and route capabilities cannot be verified until it is updated or restarted."
-        },
+        "detail": detail,
     })
 }
 
@@ -697,9 +812,38 @@ fn target_integrity_check(daemon: &serde_json::Value) -> serde_json::Value {
     )
 }
 
+fn active_configuration_check(
+    daemon: &serde_json::Value,
+    requested_path: &Path,
+) -> serde_json::Value {
+    let active_configuration_is_valid = daemon_status_schema_compatible(daemon)
+        .then(|| {
+            let state = daemon["config_state"].as_str()?;
+            let generation = daemon["config_generation"].as_u64()?;
+            let validation_errors = daemon["config_validation_error_count"].as_u64()?;
+            let active_path = daemon["config_active_path"].as_str()?;
+            let requested_path = requested_path.canonicalize().ok()?;
+            let active_path = Path::new(active_path).canonicalize().ok()?;
+            Some(
+                state == "ok"
+                    && generation > 0
+                    && validation_errors == 0
+                    && requested_path == active_path,
+            )
+        })
+        .flatten();
+    check(
+        "active_configuration",
+        active_configuration_is_valid,
+        "The live daemon must be running a fully validated generation for the inspected configuration path, including any active fleet layers, with no rejected reload pending.",
+    )
+}
+
 fn gate_for_check(name: &str) -> &'static str {
     match name {
-        "config_permissions" | "organization_policy_integrity" => "configuration_integrity",
+        "config_permissions" | "active_configuration" | "organization_policy_integrity" => {
+            "configuration_integrity"
+        }
         "capture_sensitive_focus" => "input_privacy",
         "action_broker_availability" | "action_broker_mandatory_audit" => {
             "action_broker_availability"
@@ -918,6 +1062,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_status_schema",
         "automatic_replacement_target_integrity",
         "config_permissions",
+        "active_configuration",
         "organization_policy_integrity",
         "daemon_no_new_privileges",
         "daemon_seccomp",
@@ -936,6 +1081,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_status_schema",
         "automatic_replacement_target_integrity",
         "config_permissions",
+        "active_configuration",
         "organization_policy_integrity",
         "daemon_mount_namespace",
         "daemon_private_tmp",
@@ -1122,6 +1268,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn privacy_requirement_uses_the_daemons_embedded_and_administrator_policy_precedence() {
+        let embedded: Config =
+            toml::from_str("[organization]\nsafe_mode = true\nrequire_sensitive_focus = true\n")
+                .unwrap();
+        assert_eq!(
+            effective_sensitive_focus_requirement(&embedded, &OrganizationPolicy::default()),
+            Some((true, true)),
+            "an embedded enforcing requirement is active without an overriding system policy"
+        );
+
+        let embedded_audit: Config =
+            toml::from_str("[organization]\nrequire_sensitive_focus = true\n").unwrap();
+        assert_eq!(
+            effective_sensitive_focus_requirement(&embedded_audit, &OrganizationPolicy::default()),
+            Some((true, false)),
+            "an embedded audit-only requirement is visible but does not fail enforcement"
+        );
+
+        let administrator_override = OrganizationPolicy {
+            safe_mode: true,
+            ..OrganizationPolicy::default()
+        };
+        assert_eq!(
+            effective_sensitive_focus_requirement(&embedded, &administrator_override),
+            Some((false, false)),
+            "an active system policy replaces the embedded policy just as it does in the daemon"
+        );
+
+        let administrator_audit = OrganizationPolicy {
+            require_sensitive_focus: true,
+            ..OrganizationPolicy::default()
+        };
+        assert_eq!(
+            effective_sensitive_focus_requirement(
+                &Config::parse("").unwrap(),
+                &administrator_audit
+            ),
+            Some((true, false)),
+            "an administrator audit-only requirement must be reported as configured, not enforced"
+        );
+    }
+
+    #[test]
     fn security_profiles_are_explicit_and_validated() {
         assert_eq!(
             ProtectionProfile::parse("hardened").unwrap(),
@@ -1140,20 +1329,57 @@ mod tests {
     }
 
     #[test]
+    fn namespace_diagnosis_uses_host_probe_as_context_not_as_sandbox_proof() {
+        let blocked = namespace_setup_context("blocked", Some("1"), Some("1"), Some(false));
+        assert!(blocked["diagnosis"]
+            .as_str()
+            .unwrap()
+            .contains("may prevent a user service"));
+        assert_eq!(blocked["daemon_mount_namespace_isolated"], false);
+        assert_eq!(blocked["kernel_unprivileged_userns_clone"], "1");
+
+        let host_allows_userns =
+            namespace_setup_context("allowed", Some("1"), Some("0"), Some(false));
+        assert!(host_allows_userns["diagnosis"]
+            .as_str()
+            .unwrap()
+            .contains("Inspect the effective unit properties"));
+
+        let isolated = namespace_setup_context("blocked", Some("1"), Some("1"), Some(true));
+        assert!(isolated["diagnosis"].is_null());
+        assert!(isolated["note"]
+            .as_str()
+            .unwrap()
+            .contains("not proof of systemd unit configuration"));
+
+        let daemon_unavailable = namespace_setup_context("blocked", Some("1"), Some("1"), None);
+        assert!(daemon_unavailable["diagnosis"]
+            .as_str()
+            .unwrap()
+            .contains("daemon mount isolation could not be inspected"));
+    }
+
+    #[test]
     fn daemon_schema_gate_marks_stale_and_missing_runtime_contracts_unavailable() {
         let current = serde_json::json!({"status_schema": CONTROL_STATUS_SCHEMA});
         let stale = serde_json::json!({"status_schema": CONTROL_STATUS_SCHEMA - 1});
         let missing = serde_json::json!({});
-        assert_eq!(daemon_status_schema_check(&current)["status"], "pass");
-        assert_eq!(daemon_status_schema_check(&stale)["status"], "unavailable");
         assert_eq!(
-            daemon_status_schema_check(&missing)["status"],
+            daemon_status_schema_check(&current, Some(false))["status"],
+            "pass"
+        );
+        assert_eq!(
+            daemon_status_schema_check(&stale, None)["status"],
+            "unavailable"
+        );
+        assert_eq!(
+            daemon_status_schema_check(&missing, None)["status"],
             "unavailable"
         );
         let unavailable = [serde_json::json!({
             "name": "daemon_status_schema",
             "required": true,
-            "status": daemon_status_schema_check(&stale)["status"],
+            "status": daemon_status_schema_check(&stale, None)["status"],
         })];
         assert_eq!(
             readiness_for(ProtectionProfile::Hardened, &unavailable, &[]),
@@ -1168,7 +1394,7 @@ mod tests {
     }
 
     #[test]
-    fn daemon_runtime_report_includes_action_for_stale_service() {
+    fn daemon_runtime_report_checks_active_install_cli_before_restart_advice() {
         let stale = serde_json::json!({
             "status_schema": CONTROL_STATUS_SCHEMA - 1,
             "daemon_commit": "old-build",
@@ -1181,7 +1407,33 @@ mod tests {
         assert!(report["upgrade"]["action"]
             .as_str()
             .unwrap()
-            .contains("start the installed daemon"));
+            .contains("verify that this CLI belongs to the active installation"));
+        assert!(report["upgrade"]["action"]
+            .as_str()
+            .unwrap()
+            .contains("before deciding whether a restart is needed"));
+    }
+
+    #[test]
+    fn stale_schema_advice_distinguishes_a_source_cli_from_the_active_payload() {
+        let stale = serde_json::json!({"status_schema": CONTROL_STATUS_SCHEMA - 1});
+        let source_cli = daemon_status_schema_check(&stale, Some(false))["detail"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(source_cli.contains("does not match the active user-local payload"));
+        assert!(!source_cli.contains("until it is updated or restarted"));
+        let installed_cli = daemon_status_schema_check(&stale, Some(true))["detail"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(installed_cli.contains("matches the active user-local payload"));
+        assert!(installed_cli.contains("service-specific recovery action"));
+        let unknown_cli = daemon_status_schema_check(&stale, None)["detail"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(unknown_cli.contains("cannot verify its identity"));
     }
 
     #[test]
@@ -1545,6 +1797,60 @@ mod tests {
             action_broker_audit_check(&serde_json::json!({"audit": {}}), false)["status"],
             "pass"
         );
+    }
+
+    #[test]
+    fn configuration_integrity_checks_the_live_effective_generation() {
+        let healthy = serde_json::json!({
+            "status_schema": CONTROL_STATUS_SCHEMA,
+            "config_active_path": std::env::current_exe()
+                .unwrap()
+                .to_string_lossy(),
+            "config_state": "ok",
+            "config_generation": 7,
+            "config_validation_error_count": 0,
+        });
+        let inspected_path = std::env::current_exe().unwrap();
+        assert_eq!(
+            active_configuration_check(&healthy, &inspected_path)["status"],
+            "pass"
+        );
+        assert_eq!(
+            active_configuration_check(&healthy, Path::new("/dev/null"))["status"],
+            "fail",
+            "a healthy daemon using a different config must not attest the inspected file"
+        );
+
+        let rejected_fleet_reload = serde_json::json!({
+            "status_schema": CONTROL_STATUS_SCHEMA,
+            "config_active_path": inspected_path.to_string_lossy(),
+            "config_state": "reload-rejected",
+            "config_generation": 7,
+            "config_validation_error_count": 1,
+        });
+        assert_eq!(
+            active_configuration_check(&rejected_fleet_reload, &inspected_path)["status"],
+            "fail",
+            "the old active generation must not hide a rejected effective reload"
+        );
+
+        let unknown_generation = serde_json::json!({
+            "status_schema": CONTROL_STATUS_SCHEMA - 1,
+            "config_active_path": inspected_path.to_string_lossy(),
+            "config_state": "ok",
+            "config_generation": 7,
+            "config_validation_error_count": 0,
+        });
+        assert_eq!(
+            active_configuration_check(&unknown_generation, &inspected_path)["status"],
+            "unavailable",
+            "a stale status schema cannot attest to the active generation"
+        );
+        assert_eq!(
+            gate_for_check("active_configuration"),
+            "configuration_integrity"
+        );
+        assert!(required_checks(ProtectionProfile::Workstation).contains(&"active_configuration"));
     }
 
     #[test]

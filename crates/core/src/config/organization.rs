@@ -250,7 +250,7 @@ impl OrganizationPolicy {
         if self.require_exclusive_capture && !source.exclusive_capture {
             return Some("selected input source cannot capture keyboard input exclusively".into());
         }
-        if self.require_atomic_replace && !injector.atomic_replace {
+        if self.require_atomic_replace && !injector.has_atomic_replacement_contract() {
             return Some(
                 "selected injector cannot guarantee atomic replacement transactions".into(),
             );

@@ -96,8 +96,14 @@ impl Daemon {
             return Ok(ControlFlow::Break(()));
         }
         self.config.reload_if_changed();
+        let backend_policy_changed = self
+            .status_publisher
+            .update_backend_policy_blocked(self.config.engine.backend_policy_blocked());
         if let Some(tracker) = &self.window_tracker {
             tracker.set_title_matching_required(self.config.engine.requires_window_titles());
+            tracker.set_process_identity_required(
+                self.config.engine.requires_process_executable_identity(),
+            );
         }
         self.update_profile_for_focus()?;
         // After any reload this turn: outputs use the consent now in effect.
@@ -111,6 +117,9 @@ impl Daemon {
             }
         }
         let metrics = self.config.engine.command_metrics();
+        if backend_policy_changed {
+            self.publish_status(metrics);
+        }
         let worker_failure = self
             .output_failures
             .as_ref()
@@ -349,6 +358,8 @@ impl Daemon {
 
     /// Publish the current status, including runtime capabilities.
     pub(crate) fn publish_status(&mut self, metrics: CommandMetrics) {
+        self.status_publisher
+            .update_backend_policy_blocked(self.config.engine.backend_policy_blocked());
         let (backend_mode, capture_capabilities, mut injection_capabilities) =
             if let Some(input_method) = self.input_method.as_ref() {
                 let capture_capabilities = InputSource::capabilities(input_method);
@@ -409,7 +420,11 @@ impl Daemon {
         self.retiring_output_workers
             .retain(OutputWorkerState::is_running);
         self.publish_retiring_output_workers();
-        if !self.retiring_output_workers.is_empty() {
+        if !output_loop::output_reconnect_allowed(
+            self.retiring_output_workers
+                .iter()
+                .map(OutputWorkerState::is_running),
+        ) {
             // The previous actor may still be inside an uninterruptible
             // compositor/portal call. Do not create a replacement route until
             // its backend resources and any uncertain operation are retired.
@@ -453,8 +468,22 @@ impl Daemon {
     fn finish_output_connect(&mut self, result: ConnectResult) -> Result<()> {
         match result {
             Ok(backend) => {
-                if self.evdev_mode && self.backend_name == "libei" {
-                    match spawn_async_injector(backend, Some(self.waker.clone())) {
+                let source_capabilities = self
+                    .input_method
+                    .as_ref()
+                    .map(InputSource::capabilities)
+                    .or_else(|| self.evdev.as_ref().map(InputSource::capabilities))
+                    .unwrap_or_default();
+                self.config
+                    .set_route_capabilities(backend.capabilities(), source_capabilities);
+                if (self.evdev_mode && self.backend_name == "libei")
+                    || self.active_source == "stdin"
+                {
+                    match output_loop::spawn_async_injector_with_stdin_monitor(
+                        backend,
+                        Some(self.waker.clone()),
+                        (self.active_source == "stdin").then(|| self.stdin_input_monitor.clone()),
+                    ) {
                         Ok((backend, failures, worker_state)) => {
                             self.injector = Some(backend);
                             self.output_failures = Some(failures);
@@ -476,15 +505,7 @@ impl Daemon {
                 self.output_retry_delay = Duration::from_millis(250);
                 // The output session has been renegotiated and is usable.
                 self.connection_state = "connected";
-                set_daemon_status_with_config_state(
-                    &mut self.status_publisher,
-                    &self.control,
-                    self.active_source,
-                    wayexpand_backend_selection::injection_status_label(self.backend_name),
-                    self.connection_state,
-                    self.config.path(),
-                    self.config.status_state(),
-                );
+                self.publish_status(self.config.engine.command_metrics());
                 crate::counters::note_output_reconnect();
                 info!(backend = self.backend_name, "output backend reconnected");
             }
@@ -505,6 +526,15 @@ impl Daemon {
     /// output actor and schedule a reconnect, and only permanent failures end
     /// the event loop. The expansion is never replayed.
     pub(crate) fn recover_from_output_error(&mut self, error: EventError) -> Result<()> {
+        if error.applied_with_cursor_position_failure() && !error.retryable() {
+            warn!(
+                outcome = error.diagnostic_category(),
+                trigger_chars = error.result.trigger.chars().count(),
+                insert_bytes = error.result.insert.len(),
+                "replacement was applied but cursor placement failed; matcher context was reset and the daemon will continue"
+            );
+            return Ok(());
+        }
         if error.source.source().is_some_and(|source| {
             source.kind() == wayexpand_core::InjectorErrorKind::InputInterrupted
         }) {
@@ -922,6 +952,7 @@ mod tests {
     fn input_method_status_combines_text_and_key_injector_capabilities() {
         let text = InjectorCapabilities {
             atomic_replace: true,
+            replacement_guarantee: wayexpand_core::ReplacementGuarantee::Atomic,
             full_unicode: true,
             key_passthrough: false,
             ..InjectorCapabilities::default()
@@ -941,6 +972,7 @@ mod tests {
     fn input_method_status_does_not_claim_key_injection_without_key_support() {
         let text = InjectorCapabilities {
             atomic_replace: true,
+            replacement_guarantee: wayexpand_core::ReplacementGuarantee::Atomic,
             full_unicode: true,
             ..InjectorCapabilities::default()
         };

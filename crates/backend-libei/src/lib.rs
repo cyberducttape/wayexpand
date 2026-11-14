@@ -91,6 +91,8 @@ const EI_TEXT_MAX_UTF8_BYTES: usize = 254;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_KEYMAP_BYTES: u32 = 4 * 1024 * 1024;
 const EIS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_INTERACTIVE_PACED_OUTPUT_MS: u64 = 100;
+const PACED_KEY_EVENTS_PER_SECOND: u64 = 83;
 /// Pause between synthesized key events in the `ei_keyboard` fallback. Set
 /// from the same ballpark as other synthetic-input tools (`xdotool`
 /// defaults to 12ms); below roughly this, compositors and toolkits start
@@ -104,6 +106,21 @@ const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
 // that `ei_keyboard.key()` expects (see the existing KEY_BACKSPACE handling
 // below, which is already evdev-numbered).
 const XKB_KEYCODE_OFFSET: u32 = 8;
+
+fn ensure_paced_key_event_budget(events: usize) -> Result<(), LibeiError> {
+    let events = u64::try_from(events).unwrap_or(u64::MAX);
+    let estimated_ms = events
+        .saturating_mul(1_000)
+        .saturating_add(PACED_KEY_EVENTS_PER_SECOND - 1)
+        / PACED_KEY_EVENTS_PER_SECOND;
+    if estimated_ms > MAX_INTERACTIVE_PACED_OUTPUT_MS {
+        return Err(LibeiError::FallbackTooSlow {
+            characters: usize::try_from(events).unwrap_or(usize::MAX),
+            estimated_ms,
+        });
+    }
+    Ok(())
+}
 
 /// Send `count` paced key actions, checking the output checkpoint before
 /// each. `pause` runs between actions (never after the last): backspaces and
@@ -168,7 +185,7 @@ pub enum LibeiError {
     #[error("typing stopped before the end of the text: {0}")]
     Interrupted(String),
     #[error(
-        "keysym fallback for {characters} characters would take about {estimated_ms} ms; \
+        "paced keyboard fallback for {characters} events would take about {estimated_ms} ms; \
          use an ei_text-capable backend or shorten the replacement"
     )]
     FallbackTooSlow {
@@ -393,6 +410,7 @@ impl LibeiSession {
                         .saturating_mul(KEY_EVENT_INTERVAL.as_millis() as u64),
                 });
             }
+            ensure_paced_key_event_budget(characters)?;
             if let Some(character) = text.chars().find(|c| {
                 // Newline and tab are handled specially in type_keys
                 !matches!(c, '\n' | '\t') && !typer.chars.contains_key(c)

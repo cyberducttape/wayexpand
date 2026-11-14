@@ -20,8 +20,9 @@ on_exit() {
 trap on_exit EXIT
 
 stage='reading package arguments'
-package=${1:?usage: test-package-smoke.sh <wayexpand .deb or .rpm>}
+package=${1:?usage: test-package-smoke.sh <wayexpand .deb or .rpm> <version> [previous package]}
 expected_version=${2:-}
+previous_package=${3:-}
 
 stage='checking disposable-container opt-in'
 if [ "${WAYEXPAND_PACKAGE_SMOKE_DISPOSABLE:-}" != 1 ]; then
@@ -58,13 +59,21 @@ case "$package" in
             /*) package_path=$package ;;
             *) package_path=./$package ;;
         esac
+        case "$previous_package" in
+            /*) previous_package_path=$previous_package ;;
+            *) previous_package_path=./$previous_package ;;
+        esac
         install_package() { apt-get install -y -q "$package_path"; }
         reinstall_package() { apt-get install -y -q --reinstall "$package_path"; }
+        install_previous_package() { apt-get install -y -q "$previous_package_path"; }
+        rollback_package() { apt-get install -y -q --allow-downgrades "$previous_package_path"; }
         remove_package() { apt-get remove -y -qq wayexpand; }
         ;;
     *.rpm)
         install_package() { dnf install -y -q "$package"; }
         reinstall_package() { dnf reinstall -y -q "$package"; }
+        install_previous_package() { dnf install -y -q "$previous_package"; }
+        rollback_package() { rpm -U --oldpackage "$previous_package"; }
         remove_package() { dnf remove -y -q wayexpand; }
         ;;
     *)
@@ -76,6 +85,10 @@ esac
 binaries='wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-gui wayexpand-ui wayexpand-ibus'
 
 check_installed() {
+    check_version=$expected_version
+    if [ "$#" -gt 0 ]; then
+        check_version=$1
+    fi
     stage='checking installed executables and shared libraries'
     printf '%s\n' 'Checking installed executables and shared libraries'
     for binary in $binaries; do
@@ -96,11 +109,11 @@ check_installed() {
     for binary in wayexpand wayexpand-daemon wayexpand-gui wayexpand-ui; do
         version=$("/usr/bin/$binary" --version)
         printf '%s\n' "$version"
-        if [ -n "$expected_version" ]; then
+        if [ -n "$check_version" ]; then
             case "$version" in
-                *" $expected_version"*) ;;
+                *" $check_version"*) ;;
                 *)
-                    printf 'error: %s does not report version %s\n' "$binary" "$expected_version" >&2
+                    printf 'error: %s does not report version %s\n' "$binary" "$check_version" >&2
                     return 1
                     ;;
             esac
@@ -184,8 +197,51 @@ for component in ("ibus", "ibus_engine_executable", "gnome_extension", "installe
 
 printf '%s\n' 'Installing package for the first time'
 stage='installing the package for the first time'
-install_package
+if [ -n "$previous_package" ]; then
+    stage='installing the previous package version'
+    printf 'Installing previous package: %s\n' "$(basename "$previous_package")"
+    install_previous_package
+    previous_version=$(/usr/bin/wayexpand --version)
+    printf '%s\n' "$previous_version"
+    if [ -n "$expected_version" ]; then
+        case "$previous_version" in
+            *" $expected_version"*)
+                printf '%s\n' 'error: previous package unexpectedly has the candidate version' >&2
+                exit 1
+                ;;
+        esac
+    fi
+    [ -x /usr/bin/wayexpand ] || {
+        printf '%s\n' 'error: previous package did not install the WayExpand CLI' >&2
+        exit 1
+    }
+    stage='upgrading from the previous package version'
+    printf '%s\n' 'Upgrading to the candidate package'
+    install_package
+else
+    install_package
+fi
 check_installed
+if [ -n "$previous_package" ]; then
+    stage='rolling back to the previous package version'
+    printf '%s\n' 'Rolling back to the previous package'
+    rollback_package
+    rollback_version=$(/usr/bin/wayexpand --version)
+    case "$rollback_version" in
+        *" $expected_version"*)
+            printf '%s\n' 'error: rollback left the candidate package installed' >&2
+            exit 1
+            ;;
+    esac
+    [ -x /usr/bin/wayexpand ] || {
+        printf '%s\n' 'error: rollback removed the WayExpand CLI' >&2
+        exit 1
+    }
+    stage='re-upgrading after rollback'
+    printf '%s\n' 'Re-upgrading to the candidate package'
+    install_package
+    check_installed
+fi
 printf '%s\n' 'Reinstalling package and checking idempotence'
 stage='reinstalling the package'
 reinstall_package

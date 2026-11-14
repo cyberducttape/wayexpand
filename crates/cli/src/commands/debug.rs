@@ -9,15 +9,161 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-fn focused_app_scope_from_status(status_response: Option<&str>) -> (Option<String>, Option<bool>) {
+#[derive(Debug, Default, PartialEq, Eq)]
+struct FocusedAppScopeStatus {
+    daemon_status_schema: Option<u64>,
+    daemon_schema_compatible: Option<bool>,
+    scope_state: Option<String>,
+    terminal_apps_only: Option<bool>,
+    window_tracker_connected: Option<bool>,
+    window_context_available: Option<bool>,
+    window_app_id_available: Option<bool>,
+    window_process_executable_available: Option<bool>,
+    window_process_name_available: Option<bool>,
+    window_tracker_identity_source: Option<String>,
+    window_process_identity_state: Option<String>,
+}
+
+fn focused_app_scope_from_status(status_response: Option<&str>) -> FocusedAppScopeStatus {
     let Some(status_response) = status_response else {
-        return (None, None);
+        return FocusedAppScopeStatus::default();
     };
     let status = wayexpand_core::DaemonStatus::parse(status_response);
-    (
-        status.field("capture_app_scope_state").map(str::to_owned),
-        status.bool_field("terminal_apps_only"),
-    )
+    let daemon_status_schema = status
+        .field("status_schema")
+        .and_then(|schema| schema.parse::<u64>().ok());
+    FocusedAppScopeStatus {
+        daemon_status_schema,
+        daemon_schema_compatible: daemon_status_schema
+            .map(|schema| schema == u64::from(crate::CONTROL_STATUS_SCHEMA)),
+        scope_state: status.field("capture_app_scope_state").map(str::to_owned),
+        terminal_apps_only: status.bool_field("terminal_apps_only"),
+        window_tracker_connected: status.bool_field("window_tracker_connected"),
+        window_context_available: status.bool_field("window_context_available"),
+        window_app_id_available: status.bool_field("window_app_id_available"),
+        window_process_executable_available: status
+            .bool_field("window_process_executable_available"),
+        window_process_name_available: status.bool_field("window_process_name_available"),
+        window_tracker_identity_source: status
+            .field("window_tracker_identity_source")
+            .map(str::to_owned),
+        window_process_identity_state: status
+            .field("window_process_identity_state")
+            .map(str::to_owned),
+    }
+}
+
+fn focused_app_matching_status(
+    app_id: Option<&str>,
+    scope_state: Option<&str>,
+    terminal_apps_only: Option<bool>,
+    identity_source: Option<&str>,
+    daemon_schema_compatible: Option<bool>,
+) -> &'static str {
+    if daemon_schema_compatible == Some(false) {
+        return "daemon_status_incompatible";
+    }
+    match terminal_apps_only {
+        Some(false) => "unrestricted",
+        Some(true)
+            if scope_state == Some("allowed") && identity_source == Some("process-executable") =>
+        {
+            "allowed_by_executable"
+        }
+        Some(true) if scope_state == Some("allowed") && identity_source == Some("process-name") => {
+            "allowed_by_process_name"
+        }
+        Some(true) if scope_state == Some("allowed") => "allowed",
+        Some(true) if scope_state == Some("outside_allowlist") => "suppressed_outside_allowlist",
+        Some(true) if app_id.is_none() || app_id == Some("unavailable") => {
+            "suppressed_unknown_focus"
+        }
+        Some(true) => "scope_unverified",
+        None => "unknown",
+    }
+}
+
+fn process_executable_from_app_identity(app_id: &str) -> Option<&str> {
+    app_id.strip_prefix(wayexpand_core::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+}
+
+fn process_name_from_app_identity(app_id: &str) -> Option<&str> {
+    app_id.strip_prefix(wayexpand_core::PROCESS_NAME_APP_ID_PREFIX)
+}
+
+fn focused_app_diagnostic(
+    matching_status: &str,
+    focus: &FocusedAppScopeStatus,
+) -> Option<(&'static str, &'static str)> {
+    match matching_status {
+        "daemon_status_incompatible" => Some((
+            "WX-VERSION-001",
+            "The running daemon reports a different status protocol schema, so this focus diagnosis may be incomplete. Run `wayexpand upgrade-status` and `wayexpand upgrade --check`; restart or upgrade the daemon before using this result to change application allowlists.",
+        )),
+        "suppressed_unknown_focus"
+            if focus.window_tracker_connected == Some(true)
+                && focus.window_context_available == Some(true)
+                && focus.window_app_id_available == Some(false) =>
+        {
+            if focus.window_process_identity_state.as_deref() == Some("compositor-process-id") {
+                return Some((
+                    "WX-EVDEV-FOCUS-006",
+                    "KWin reported its own process ID for the focused compositor surface, not an application process. Focus the actual terminal or browser window and rerun this diagnostic; do not allowlist `kwin_wayland` or use a window title as a substitute for client identity.",
+                ));
+            }
+            if focus.window_tracker_identity_source.as_deref() == Some("process-name") {
+                return Some((
+                    "WX-EVDEV-FOCUS-004",
+                    "KWin could not provide a verified executable identity and supplied only a mutable process name. If you accept this lower assurance, add an exact `process_name_exact:<that-name>` filter to the terminal and expansion scopes; do not use a wildcard or window title. The `window_process_identity_state` field gives the content-free executable lookup failure category.",
+                ));
+            }
+            if focus.window_process_identity_state.as_deref()
+                == Some("process-id-unavailable")
+            {
+                return Some((
+                    "WX-EVDEV-FOCUS-005",
+                    "KWin did not provide a process ID for the focused window, so WayExpand cannot resolve an executable or process name. Keep terminal-scoped matching fail-closed; use a compositor route that supplies application identity or manual paste.",
+                ));
+            }
+            if focus.window_tracker_identity_source.as_deref()
+                == Some("process-executable-permission-denied")
+            {
+                return Some((
+                    "WX-EVDEV-FOCUS-003",
+                    "KWin supplied a focused-window PID, but WayExpand could not verify its executable through `/proc`. An exact-path filter cannot authorize this window until the host allows same-user executable inspection. Do not weaken process permissions or replace this with a title/wildcard filter; use an application-ID-capable route or manual paste for this window.",
+                ));
+            }
+            let action = if focus.window_tracker_identity_source.as_deref()
+                == Some("compositor-identity-only")
+            {
+                "KWin supplied only compositor-owned identity metadata for this window, so an app-ID allowlist cannot authorize it. For a terminal you explicitly trust, use `process_executable_exact:/absolute/path` in `settings.terminal_apps` and, when applicable, `settings.raw_capture_apps` and the expansion's `app_filter`. KWin resolves executable identity only for exact-path filters. Keep the scope enabled; do not substitute a title or wildcard."
+            } else {
+                "The window tracker reports a focused window but supplies no stable application ID, so terminal-only matching is suppressed. If the tracker cannot provide an app ID, configure an explicit `process_executable_exact:/absolute/path` filter for the intended terminal in `settings.terminal_apps` and, when applicable, `settings.raw_capture_apps` and the expansion's `app_filter`. Check `wayexpand doctor --json`; do not substitute the window title or an unknown-app wildcard."
+            };
+            Some(("WX-EVDEV-FOCUS-001", action))
+        }
+        "suppressed_outside_allowlist"
+            if focus.window_tracker_identity_source.as_deref() == Some("process-executable") =>
+        {
+            Some((
+                "WX-EVDEV-FOCUS-002",
+                "KWin identified the focused executable in `focused_app_id` as an exact path, but it is outside the configured allowlist. If this terminal is intended, add `process_executable_exact:<that-path>` to `settings.terminal_apps` and any affected expansion `app_filter`; keep the filter exact rather than widening it.",
+            ))
+        }
+        "suppressed_outside_allowlist"
+            if focus.window_tracker_identity_source.as_deref() == Some("process-name") =>
+        {
+            Some((
+                "WX-EVDEV-FOCUS-004",
+                "KWin identified this window using its mutable Linux process name, which is weaker than an executable path. If you accept that limitation, add the exact `process_name_exact:<that-name>` filter to `settings.terminal_apps` and any affected expansion `app_filter`; process names can be changed by the application and are not a strong security identity.",
+            ))
+        }
+        "suppressed_unknown_focus" | "scope_unverified" => Some((
+            "WX-EVDEV-FOCUS-001",
+            "Run `wayexpand debug --live --seconds 60` while testing a harmless trigger in a configured application, then inspect sanitized app_scope events. Keep app-scoped capture enabled.",
+        )),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,34 +285,120 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             .lines()
             .find_map(|line| line.strip_prefix("focused_app_id="))
             .ok_or_else(|| anyhow::anyhow!("daemon returned an invalid focused app ID response"))?;
+        let focused_process_executable = process_executable_from_app_identity(app_id);
+        let focused_process_name = process_name_from_app_identity(app_id);
+        let focused_application_id = (app_id != "unavailable"
+            && focused_process_executable.is_none()
+            && focused_process_name.is_none())
+        .then_some(app_id);
         // Read the scope decision beside the identity. This turns the command
         // into a useful diagnosis for terminal-scoped evdev routes instead of
         // making users compare the ID against configuration by hand. Older
         // daemons may not publish these fields, so keep them optional.
         let status_response =
             crate::control_operation(wayexpand_core::DaemonOperation::Status).ok();
-        let (scope_state, terminal_apps_only) =
-            focused_app_scope_from_status(status_response.as_deref());
+        let focus = focused_app_scope_from_status(status_response.as_deref());
+        let matching_status = focused_app_matching_status(
+            (app_id != "unavailable").then_some(app_id),
+            focus.scope_state.as_deref(),
+            focus.terminal_apps_only,
+            focus.window_tracker_identity_source.as_deref(),
+            focus.daemon_schema_compatible,
+        );
+        let diagnostic = focused_app_diagnostic(matching_status, &focus);
         if json {
             println!(
                 "{}",
                 serde_json::json!({
-                    "focused_app_id": if app_id == "unavailable" { None } else { Some(app_id) },
-                    "capture_app_scope_state": scope_state,
-                    "terminal_apps_only": terminal_apps_only,
+                    "focused_app_id": focused_application_id,
+                    "focused_process_executable": focused_process_executable,
+                    "focused_process_name": focused_process_name,
+                    "daemon_status_schema": focus.daemon_status_schema,
+                    "daemon_schema_compatible": focus.daemon_schema_compatible,
+                    "capture_app_scope_state": focus.scope_state,
+                    "terminal_apps_only": focus.terminal_apps_only,
+                    "window_tracker_connected": focus.window_tracker_connected,
+                    "window_context_available": focus.window_context_available,
+                    "window_app_id_available": focus.window_app_id_available,
+                    "window_process_executable_available": focus.window_process_executable_available,
+                    "window_process_name_available": focus.window_process_name_available,
+                    "window_tracker_identity_source": focus.window_tracker_identity_source,
+                    "window_process_identity_state": focus.window_process_identity_state,
+                    "matching_status": matching_status,
+                    "problem_id": diagnostic.map(|(id, _)| id),
+                    "suggested_action": diagnostic.map(|(_, action)| action),
                 })
             );
+        } else if matching_status == "daemon_status_incompatible" {
+            println!("The running daemon uses an incompatible status schema.");
+            println!(
+                "Reported schema: {}",
+                focus
+                    .daemon_status_schema
+                    .map_or_else(|| "unknown".into(), |schema| schema.to_string())
+            );
+            if let Some((problem_id, suggested_action)) = diagnostic {
+                println!("Problem: {problem_id}");
+                println!("Next: {suggested_action}");
+            }
+        } else if let Some(path) = focused_process_executable {
+            println!("Focused application ID: unavailable");
+            println!("Focused executable: {path}");
+            if let Some(scope_state) = focus.scope_state.as_deref() {
+                println!("Capture app scope: {scope_state}");
+            }
+            if matching_status == "suppressed_outside_allowlist" {
+                println!("Expansion matching is suppressed for this focused application.");
+                if let Some((problem_id, suggested_action)) = diagnostic {
+                    println!("Problem: {problem_id}");
+                    println!("Next: {suggested_action}");
+                }
+            }
+        } else if let Some(name) = focused_process_name {
+            println!("Focused application ID: unavailable");
+            println!("Focused process name (lower assurance): {name}");
+            if let Some(scope_state) = focus.scope_state.as_deref() {
+                println!("Capture app scope: {scope_state}");
+            }
+            if let Some((problem_id, suggested_action)) = diagnostic {
+                println!("Problem: {problem_id}");
+                println!("Next: {suggested_action}");
+            }
         } else if app_id == "unavailable" {
             println!("Focused application ID: unavailable");
-            if let Some(scope_state) = scope_state {
+            if let Some(scope_state) = focus.scope_state.as_deref() {
                 println!("Capture app scope: {scope_state}");
+            }
+            if focus.window_tracker_connected == Some(true)
+                && focus.window_context_available == Some(true)
+                && focus.window_app_id_available == Some(false)
+            {
+                if focus.window_process_executable_available == Some(true) {
+                    println!("KWin supplied an exact process executable identity; no desktop application ID is available.");
+                } else {
+                    println!("The focus tracker sees a window, but KWin supplied no stable application ID.");
+                }
+            }
+            if matching_status == "suppressed_unknown_focus" {
+                println!("Terminal-scoped matching is suppressed because the focused application could not be identified.");
+                if let Some((problem_id, suggested_action)) = diagnostic {
+                    println!("Problem: {problem_id}");
+                    println!("Next: {suggested_action}");
+                }
             }
         } else {
             println!("Focused application ID: {app_id}");
-            if let Some(scope_state) = scope_state {
+            if let Some(scope_state) = focus.scope_state.as_deref() {
                 println!("Capture app scope: {scope_state}");
-                if terminal_apps_only == Some(true) && scope_state == "outside_allowlist" {
+                if focus.terminal_apps_only == Some(true) && scope_state == "outside_allowlist" {
                     println!("Expansion matching is suppressed for this focused application.");
+                }
+            }
+            if matching_status == "scope_unverified" {
+                println!("Terminal-scoped matching cannot be verified from the daemon's current app-scope status.");
+                if let Some((problem_id, suggested_action)) = diagnostic {
+                    println!("Problem: {problem_id}");
+                    println!("Next: {suggested_action}");
                 }
             }
         }
@@ -558,7 +790,10 @@ mod desktop_test_option_tests {
 
 #[cfg(test)]
 mod focused_app_scope_tests {
-    use super::focused_app_scope_from_status;
+    use super::{
+        focused_app_diagnostic, focused_app_matching_status, focused_app_scope_from_status,
+        FocusedAppScopeStatus,
+    };
 
     #[test]
     fn reports_terminal_scope_and_fail_closed_allowlist_mismatch() {
@@ -566,19 +801,244 @@ mod focused_app_scope_tests {
             focused_app_scope_from_status(Some(
                 "running\nterminal_apps_only=true\ncapture_app_scope_state=outside_allowlist\n",
             )),
-            (Some("outside_allowlist".into()), Some(true))
+            FocusedAppScopeStatus {
+                scope_state: Some("outside_allowlist".into()),
+                terminal_apps_only: Some(true),
+                ..FocusedAppScopeStatus::default()
+            }
         );
     }
 
     #[test]
     fn old_or_ambiguous_status_keeps_scope_unavailable() {
-        assert_eq!(focused_app_scope_from_status(None), (None, None));
+        assert_eq!(
+            focused_app_scope_from_status(None),
+            FocusedAppScopeStatus::default()
+        );
         assert_eq!(
             focused_app_scope_from_status(Some(
                 "running\nterminal_apps_only=true\ncapture_app_scope_state=allowed\ncapture_app_scope_state=outside_allowlist\n",
             )),
-            (None, Some(true))
+            FocusedAppScopeStatus {
+                terminal_apps_only: Some(true),
+                ..FocusedAppScopeStatus::default()
+            }
         );
+    }
+
+    #[test]
+    fn focused_app_matching_diagnosis_distinguishes_unknown_and_blocked_focus() {
+        assert_eq!(
+            focused_app_matching_status(None, Some("unknown"), Some(true), None, None),
+            "suppressed_unknown_focus"
+        );
+        assert_eq!(
+            focused_app_matching_status(
+                Some("org.gnome.TextEditor"),
+                Some("outside_allowlist"),
+                Some(true),
+                None,
+                None,
+            ),
+            "suppressed_outside_allowlist"
+        );
+        assert_eq!(
+            focused_app_matching_status(
+                Some("org.kde.konsole"),
+                Some("allowed"),
+                Some(true),
+                Some("desktop-file-name"),
+                None,
+            ),
+            "allowed"
+        );
+        assert_eq!(
+            focused_app_matching_status(
+                Some("org.kde.konsole"),
+                Some("unknown"),
+                Some(true),
+                None,
+                None,
+            ),
+            "scope_unverified"
+        );
+        assert_eq!(
+            focused_app_matching_status(None, None, Some(false), None, None),
+            "unrestricted"
+        );
+        assert_eq!(
+            focused_app_matching_status(
+                None,
+                Some("allowed"),
+                Some(true),
+                Some("process-executable"),
+                None,
+            ),
+            "allowed_by_executable"
+        );
+        assert_eq!(
+            focused_app_matching_status(
+                Some("process-name:konsole"),
+                Some("allowed"),
+                Some(true),
+                Some("process-name"),
+                None,
+            ),
+            "allowed_by_process_name"
+        );
+    }
+
+    #[test]
+    fn unknown_focus_has_stable_problem_id_and_safe_remediation() {
+        let (problem_id, suggested_action) = focused_app_diagnostic(
+            "suppressed_unknown_focus",
+            &FocusedAppScopeStatus::default(),
+        )
+        .expect("unknown focus needs an actionable diagnostic");
+        assert_eq!(problem_id, "WX-EVDEV-FOCUS-001");
+        assert!(suggested_action.contains("wayexpand debug --live"));
+        assert!(suggested_action.contains("Keep app-scoped capture enabled"));
+        assert_eq!(
+            focused_app_diagnostic("allowed", &FocusedAppScopeStatus::default()),
+            None
+        );
+        assert_eq!(
+            focused_app_diagnostic(
+                "suppressed_outside_allowlist",
+                &FocusedAppScopeStatus::default()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn reports_stale_daemon_schema_before_diagnosing_application_scope() {
+        let current = crate::CONTROL_STATUS_SCHEMA;
+        let focus = focused_app_scope_from_status(Some(&format!(
+            "running\nstatus_schema={}\nterminal_apps_only=true\ncapture_app_scope_state=unknown\n",
+            current.saturating_sub(1)
+        )));
+        assert_eq!(focus.daemon_schema_compatible, Some(false));
+        assert_eq!(
+            focused_app_matching_status(
+                None,
+                focus.scope_state.as_deref(),
+                focus.terminal_apps_only,
+                None,
+                focus.daemon_schema_compatible,
+            ),
+            "daemon_status_incompatible"
+        );
+        let (problem_id, suggested_action) =
+            focused_app_diagnostic("daemon_status_incompatible", &focus)
+                .expect("incompatible schema needs a specific remediation");
+        assert_eq!(problem_id, "WX-VERSION-001");
+        assert!(suggested_action.contains("wayexpand upgrade-status"));
+        assert!(
+            suggested_action.contains("before using this result to change application allowlists")
+        );
+
+        let compatible = focused_app_scope_from_status(Some(&format!(
+            "running\nstatus_schema={current}\nterminal_apps_only=true\ncapture_app_scope_state=allowed\n"
+        )));
+        assert_eq!(compatible.daemon_schema_compatible, Some(true));
+    }
+
+    #[test]
+    fn missing_window_application_id_has_specific_safe_guidance() {
+        let focus = focused_app_scope_from_status(Some(
+            "running\nterminal_apps_only=true\ncapture_app_scope_state=unknown\nwindow_tracker_connected=true\nwindow_context_available=true\nwindow_app_id_available=false\n",
+        ));
+        let (problem_id, suggested_action) =
+            focused_app_diagnostic("suppressed_unknown_focus", &focus)
+                .expect("missing app ID needs a specific diagnosis");
+        assert_eq!(problem_id, "WX-EVDEV-FOCUS-001");
+        assert!(suggested_action.contains("window tracker reports a focused window"));
+        assert!(!suggested_action.contains("KWin reported"));
+        assert!(suggested_action.contains("do not substitute the window title"));
+    }
+
+    #[test]
+    fn compositor_only_identity_source_is_explained_without_exposing_identity() {
+        let focus = focused_app_scope_from_status(Some(
+            "running\nterminal_apps_only=true\ncapture_app_scope_state=unknown\nwindow_tracker_connected=true\nwindow_context_available=true\nwindow_app_id_available=false\nwindow_tracker_identity_source=compositor-identity-only\n",
+        ));
+        let (_, suggested_action) =
+            focused_app_diagnostic("suppressed_unknown_focus", &focus).unwrap();
+        assert!(suggested_action.contains("compositor-owned identity metadata"));
+        assert!(!suggested_action.contains("window title:"));
+    }
+
+    #[test]
+    fn process_identity_outside_allowlist_suggests_the_exact_path_filter() {
+        let focus = focused_app_scope_from_status(Some(
+            "running\nterminal_apps_only=true\ncapture_app_scope_state=outside_allowlist\nwindow_tracker_connected=true\nwindow_context_available=true\nwindow_app_id_available=false\nwindow_process_executable_available=true\nwindow_tracker_identity_source=process-executable\n",
+        ));
+        let (problem_id, suggested_action) =
+            focused_app_diagnostic("suppressed_outside_allowlist", &focus)
+                .expect("an identified but unlisted terminal needs remediation");
+        assert_eq!(problem_id, "WX-EVDEV-FOCUS-002");
+        assert!(suggested_action.contains("focused_app_id"));
+        assert!(suggested_action.contains("process_executable_exact:<that-path>"));
+        assert!(suggested_action.contains("keep the filter exact"));
+        assert!(!suggested_action.contains("wildcard"));
+    }
+
+    #[test]
+    fn process_name_outside_allowlist_warns_about_mutable_identity() {
+        let focus = focused_app_scope_from_status(Some(
+            "running\nterminal_apps_only=true\ncapture_app_scope_state=outside_allowlist\nwindow_tracker_connected=true\nwindow_context_available=true\nwindow_app_id_available=false\nwindow_process_name_available=true\nwindow_tracker_identity_source=process-name\n",
+        ));
+        let (problem_id, suggested_action) =
+            focused_app_diagnostic("suppressed_outside_allowlist", &focus).unwrap();
+        assert_eq!(problem_id, "WX-EVDEV-FOCUS-004");
+        assert!(suggested_action.contains("process_name_exact:<that-name>"));
+        assert!(suggested_action.contains("mutable"));
+        assert!(suggested_action.contains("weaker than an executable path"));
+    }
+
+    #[test]
+    fn failed_process_identity_lookup_does_not_suggest_an_exact_path_filter() {
+        let focus = focused_app_scope_from_status(Some(
+            "running\nterminal_apps_only=true\ncapture_app_scope_state=unknown\nwindow_tracker_connected=true\nwindow_context_available=true\nwindow_app_id_available=false\nwindow_process_executable_available=false\nwindow_tracker_identity_source=process-executable-permission-denied\nwindow_process_identity_state=executable-permission-denied\n",
+        ));
+        let (problem_id, suggested_action) =
+            focused_app_diagnostic("suppressed_unknown_focus", &focus)
+                .expect("failed process lookup needs a distinct diagnosis");
+        assert_eq!(problem_id, "WX-EVDEV-FOCUS-003");
+        assert!(suggested_action.contains("could not verify its executable"));
+        assert!(!suggested_action.contains("process_executable_exact:"));
+        assert!(suggested_action.contains("Do not weaken process permissions"));
+    }
+
+    #[test]
+    fn unknown_focus_diagnoses_process_id_absence_and_mutable_name_fallback() {
+        let name_fallback = focused_app_scope_from_status(Some(
+            "running\nterminal_apps_only=true\ncapture_app_scope_state=unknown\nwindow_tracker_connected=true\nwindow_context_available=true\nwindow_app_id_available=false\nwindow_process_name_available=true\nwindow_tracker_identity_source=process-name\nwindow_process_identity_state=executable-permission-denied\n",
+        ));
+        let (problem_id, action) =
+            focused_app_diagnostic("suppressed_unknown_focus", &name_fallback).unwrap();
+        assert_eq!(problem_id, "WX-EVDEV-FOCUS-004");
+        assert!(action.contains("mutable process name"));
+        assert!(action.contains("window_process_identity_state"));
+
+        let no_pid = focused_app_scope_from_status(Some(
+            "running\nterminal_apps_only=true\ncapture_app_scope_state=unknown\nwindow_tracker_connected=true\nwindow_context_available=true\nwindow_app_id_available=false\nwindow_process_identity_state=process-id-unavailable\n",
+        ));
+        let (problem_id, action) =
+            focused_app_diagnostic("suppressed_unknown_focus", &no_pid).unwrap();
+        assert_eq!(problem_id, "WX-EVDEV-FOCUS-005");
+        assert!(action.contains("did not provide a process ID"));
+
+        let compositor_pid = focused_app_scope_from_status(Some(
+            "running\nterminal_apps_only=true\ncapture_app_scope_state=unknown\nwindow_tracker_connected=true\nwindow_context_available=true\nwindow_app_id_available=false\nwindow_process_identity_state=compositor-process-id\n",
+        ));
+        let (problem_id, action) =
+            focused_app_diagnostic("suppressed_unknown_focus", &compositor_pid)
+                .expect("a compositor PID must not be presented as an application identity");
+        assert_eq!(problem_id, "WX-EVDEV-FOCUS-006");
+        assert!(action.contains("its own process ID"));
+        assert!(!action.contains("process_name_exact:"));
     }
 }
 
@@ -645,6 +1105,15 @@ fn status_counter(status: Option<&serde_json::Value>, key: &str) -> u64 {
         .unwrap_or(0)
 }
 
+fn status_counter_compat(status: Option<&serde_json::Value>, current: &str, legacy: &str) -> u64 {
+    let current_value = status_counter(status, current);
+    if current_value != 0 {
+        current_value
+    } else {
+        status_counter(status, legacy)
+    }
+}
+
 fn app_scope_detail(state: &str) -> &'static str {
     match state {
         "unrestricted" => "application scope is unrestricted by this daemon route",
@@ -689,7 +1158,11 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
         status_counter(initial_daemon.as_ref(), "matcher_evaluations_total");
     let mut last_matches = status_counter(initial_daemon.as_ref(), "matches_found_total");
     let mut last_attempts = status_counter(initial_daemon.as_ref(), "expansion_attempts_total");
-    let mut last_applied = status_counter(initial_daemon.as_ref(), "expansions_applied_total");
+    let mut last_acknowledged = status_counter_compat(
+        initial_daemon.as_ref(),
+        "expansion_output_acknowledgements_total",
+        "expansions_applied_total",
+    );
     let mut last_refused = status_counter(initial_daemon.as_ref(), "output_refused_total");
     let mut last_partial = status_counter(initial_daemon.as_ref(), "partial_write_total");
     let mut last_evdev_raw_keys =
@@ -812,7 +1285,7 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
                 started,
                 "expansion_activity",
                 &format!(
-                    "{} expansion(s) committed by IBus; trigger and replacement omitted",
+                    "{} IBus output(s) emitted; target text unverified, content omitted",
                     expansions - last_expansions
                 ),
             );
@@ -821,29 +1294,33 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
         let matcher_evaluations = status_counter(daemon.as_ref(), "matcher_evaluations_total");
         let matches = status_counter(daemon.as_ref(), "matches_found_total");
         let attempts = status_counter(daemon.as_ref(), "expansion_attempts_total");
-        let applied = status_counter(daemon.as_ref(), "expansions_applied_total");
+        let acknowledged = status_counter_compat(
+            daemon.as_ref(),
+            "expansion_output_acknowledgements_total",
+            "expansions_applied_total",
+        );
         if matcher_evaluations > last_matcher_evaluations
             || matches > last_matches
             || attempts > last_attempts
-            || applied > last_applied
+            || acknowledged > last_acknowledged
         {
             emit(
                 json,
                 started,
                 "matcher",
                 &format!(
-                    "{} evaluation(s), {} match(es), {} insertion attempt(s), {} applied; content omitted",
+                    "{} evaluation(s), {} match(es), {} insertion attempt(s), {} output acknowledgement(s); target text unverified, content omitted",
                     matcher_evaluations.saturating_sub(last_matcher_evaluations),
                     matches.saturating_sub(last_matches),
                     attempts.saturating_sub(last_attempts),
-                    applied.saturating_sub(last_applied),
+                    acknowledged.saturating_sub(last_acknowledged),
                 ),
             );
         }
         last_matcher_evaluations = matcher_evaluations;
         last_matches = matches;
         last_attempts = attempts;
-        last_applied = applied;
+        last_acknowledged = acknowledged;
         let refused = status_counter(daemon.as_ref(), "output_refused_total");
         let partial = status_counter(daemon.as_ref(), "partial_write_total");
         if refused > last_refused || partial > last_partial {
@@ -885,11 +1362,17 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
                     .get("completion")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("unknown");
+                let application_result = outcome
+                    .get("application_result")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown");
                 emit(
                     json,
                     started,
                     "output_transaction",
-                    &format!("transaction {id} completed with state {completion}; no text logged"),
+                    &format!(
+                        "transaction {id}: backend completion {completion}; application result {application_result}; no text logged"
+                    ),
                 );
                 seen.push_back(id.to_owned());
                 if seen.len() > 32 {
@@ -925,7 +1408,7 @@ mod tests {
 
 #[cfg(test)]
 mod status_counter_tests {
-    use super::status_counter;
+    use super::{status_counter, status_counter_compat};
     use serde_json::json;
 
     #[test]
@@ -941,5 +1424,31 @@ mod status_counter_tests {
         assert_eq!(status_counter(Some(&status), "negative"), 0);
         assert_eq!(status_counter(Some(&status), "invalid"), 0);
         assert_eq!(status_counter(None, "missing"), 0);
+    }
+
+    #[test]
+    fn output_acknowledgement_counter_prefers_new_name_and_reads_legacy_daemons() {
+        let current = serde_json::json!({
+            "expansion_output_acknowledgements_total": 8,
+            "expansions_applied_total": 8
+        });
+        assert_eq!(
+            status_counter_compat(
+                Some(&current),
+                "expansion_output_acknowledgements_total",
+                "expansions_applied_total"
+            ),
+            8
+        );
+
+        let legacy = serde_json::json!({"expansions_applied_total": 3});
+        assert_eq!(
+            status_counter_compat(
+                Some(&legacy),
+                "expansion_output_acknowledgements_total",
+                "expansions_applied_total"
+            ),
+            3
+        );
     }
 }

@@ -327,10 +327,6 @@ if [ -f "$project_dir/polkit/org.wayexpand.action.policy" ] &&
     printf '%s\n' "Broker actions require administrator installation of the polkit policy:"
     printf '%s\n' "   sudo install -m 0644 \"$project_dir/polkit/org.wayexpand.action.policy\" /usr/share/polkit-1/actions/"
 fi
-if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet wayexpand-action-broker.service 2>/dev/null; then
-    printf '%s\n' "Active broker service still uses its current process; restart it after this upgrade:"
-    printf '%s\n' "  systemctl --user restart wayexpand-action-broker.service"
-fi
 printf '%s\n' ""
 printf '%s\n' "3. Check which backend your compositor supports:"
 printf '%s\n' "   wayexpand doctor"
@@ -356,8 +352,22 @@ if command -v systemctl >/dev/null 2>&1; then
         fi
     done
     if [ "$active_upgrade" -eq 1 ]; then
-        printf '%s\n' 'An active WayExpand service still uses its current process. After this installation finishes, run:'
-        printf '%s\n' '  wayexpand upgrade --apply'
+        printf '%s\n' 'An active WayExpand service was detected. Runtime process check:'
+        if runtime_check_output=$("$bin_dir/wayexpand" upgrade --check 2>&1); then
+            printf '%s\n' "$runtime_check_output"
+            case "$runtime_check_output" in
+                *'Action: restart the affected service'*|*'Action: restart the active Action Broker service'*)
+                    printf '%s\n' 'After reviewing the process details above, apply the restart and health check with:'
+                    printf '  %s/wayexpand upgrade --apply\n' "$bin_dir"
+                    ;;
+                *)
+                    printf '%s\n' 'The runtime check did not identify a managed daemon version mismatch; inspect the status above before restarting anything.'
+                    ;;
+            esac
+        else
+            printf '%s\n' "$runtime_check_output"
+            printf '%s\n' 'Could not complete the runtime check. Inspect the check output and rerun wayexpand upgrade --check before applying.'
+        fi
     fi
 fi
 

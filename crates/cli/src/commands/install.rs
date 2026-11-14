@@ -202,7 +202,7 @@ fn package_managed_executable(path: &Path) -> bool {
         .any(|(program, flag)| crate::setup_ibus::command_output(program, &[flag, &path]).is_some())
 }
 
-fn installation_method(path: Option<&Path>) -> &'static str {
+pub(crate) fn installation_method(path: Option<&Path>) -> &'static str {
     let Some(path) = path else {
         return "unknown";
     };
@@ -349,14 +349,27 @@ fn integrated_checks(ibus: &wayexpand_backend_ibus::chain::IbusChainReport) -> V
         ));
     }
     let readiness = ibus.readiness();
+    let manifest = ibus.check("manifest");
+    let manifest_scope = ibus.check("manifest-scope");
+    let registration_status = ibus_registration_status(
+        readiness.registered,
+        readiness.component_installed,
+        manifest.map(|check| check.state),
+        manifest_scope.map(|check| check.state),
+    );
     checks.push(readiness_check(
         "ibus_registration",
-        if readiness.registered { "pass" } else { "unavailable" },
-        "IBus live registry state and component executable contract",
+        registration_status,
+        if registration_status == "pass" {
+            "IBus live registry and shared executable contract are ready"
+        } else {
+            "IBus registry presence does not establish a usable, multi-user-safe engine registration"
+        },
         serde_json::json!({
             "component_installed":readiness.component_installed,
             "registered":readiness.registered,
-            "manifest":ibus.check("manifest").map(|check| serde_json::json!({"state":format!("{:?}",check.state).to_lowercase(),"detail":check.detail})),
+            "manifest_scope":manifest_scope.map(|check| serde_json::json!({"state":format!("{:?}",check.state).to_lowercase(),"detail":check.detail})),
+            "manifest":manifest.map(|check| serde_json::json!({"state":format!("{:?}",check.state).to_lowercase(),"detail":check.detail})),
         }),
     ));
     checks.extend(ibus_integration_checks(ibus));
@@ -410,6 +423,28 @@ fn ibus_integration_checks(
     .collect()
 }
 
+fn ibus_registration_status(
+    registered: bool,
+    component_installed: bool,
+    manifest: Option<wayexpand_backend_ibus::chain::IbusCheckState>,
+    manifest_scope: Option<wayexpand_backend_ibus::chain::IbusCheckState>,
+) -> &'static str {
+    use wayexpand_backend_ibus::chain::IbusCheckState;
+
+    if !registered {
+        return "unavailable";
+    }
+    if !component_installed {
+        return "unavailable";
+    }
+    match (manifest, manifest_scope) {
+        (Some(IbusCheckState::Fail), _) | (_, Some(IbusCheckState::Fail)) => "fail",
+        (Some(IbusCheckState::Warn), _) | (_, Some(IbusCheckState::Warn)) => "warning",
+        (Some(IbusCheckState::Pass), Some(IbusCheckState::Pass)) => "pass",
+        _ => "unknown",
+    }
+}
+
 fn operational_checks(
     ibus: &wayexpand_backend_ibus::chain::IbusReadiness,
     daemon: Option<&serde_json::Value>,
@@ -420,7 +455,7 @@ fn operational_checks(
         "ibus_engine",
         if ibus_active { "pass" } else { "not_tested" },
         if ibus_active { "selected engine process is running; target text receipt/insertion remains a separate test" } else { "IBus engine activation has not been verified" },
-        serde_json::json!({"selected":ibus.selected,"engine_running":ibus.engine_running,"text_received":ibus.text_received,"expanded":ibus.expanded}),
+        serde_json::json!({"selected":ibus.selected,"engine_running":ibus.engine_running,"text_received":ibus.text_received,"output_emitted_unverified":ibus.output_emitted_unverified}),
     ));
     checks.push(readiness_check(
         "ibus_field_input",
@@ -458,14 +493,14 @@ fn operational_checks(
         }),
     ));
     checks.push(readiness_check(
-        "ibus_expansion",
-        if ibus.expanded { "pass" } else { "not_tested" },
-        if ibus.expanded {
-            "the IBus engine reports a committed expansion"
+        "ibus_output_emission",
+        if ibus.output_emitted_unverified { "submitted_unverified" } else { "not_tested" },
+        if ibus.output_emitted_unverified {
+            "IBus reports replacement signals emitted; the target application's resulting text is unknown"
         } else {
             "no IBus expansion has been observed; actual target insertion remains unverified"
         },
-        serde_json::json!({"expanded":ibus.expanded}),
+        serde_json::json!({"output_emitted_unverified":ibus.output_emitted_unverified,"target_application_verified":false}),
     ));
     let daemon_ready = daemon.is_some_and(|status| {
         crate::doctor::status::status_schema_compatible(status)
@@ -1309,6 +1344,70 @@ mod tests {
     }
 
     #[test]
+    fn ibus_registry_presence_does_not_override_an_unsafe_shared_manifest() {
+        use wayexpand_backend_ibus::chain::IbusCheckState;
+
+        assert_eq!(
+            ibus_registration_status(
+                true,
+                true,
+                Some(IbusCheckState::Pass),
+                Some(IbusCheckState::Fail),
+            ),
+            "fail"
+        );
+        assert_eq!(
+            ibus_registration_status(
+                true,
+                true,
+                Some(IbusCheckState::Pass),
+                Some(IbusCheckState::Unknown),
+            ),
+            "unknown"
+        );
+        assert_eq!(
+            ibus_registration_status(
+                true,
+                true,
+                Some(IbusCheckState::Pass),
+                Some(IbusCheckState::Pass),
+            ),
+            "pass"
+        );
+        assert_eq!(
+            ibus_registration_status(
+                true,
+                true,
+                Some(IbusCheckState::Fail),
+                Some(IbusCheckState::Pass),
+            ),
+            "fail"
+        );
+        assert_eq!(
+            ibus_registration_status(
+                false,
+                true,
+                Some(IbusCheckState::Pass),
+                Some(IbusCheckState::Pass),
+            ),
+            "unavailable"
+        );
+        assert_eq!(
+            ibus_registration_status(
+                true,
+                false,
+                Some(IbusCheckState::Pass),
+                Some(IbusCheckState::Pass),
+            ),
+            "unavailable"
+        );
+        assert_eq!(
+            ibus_registration_status(true, true, None, Some(IbusCheckState::Pass)),
+            "unknown"
+        );
+    }
+
+    #[test]
     fn setup_readiness_exposes_compositor_routing_failure_and_repair() {
         let report = wayexpand_backend_ibus::chain::IbusChainReport {
             desktop: wayexpand_backend_ibus::chain::IbusDesktop::KdeWayland,
@@ -1324,7 +1423,7 @@ mod tests {
                 wayexpand_backend_ibus::chain::IbusCheck {
                     id: "manifest-scope",
                     title: "Shared IBus registration is multi-user safe",
-                    state: wayexpand_backend_ibus::chain::IbusCheckState::Warn,
+                    state: wayexpand_backend_ibus::chain::IbusCheckState::Fail,
                     problem_id: Some("WX-IBUS-MULTIUSER-001"),
                     detail: "shared manifest points into a user home".into(),
                     fix: Some("install the shared engine".into()),
@@ -1349,7 +1448,7 @@ mod tests {
             .iter()
             .find(|check| check.component == "ibus_route:manifest-scope")
             .expect("shared IBus scope evidence should be included");
-        assert_eq!(manifest.status, "warning");
+        assert_eq!(manifest.status, "fail");
         assert_eq!(manifest.evidence["problem_id"], "WX-IBUS-MULTIUSER-001");
     }
 
@@ -1359,7 +1458,7 @@ mod tests {
             selected: true,
             engine_running: true,
             text_received: false,
-            expanded: false,
+            output_emitted_unverified: false,
             ..Default::default()
         };
 
@@ -1399,7 +1498,7 @@ mod tests {
         assert_eq!(
             checks
                 .iter()
-                .find(|check| check.component == "ibus_expansion")
+                .find(|check| check.component == "ibus_output_emission")
                 .unwrap()
                 .status,
             "not_tested"

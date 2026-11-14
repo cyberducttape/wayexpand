@@ -15,6 +15,8 @@ use super::status::{
 };
 use crate::*;
 
+pub(crate) const GNOME_APP_FILTER_SUPPORT_DETAIL: &str = "Focused-window tracking is provided by the KWin bridge on KDE Plasma and by the WayExpand GNOME Shell extension, which is runtime-gated on GNOME Shell 46, 50, and 51; filtered snippets fail closed when tracking is unavailable.";
+
 /// Stable, automation-friendly diagnostic output for service managers and
 /// fleet health checks. Probes are bounded and non-interactive; portal
 /// authorization and other state-changing checks are deliberately excluded.
@@ -69,25 +71,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         wayexpand_backend_selection::plan_routes(&live_capabilities, ibus_installed, |route| {
             wayexpand_backend_selection::route_allowed_by_policy(&policy, route)
         });
-    let ranked_routes: Vec<_> = route_plan
-        .routes
-        .iter()
-        .map(|planned| {
-            let contract = planned.contract;
-            serde_json::json!({
-                "id": contract.id,
-                "label": contract.label,
-                "standing": planned.standing.as_str(),
-                "reason": planned.reason,
-                "capture": contract.capture,
-                "injection": contract.injection,
-                "certification": contract.status,
-                "replacement_assurance": contract.replacement_assurance,
-                "sensitive_field_protection": contract.sensitive_field_support.certified,
-                "assessment": &planned.assessment,
-            })
-        })
-        .collect();
+    let ranked_routes: Vec<_> = route_plan.routes.iter().map(route_plan_entry).collect();
     let setup_recommendation = serde_json::json!({
         "mode": if recommendation.backend == "unavailable" { "none" } else if recommendation.backend == "evdev" { "maximum" } else { "recommended" },
         "backend": recommendation.backend,
@@ -262,11 +246,13 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "feature_support": {
                 "ime_preedit": {
                     "status": "unsupported",
-                    "detail": "Only committed text is processed; finish IME, dead-key, or Compose composition before typing a trigger.",
+                    "detail": "WayExpand does not observe another IME's active preedit. Finish the composition and wait for committed text before typing a trigger. Local dead-key/Compose tracking is route-specific and does not provide external IME awareness.",
+                    "remediation": "Commit or cancel the active composition, then type the trigger. For expansion during composition, use the IME's own phrase feature; composition-aware WayExpand integration is not available yet.",
+                    "committed_unicode": "Committed Unicode can be matched and inserted only when the selected capture and output route support that text and the target permits safe replacement. This does not imply active-preedit support or universal application coverage.",
                 },
                 "app_filter": {
                     "status": "kwin_or_gnome_extension",
-                    "detail": "Focused-window tracking is provided by the KWin bridge on KDE Plasma and by the WayExpand GNOME Shell extension (GNOME 45+) on GNOME; filtered snippets fail closed when tracking is unavailable.",
+                    "detail": GNOME_APP_FILTER_SUPPORT_DETAIL,
                 },
             },
             "policy": policy_json,
@@ -287,6 +273,25 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
     );
     Ok(healthy)
+}
+
+fn route_plan_entry(planned: &wayexpand_backend_selection::PlannedRoute) -> serde_json::Value {
+    let contract = planned.contract;
+    serde_json::json!({
+        "id": contract.id,
+        "label": contract.label,
+        "standing": planned.standing.as_str(),
+        "reason": planned.reason,
+        "capture": contract.capture,
+        "injection": contract.injection,
+        "certification": contract.status,
+        "trigger_precondition": contract.trigger_precondition,
+        "output_transaction": contract.output_transaction,
+        "application_result": contract.application_result,
+        "atomic_replace": contract.atomic_replace,
+        "sensitive_field_protection": contract.sensitive_field_support.certified,
+        "assessment": &planned.assessment,
+    })
 }
 
 pub(crate) fn selected_ibus_has_problem(route: &serde_json::Value) -> bool {
@@ -416,8 +421,49 @@ pub(crate) fn production_readiness(daemon: &serde_json::Value) -> serde_json::Va
 
 #[cfg(test)]
 mod tests {
-    use super::selected_ibus_has_problem;
+    use super::{route_plan_entry, selected_ibus_has_problem};
     use serde_json::json;
+
+    #[test]
+    fn doctor_route_contract_does_not_call_signal_emission_application_verification() {
+        let plan = wayexpand_backend_selection::plan_routes(
+            &wayexpand_backend_selection::Capabilities::default(),
+            true,
+            |_| true,
+        );
+        let ibus = plan
+            .routes
+            .iter()
+            .find(|route| route.contract.id == "ibus")
+            .expect("IBus route is present in the shared catalog");
+        let report = route_plan_entry(ibus);
+
+        assert_eq!(
+            report["trigger_precondition"],
+            "surrounding_text_matches_trigger"
+        );
+        assert_eq!(report["output_transaction"], "separate_delete_and_commit");
+        assert_eq!(report["application_result"], "unobservable");
+        assert_eq!(report["atomic_replace"], false);
+        assert!(report.get("replacement_assurance").is_none());
+        let contract: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/contracts/cli-json-shapes.json"
+        ))
+        .unwrap();
+        let expected = contract["doctor_route"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|field| field.as_str().unwrap().to_owned())
+            .collect::<std::collections::BTreeSet<_>>();
+        let actual = report
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn selected_ibus_route_problem_blocks_overall_health() {

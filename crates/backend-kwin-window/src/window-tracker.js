@@ -67,6 +67,8 @@ function sendPendingReport(generation) {
             report.appId,
             report.title,
             report.instanceId,
+            report.identitySource,
+            report.processId,
             function (accepted) {
                 if (generation !== pendingReportGeneration || pendingReportKey !== reportKey) {
                     return;
@@ -111,43 +113,91 @@ function startReconciliation() {
 
 function report(window) {
     var appId = "";
+    var identitySource = "unavailable";
     if (window) {
-        appId = window.resourceClass || "";
-        // Native Wayland windows may not expose an X11 resource class. KWin
-        // provides the owning desktop-file identity separately; use it only
-        // when resourceClass is absent so existing X11 IDs remain stable.
-        if (!appId) {
-            appId = window.desktopFileName || "";
-            var slash = appId.lastIndexOf("/");
-            if (slash >= 0) {
-                appId = appId.substring(slash + 1);
-            }
-            if (appId.toLowerCase().slice(-8) === ".desktop") {
-                appId = appId.slice(0, -8);
+        var resourceClass = window.resourceClass || "";
+        var normalizedClass = resourceClass.toLowerCase();
+        // Some KWin-owned Wayland windows expose the compositor executable as
+        // resourceClass instead of the application owning the text surface.
+        // It is not a usable application identity for matching terminal or
+        // browser allowlists. Prefer KWin's documented desktop-file identity
+        // for those windows; if it is absent, leave the app identity unknown
+        // rather than attributing the compositor to the focused client.
+        var classIsCompositor =
+            normalizedClass === "kwin_wayland" || normalizedClass === "kwin_x11";
+        var desktopFileName = window.desktopFileName || "";
+        var desktopIdentity = desktopFileName;
+        var desktopSlash = desktopIdentity.lastIndexOf("/");
+        if (desktopSlash >= 0) {
+            desktopIdentity = desktopIdentity.substring(desktopSlash + 1);
+        }
+        if (desktopIdentity.toLowerCase().slice(-8) === ".desktop") {
+            desktopIdentity = desktopIdentity.slice(0, -8);
+        }
+        var desktopIsCompositor =
+            desktopIdentity.toLowerCase() === "kwin_wayland" ||
+            desktopIdentity.toLowerCase() === "kwin_x11";
+        var identityIsCompositor = classIsCompositor || desktopIsCompositor;
+        if (!classIsCompositor) {
+            appId = resourceClass;
+            if (appId) {
+                identitySource = "resource-class";
             }
         }
-        // Some XWayland clients expose an empty resourceClass and no desktop
-        // file association, while still providing the other half of WM_CLASS.
-        // Use that stable window-manager identity as a last resort; never use
-        // the editable title as an application identity.
+        // Native Wayland windows may not expose an X11 resource class, and a
+        // compositor-owned class is not the app. KWin's desktopFileName is
+        // the owning application's desktop identity in either case. If that
+        // value names KWin itself, no client identity is available; do not
+        // fall through to resourceName or attribute the compositor to a
+        // focused terminal/browser.
         if (!appId) {
-            appId = window.resourceName || "";
+            if (!desktopIsCompositor) {
+                appId = desktopIdentity;
+                if (appId) {
+                    identitySource = "desktop-file-name";
+                }
+            }
+        }
+        // Some Wayland windows expose a compositor-owned resourceClass while
+        // resourceName still identifies the client. Accept that separate
+        // KWin window property only when it is itself not a compositor
+        // identity. Never use the editable title as an application identity.
+        var resourceName = window.resourceName || "";
+        var normalizedResourceName = resourceName.toLowerCase();
+        var resourceNameIsCompositor =
+            normalizedResourceName === "kwin_wayland" ||
+            normalizedResourceName === "kwin_x11";
+        if (!appId && resourceName && !resourceNameIsCompositor) {
+            appId = resourceName;
+            identitySource = "resource-name";
+        }
+        if (!appId && identityIsCompositor) {
+            identitySource = "compositor-identity-only";
         }
     }
     var title = window ? window.caption : "";
+    var processId = window && Number.isInteger(Number(window.pid)) && Number(window.pid) > 0
+        ? Number(window.pid)
+        : 0;
     // internalId is a compositor-issued identity for this exact KWin window.
     // It is intentionally kept separate from appId/title, which are not unique.
     var instanceId = window && window.internalId ? String(window.internalId) : "";
     // KWin may deliver the same transition through both workspace activation
     // and a window's activeChanged signal. Avoid duplicate D-Bus traffic.
-    var reportKey = JSON.stringify([appId, title, instanceId]);
+    var reportKey = JSON.stringify([appId, title, instanceId, processId]);
     if (reportKey === lastReportKey || reportKey === pendingReportKey) {
         return;
     }
     stopReportRetry();
     pendingReportGeneration += 1;
     pendingReportKey = reportKey;
-    pendingReport = { appId: appId, title: title, instanceId: instanceId };
+    pendingReport = {
+        appId: appId,
+        title: title,
+        instanceId: instanceId,
+        identitySource: identitySource,
+        processId: processId,
+    };
     pendingReportAttempts = 0;
     sendPendingReport(pendingReportGeneration);
 }
@@ -234,6 +284,6 @@ workspace.windowActivated.connect(function (window) {
 startReconciliation();
 report(currentActiveWindow());
 
-// Initial absence starts reconciliation through report(). It continues only
-// until KWin provides a window with an application identity; it does not infer
-// focus from stacking order, titles, or keyboard activity.
+// Reconciliation remains active for this script's lifetime, including when
+// KWin temporarily reports no focused window. It never infers focus from
+// stacking order, titles, or keyboard activity.

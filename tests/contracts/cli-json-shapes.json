@@ -6,6 +6,59 @@
   "preview": [
     "matched"
   ],
+  "backend_list": [
+    "schema_version",
+    "session",
+    "routes",
+    "production_certification_claimed"
+  ],
+  "backend_list_schema": 2,
+  "backend_list_route": [
+    "id",
+    "label",
+    "capture",
+    "injection",
+    "standing",
+    "reason",
+    "assessment",
+    "trigger_precondition",
+    "output_transaction",
+    "application_result",
+    "atomic_replace",
+    "sensitive_field_detection"
+  ],
+  "doctor_route": [
+    "id",
+    "label",
+    "standing",
+    "reason",
+    "capture",
+    "injection",
+    "certification",
+    "trigger_precondition",
+    "output_transaction",
+    "application_result",
+    "atomic_replace",
+    "sensitive_field_protection",
+    "assessment"
+  ],
+  "debug_focused_app": [
+    "focused_app_id",
+    "focused_process_executable",
+    "focused_process_name",
+    "daemon_status_schema",
+    "daemon_schema_compatible",
+    "capture_app_scope_state",
+    "terminal_apps_only",
+    "window_tracker_connected",
+    "window_context_available",
+    "window_app_id_available",
+    "window_process_executable_available",
+    "window_process_name_available",
+    "matching_status",
+    "problem_id",
+    "suggested_action"
+  ],
   "list": [
     "config",
     "count",
@@ -38,10 +91,17 @@
     "reason",
     "readiness",
     "errors",
+    "output_integrity",
     "application_coverage",
     "route_safety",
     "configuration",
     "daemon"
+  ],
+  "health_output_integrity": [
+    "state",
+    "uncertain_total",
+    "partial_total",
+    "review_required"
   ],
   "health_error": [
     "id",
@@ -68,6 +128,12 @@
     "output_health",
     "matching_available",
     "matching_unavailable_reason",
+    "backend_policy_blocked",
+    "window_tracker_connected",
+    "window_context_available",
+    "window_app_id_available",
+    "window_process_executable_available",
+    "window_process_name_available",
     "production_certified"
   ],
   "health_application_coverage": [
@@ -82,7 +148,18 @@
     "daemon_route",
     "detail"
   ],
-  "health_schema": 4,
+  "health_route_safety": [
+    "sensitive_field_signal",
+    "target_identity",
+    "window_identity",
+    "application_identity",
+    "replacement",
+    "compatibility_mode",
+    "production_certified",
+    "readiness",
+    "limitations"
+  ],
+  "health_schema": 8,
   "health_readiness": [
     "operational",
     "route_safety"
@@ -107,10 +184,11 @@
     "action_broker_availability_readiness",
     "target_integrity_readiness",
     "daemon_runtime",
+    "host_namespace_context",
     "healthy",
     "checks"
   ],
-  "doctor_security_schema": 11,
+  "doctor_security_schema": 12,
   "doctor_security_gates": [
     "execution_sandbox",
     "input_privacy",
@@ -159,6 +237,7 @@
     "capture_layout_aware",
     "capture_layout_state",
     "window_tracker_connected",
+    "window_process_identity_state",
     "window_identity_exact",
     "inject_atomic_replace",
     "inject_full_unicode",
@@ -175,6 +254,7 @@
     "hotkey_in_flight",
     "command_queue_rejected_total",
     "command_timeout_total",
+    "command_cancelled_total",
     "command_failure_total",
     "injection_latency_sample_count",
     "injection_latency_window_count",
@@ -205,6 +285,12 @@
     "clipboard_deadline_misses_total",
     "clipboard_read_max_duration_us",
     "output_health",
+    "output_interrupt_to_backend_return_sample_count",
+    "output_interrupt_to_backend_return_window_count",
+    "output_interrupt_to_backend_return_p50_us",
+    "output_interrupt_to_backend_return_p95_us",
+    "output_interrupt_to_backend_return_p99_us",
+    "output_interrupt_to_backend_return_dropped_total",
     "output_uncertain_total",
     "output_partial_total",
     "output_retiring_workers",
@@ -220,7 +306,9 @@
     "replacement_assurance",
     "output_reconnect_total",
     "input_reconnect_total",
+    "expansion_output_acknowledgements_total",
     "input_overflow_total",
+    "last_output_acknowledged_unix",
     "evdev_quarantined_events_total",
     "control_rejected_total",
     "memory_rss_kib",

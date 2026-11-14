@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {
+    AuthorizationAttempt,
     CancellableSources,
     clearTitleWatch,
     activeXkbSettings,
@@ -78,10 +79,59 @@ test('pending authorization reservations are deduplicated, bounded, and released
     assert.equal(reservations.size, 0);
 });
 
+test('slow D-Bus authorization replies remain pending and settle only once', () => {
+    const results = [];
+    const attempt = new AuthorizationAttempt(value => results.push(value));
+    assert.equal(attempt.active, true);
+    assert.deepEqual(results, [], 'the caller remains pending until the async reply arrives');
+    assert.equal(attempt.finish(true), true);
+    assert.equal(attempt.finish(false), false, 'duplicate/late replies are ignored');
+    assert.deepEqual(results, [true]);
+});
+
+test('a disappearing D-Bus client fails authorization closed', () => {
+    const results = [];
+    const attempt = new AuthorizationAttempt(value => results.push(value));
+    // GetConnectionUnixUser/GetConnectionUnixProcessID fail when a unique
+    // name disappears during lookup; the extension resolves that path false.
+    assert.equal(attempt.finish(false), true);
+    assert.deepEqual(results, [false]);
+});
+
+test('Shell shutdown cancels authorization and ignores a late successful reply', () => {
+    const results = [];
+    let cancelled = 0;
+    const attempt = new AuthorizationAttempt(value => results.push(value), () => cancelled++);
+    assert.equal(attempt.cancel(), true);
+    assert.equal(attempt.finish(true), false);
+    assert.equal(cancelled, 1, 'pending D-Bus calls are cancelled with the authorization attempt');
+    assert.deepEqual(results, []);
+    assert.match(extensionSource, /for \(const attempt of this\._authorizationAttempts\.values\(\)\)[\s\S]*?attempt\.cancel\(\)/);
+});
+
+test('unsubscribing and resubscribing the same peer cannot revive the old reply', () => {
+    const reservations = new SubscriptionReservations(2);
+    const oldResults = [];
+    const newResults = [];
+    assert.equal(reservations.reserve(':1.8', 0), true);
+    const oldAttempt = new AuthorizationAttempt(value => oldResults.push(value));
+    oldAttempt.cancel(); // Unsubscribe releases the sender reservation.
+    reservations.release(':1.8');
+    assert.equal(reservations.reserve(':1.8', 0), true);
+    const newAttempt = new AuthorizationAttempt(value => newResults.push(value));
+    assert.equal(newAttempt.finish(true), true);
+    assert.equal(oldAttempt.finish(true), false);
+    assert.deepEqual(oldResults, []);
+    assert.deepEqual(newResults, [true]);
+    assert.match(extensionSource, /this\._cancelAuthorization\(pending\)/);
+});
+
 test('GNOME Shell peer authorization uses asynchronous D-Bus calls', () => {
     assert.match(extensionSource, /GetConnectionUnixUser/);
     assert.match(extensionSource, /GetConnectionUnixProcessID/);
     assert.doesNotMatch(extensionSource, /\.call_sync\s*\(/);
+    assert.equal((extensionSource.match(/Gio\.DBusCallFlags\.NONE, 500, cancellable/g) || []).length, 3,
+        'each identity lookup has a finite timeout and shares the cancellable lifecycle');
 });
 
 test('every metadata and input-source control method authenticates its caller', () => {
@@ -101,6 +151,8 @@ test('every metadata and input-source control method authenticates its caller', 
     assert.match(extensionSource, /MAX_PENDING_AUTHORIZATIONS = 8/);
     assert.match(extensionSource, /this\._authorizationReservations\.reserve\(sender, 0\)/);
     assert.match(extensionSource, /this\._pendingAuthorizedCalls\.clear\(\)/);
+    assert.match(extensionSource, /this\._authorizationAttempts\.set\(invocation, authorization\)/);
+    assert.match(extensionSource, /_cancelAuthorization\(invocation\)/);
 });
 
 test('title access is opt-in per request and can be revoked on an active subscription', () => {

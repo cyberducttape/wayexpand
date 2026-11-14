@@ -47,18 +47,88 @@ function lastIdentity() {
   return Array.from(reports.at(-1).slice(4, 7));
 }
 
+function lastIdentitySource() {
+  return reports.at(-1)[7];
+}
+
+function lastProcessId() {
+  return reports.at(-1)[8];
+}
+
 activated({
   resourceClass: "org.example.Class",
   desktopFileName: "org.example.Desktop",
   resourceName: "example-resource",
   caption: "Private document title",
   internalId: "window-1",
+  pid: process.pid,
 });
 assert.deepEqual(lastIdentity(), [
   "org.example.Class",
   "Private document title",
   "window-1",
 ]);
+assert.equal(lastIdentitySource(), "resource-class");
+assert.equal(lastProcessId(), process.pid, "authenticated focus report includes KWin's window PID");
+
+activated({
+  resourceClass: "kwin_wayland",
+  desktopFileName: "/usr/share/applications/org.kde.konsole.desktop",
+  resourceName: "kwin_wayland",
+  caption: "Terminal title",
+  internalId: "window-kwin-class",
+  pid: process.pid,
+});
+assert.deepEqual(
+  lastIdentity(),
+  ["org.kde.konsole", "Terminal title", "window-kwin-class"],
+  "a compositor resource class must use KWin's owning desktop-file identity",
+);
+assert.equal(lastIdentitySource(), "desktop-file-name");
+
+activated({
+  resourceClass: "kwin_wayland",
+  desktopFileName: "",
+  resourceName: "kwin_wayland",
+  caption: "Compositor-owned window",
+  internalId: "window-kwin-unknown",
+  pid: process.pid,
+});
+assert.deepEqual(
+  lastIdentity(),
+  ["", "Compositor-owned window", "window-kwin-unknown"],
+  "a compositor identity without an owning desktop ID must fail closed",
+);
+assert.equal(lastIdentitySource(), "compositor-identity-only");
+
+activated({
+  resourceClass: "kwin_wayland",
+  desktopFileName: "",
+  resourceName: "org.kde.konsole",
+  caption: "Terminal title",
+  internalId: "window-kwin-resource-name",
+  pid: process.pid,
+});
+assert.deepEqual(
+  lastIdentity(), ["org.kde.konsole", "Terminal title", "window-kwin-resource-name"],
+  "a client resource name can identify a window when KWin's class is compositor-owned",
+);
+assert.equal(lastIdentitySource(), "resource-name");
+
+activated({
+  resourceClass: "kwin_wayland",
+  desktopFileName: "/usr/share/applications/kwin_wayland.desktop",
+  resourceName: "kwin_wayland",
+  caption: "Wayland window",
+  internalId: "window-kwin-desktop",
+  pid: process.pid,
+});
+assert.deepEqual(
+  lastIdentity(),
+  ["", "Wayland window", "window-kwin-desktop"],
+  "a KWin desktop-file identity must not be reported as the focused application",
+);
+assert.equal(lastIdentitySource(), "compositor-identity-only");
 
 activated({
   resourceClass: "",
@@ -66,12 +136,14 @@ activated({
   resourceName: "example-resource",
   caption: "Private document title",
   internalId: "window-2",
+  pid: process.pid,
 });
 assert.deepEqual(lastIdentity(), [
   "org.example.App",
   "Private document title",
   "window-2",
 ]);
+assert.equal(lastIdentitySource(), "desktop-file-name");
 
 activated({
   resourceClass: "",
@@ -79,12 +151,14 @@ activated({
   resourceName: "example-resource",
   caption: "Private document title",
   internalId: "window-3",
+  pid: process.pid,
 });
 assert.deepEqual(lastIdentity(), [
   "example-resource",
   "Private document title",
   "window-3",
 ]);
+assert.equal(lastIdentitySource(), "resource-name");
 
 activated({
   resourceClass: "",
@@ -92,12 +166,14 @@ activated({
   resourceName: "",
   caption: "Private document title",
   internalId: "window-4",
+  pid: process.pid,
 });
 assert.deepEqual(lastIdentity(), [
   "",
   "Private document title",
   "window-4",
 ]);
+assert.equal(lastIdentitySource(), "unavailable");
 
 assert.equal(typeof windowAdded, "function", "tracker watches new windows");
 assert.equal(typeof windowRemoved, "function", "tracker forgets removed windows");
@@ -108,6 +184,7 @@ const changedWindow = {
   resourceName: "focus-fallback",
   caption: "Focus fallback test",
   internalId: "window-5",
+  pid: process.pid,
   active: false,
   activeChanged: {
     connect(callback) {
@@ -128,6 +205,7 @@ assert.deepEqual(lastIdentity(), [
   "Focus fallback test",
   "window-5",
 ]);
+assert.equal(lastIdentitySource(), "resource-class");
 
 const afterWindowSignal = reports.length;
 activated(changedWindow);
@@ -151,6 +229,7 @@ const alreadyActiveWindow = {
   resourceName: "already-active",
   caption: "Active when added",
   internalId: "window-already-active",
+  pid: process.pid,
   active: true,
   activeChanged: {
     connect(callback) {
@@ -177,6 +256,7 @@ const startupActiveWindow = {
   resourceName: "startup-focus",
   caption: "Startup focus test",
   internalId: "window-startup-active",
+  pid: process.pid,
   active: true,
   activeChanged: { connect() {} },
 };

@@ -276,15 +276,18 @@ the collector with `--format json` and a validated results file:
 
 ```sh
 scripts/certify-compositor.sh --format json --compositor kde \
-  --version 6.6.2 --backend input-method-v2 \
+  --version 6.6.2 --backend ibus \
   --layout us,de,fr,altgr,multi-layout-switching \
   --target-apps gtk4-demo,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit \
   --client-versions "$WAYEXPAND_CERTIFICATION_CLIENT_VERSIONS" \
   --results kde-results.txt --output kde-certification.json
 ```
 
-That record is distinct from the CLI preflight: it includes the exact session
-metadata and one result for every scenario × layout × client cell. Schema 4
+That command records a compatibility run, not production certification: KDE's
+matrix currently does not declare `input-method-v2` as a route, and IBus is
+not production-eligible. The record is distinct from the CLI preflight: it
+includes the session metadata and one result for every scenario × layout ×
+client cell. Schema 5
 separates `certified` from `certification_scope`: a compatibility run can pass
 every scenario and report `certified: true` with scope `compatibility`, but
 only scope `production` can satisfy the release gate. Production scope also
@@ -313,6 +316,17 @@ looks like this (the full map must contain every target application):
   }
 }
 ```
+
+When a target is marked production-required, a Wayland session label is not
+enough: headless compositor sessions also report `XDG_SESSION_TYPE=wayland`.
+The operator must additionally provide `--physical-keyboard MODEL`,
+`--physical-evidence-ref REF`, `--physical-input-confirmed`, and
+`--reviewed-by NAME`. These fields record an accountable human attestation;
+they do not machine-prove that hardware was used. The referenced evidence must
+be independently reviewed and must cover physical input, overlapping typing,
+focus changes, sensitive fields, and the declared application/layout matrix.
+Do not attach recordings or logs containing typed text or snippet contents to
+public evidence artifacts.
 
 `status` reports scenario completeness (`certified`, `incomplete`, or `failed`);
 `certification_scope` reports compatibility or production evidence.
@@ -354,20 +368,30 @@ certification is incomplete or failed. Automation must inspect
 pass is not a production pass. The JSON artifact remains available for upload
 and review after a nonzero exit.
 
-The compositor evidence collector emits schema version 4, where each entry in
+The compositor evidence collector emits schema version 5, where each entry in
 `scenarios` is an individual scenario × layout × client result. It records the
 kernel release, CLI binary SHA-256, and exact client/toolkit version map.
 Reports without complete client/toolkit version metadata cannot be certified.
 Scenario-only schema-1 artifacts do not prove this expanded matrix.
+The support-matrix generator accepts only schema-5 production evidence for
+`input-method-v2`, requires every declared scenario × layout × client cell
+exactly once and passing, verifies client-version metadata, and checks the
+doctor, desktop, backend, status, and declared Wayland-session probes. The
+release workflow refuses to run production-required certification from a
+non-Wayland session. This keeps the published certification table aligned
+with the collector's current evidence contract.
 The artifact also carries `out_of_scope_capabilities`; these are explicit
 product boundaries, not untested passing scenarios. The committed-text
 composition scenarios exercise expansion after the user completes composition.
 
-The KDE self-hosted workflow also runs the live KWin tracker lifecycle test,
-which requires a non-empty compositor-issued identity for the focused window,
-rejects an untrusted D-Bus focus event, and detects when its own temporary KWin
-script is unloaded. This is a focused backend integration check, not a typing
-or end-to-end certification result.
+The KDE self-hosted workflow runs two independent live KWin checks. The tracker
+lifecycle test requires a non-empty compositor-issued identity for the focused
+window, rejects an untrusted D-Bus focus event, and detects when its own
+temporary KWin script is unloaded. The application-identity test separately
+requires KWin metadata or verified same-user executable identity for the
+focused application. Keeping these gates separate distinguishes tracker
+availability from the host's ability to provide a usable application identity.
+Neither check is a typing or end-to-end certification result.
 The workflow still expects a compositor-specific executable driver configured
 by the runner. Fake-driver contract tests verify orchestration only and are
 not compositor evidence. Until real driver implementations run and reviewed

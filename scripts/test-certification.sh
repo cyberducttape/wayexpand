@@ -5,6 +5,20 @@ project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certification-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
 command -v jq >/dev/null 2>&1
+. "$project_dir/scripts/certification-attestation.sh"
+if wayexpand_physical_session_attestation_valid false 1 true keyboard evidence reviewer \
+    || wayexpand_physical_session_attestation_valid true 0 true keyboard evidence reviewer \
+    || wayexpand_physical_session_attestation_valid true 1 false keyboard evidence reviewer \
+    || wayexpand_physical_session_attestation_valid true 1 true '' evidence reviewer \
+    || wayexpand_physical_session_attestation_valid true 1 true '   ' evidence reviewer \
+    || wayexpand_physical_session_attestation_valid true 1 true keyboard '' reviewer \
+    || wayexpand_physical_session_attestation_valid true 1 true keyboard evidence '  ' \
+    || wayexpand_physical_session_attestation_valid true 1 true keyboard evidence ''; then
+    printf '%s\n' 'physical-session attestation accepted an incomplete production record' >&2
+    exit 1
+fi
+wayexpand_physical_session_attestation_valid true 1 true \
+    'USB keyboard model' 'reviewed://CERT-123/evidence' 'release-reviewer'
 matrix="$project_dir/tests/certification/compositor-matrix.json"
 status_schema=$(jq -er '.daemon_control_schema | select(type == "number" and . > 0)' \
     "$project_dir/tests/contracts/status-json.json")
@@ -98,7 +112,7 @@ if run_certification --format json --results "$results" --output "$json_output";
     exit 1
 fi
 jq -e --argjson expected_cases "$expected_cases" '
-    .schema == 4 and .certified == false and .status == "incomplete" and
+    .schema == 5 and .certified == false and .status == "incomplete" and
     .certification_scope == "compatibility" and .production_eligible == false and
     .production_certification_required == false and
     .backend_certification_eligible == false and
@@ -356,7 +370,7 @@ if run_certification --format json --results "$missing" --output "$missing_json"
     printf '%s\n' 'JSON certification accepted an incomplete results file' >&2
     exit 1
 fi
-jq -e --argjson cases "$expected_cases" '.schema == 4 and .certified == false and .status == "incomplete" and .certification_scope == "compatibility" and ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and ([.scenarios[] | select(.result == "UNVERIFIED")] | length == 1) and (.scenarios | length == $cases)' "$missing_json" >/dev/null
+jq -e --argjson cases "$expected_cases" '.schema == 5 and .certified == false and .status == "incomplete" and .certification_scope == "compatibility" and ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and ([.scenarios[] | select(.result == "UNVERIFIED")] | length == 1) and (.scenarios | length == $cases)' "$missing_json" >/dev/null
 
 failed="$test_root/failed.txt"
 sed '1s/=pass$/=fail/' "$results" >"$failed"
@@ -472,7 +486,7 @@ XDG_CURRENT_DESKTOP=GNOME PATH="$project_dir/target/debug:$PATH" \
     --cli "$gnome_cli" --format json \
     --results "$gnome_results" --output "$gnome_json"
 jq -e '
-    .schema == 4 and .certified == true and .status == "certified" and
+    .schema == 5 and .certified == true and .status == "certified" and
     .certification_scope == "compatibility" and
     .production_eligible == false and
     .production_certification_required == false and
@@ -496,16 +510,19 @@ EOF
 chmod 0755 "$sway_cli"
 set_status_schema "$sway_cli"
 sway_json="$test_root/sway-certification.json"
-XDG_CURRENT_DESKTOP='Sway/wlroots' PATH="$project_dir/target/debug:$PATH" \
+XDG_CURRENT_DESKTOP='Sway/wlroots' XDG_SESSION_TYPE=unknown \
+    PATH="$project_dir/target/debug:$PATH" \
     "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor sway --version 1.10 --backend input-method-v2 \
     --layout "$layout_profiles" --target-apps "$target_apps" \
     --client-versions "$client_versions" --cli "$sway_cli" \
     --results "$results" --output "$sway_json"
 jq -e '
-    .schema == 4 and .certified == true and .status_probe_valid == true and
+    .schema == 5 and .certified == true and .status_probe_valid == true and
     .production_eligible == true and .certification_scope == "compatibility" and
-    .backend_probe_valid == true and .backend_certification_eligible == true
+    .backend_probe_valid == true and .backend_certification_eligible == true and
+    .expected_session == "wayland" and .session == "unknown" and
+    .session_probe_valid == false
 ' "$sway_json" >/dev/null
 
 printf '%s\n' 'certification contract test passed'

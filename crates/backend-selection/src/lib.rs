@@ -878,6 +878,41 @@ mod tests {
     }
 
     #[test]
+    fn route_catalog_separates_trigger_checks_from_delivery_and_application_result() {
+        for route in catalog_for_tests() {
+            assert_eq!(route.application_result, "unobservable", "{}", route.id);
+            assert_eq!(
+                route.atomic_replace,
+                route.output_transaction == "atomic_protocol_batch",
+                "{} atomic flag disagrees with its output transaction",
+                route.id
+            );
+        }
+
+        let ibus = catalog_for_tests()
+            .iter()
+            .find(|route| route.id == "ibus")
+            .unwrap();
+        assert_eq!(
+            ibus.trigger_precondition,
+            "surrounding_text_matches_trigger"
+        );
+        assert_eq!(ibus.output_transaction, "separate_delete_and_commit");
+        assert!(!ibus.atomic_replace);
+
+        let input_method = catalog_for_tests()
+            .iter()
+            .find(|route| route.id == "input-method-v2")
+            .unwrap();
+        assert_eq!(
+            input_method.trigger_precondition,
+            "surrounding_text_matches_trigger"
+        );
+        assert_eq!(input_method.output_transaction, "atomic_protocol_batch");
+        assert_eq!(input_method.application_result, "unobservable");
+    }
+
+    #[test]
     fn daemon_route_status_resolves_through_the_shared_contract() {
         let contract = route_contract_for("input-method", "input-method-v2").unwrap();
         assert_eq!(contract.id, "input-method-v2");

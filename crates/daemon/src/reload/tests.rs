@@ -43,6 +43,70 @@ fn command_config_text(replacement: &str) -> String {
     )
 }
 
+#[test]
+fn reload_admission_exhaustively_rejects_stale_path_and_source_snapshots() {
+    // Exercise every independent mismatch at the production promotion gate:
+    // requested path, file stamp, and fleet signature. A successful build is
+    // admitted using the snapshot it read; a failed build is applied only if
+    // the request's original snapshot remains current.
+    for path_matches in [false, true] {
+        for requested_stamp_matches in [false, true] {
+            for built_stamp_matches in [false, true] {
+                for requested_fleet_matches in [false, true] {
+                    for built_fleet_matches in [false, true] {
+                        let requested_stamp = 1_u8;
+                        let current_stamp = if requested_stamp_matches { 1 } else { 2 };
+                        let built_stamp = if built_stamp_matches {
+                            current_stamp
+                        } else if current_stamp == 1 {
+                            2
+                        } else {
+                            1
+                        };
+                        let requested_fleet = 11_u64;
+                        let current_fleet = if requested_fleet_matches { 11 } else { 12 };
+                        let built_fleet = if built_fleet_matches {
+                            current_fleet
+                        } else if current_fleet == 11 {
+                            12
+                        } else {
+                            11
+                        };
+
+                        let successful_build_is_admitted = reload_snapshot_is_current(
+                            path_matches,
+                            &requested_stamp,
+                            &current_stamp,
+                            requested_fleet,
+                            current_fleet,
+                            Some((&built_stamp, built_fleet)),
+                        );
+                        assert_eq!(
+                            successful_build_is_admitted,
+                            path_matches && built_stamp_matches && built_fleet_matches,
+                            "successful-build admission must match the built snapshot"
+                        );
+
+                        let failed_build_is_admitted = reload_snapshot_is_current::<u8>(
+                            path_matches,
+                            &requested_stamp,
+                            &current_stamp,
+                            requested_fleet,
+                            current_fleet,
+                            None,
+                        );
+                        assert_eq!(
+                            failed_build_is_admitted,
+                            path_matches && requested_stamp_matches && requested_fleet_matches,
+                            "failed-build reporting must belong to the still-current request"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn wait_for_command_workers(config: &mut ReloadableConfig) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while !config.engine.async_commands_enabled() {
@@ -291,6 +355,54 @@ fn valid_reload_replaces_active_engine() {
         .pop()
         .unwrap();
     assert_eq!(result.insert, "new replacement");
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn reload_enforcing_unavailable_route_capability_disables_expansion_until_policy_relaxes() {
+    use wayexpand_core::{InjectorCapabilities, InputSourceCapabilities};
+
+    let path = temporary_config();
+    write_config(&path, &config_text("old"));
+    let mut config =
+        ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+    config.set_route_capabilities(
+        InjectorCapabilities::default(),
+        InputSourceCapabilities::default(),
+    );
+    assert!(config
+        .engine
+        .process(InputEvent::Text(":".into()))
+        .is_empty());
+
+    // A restrictive embedded policy arrives through the ordinary reload path.
+    // The route is non-atomic, so even explicit compatibility consent cannot
+    // make it satisfy this new organization requirement.
+    write_config(
+        &path,
+        "[settings]\ncompatibility_mode = \"tracked-focus\"\n[organization]\nsafe_mode = true\nrequire_atomic_replace = true\n[[expansion]]\ntrigger = \":x\"\nreplacement = \"restricted\"\n",
+    );
+    config.reload_now();
+    config.finish_pending_reload();
+    assert!(config.healthy());
+    assert!(config.engine.backend_policy_blocked());
+    assert!(config
+        .engine
+        .process(InputEvent::Text("x".into()))
+        .is_empty());
+
+    // The block is derived from the effective policy and route contract, so a
+    // later valid policy relaxation clears it on the next atomic promotion.
+    write_config(&path, &config_text("available again"));
+    config.reload_now();
+    config.finish_pending_reload();
+    assert!(!config.engine.backend_policy_blocked());
+    let result = config
+        .engine
+        .process(InputEvent::Text(":x".into()))
+        .pop()
+        .unwrap();
+    assert_eq!(result.insert, "available again");
     let _ = fs::remove_file(path);
 }
 
@@ -824,10 +936,16 @@ fn integrity_fallback_detects_changes_when_no_watch_event_arrives() {
 
 #[test]
 fn reload_while_a_command_runs_drops_its_result_and_keeps_typing_working() {
-    let slow = "[[expansion]]\ntrigger = \":slow\"\nreplacement = \"\"\n\
-                [expansion.command]\nprogram = \"/bin/sh\"\n\
-                args = [\"-c\", \"sleep 0.3; printf command-output\"]\ntimeout_ms = 2000\n";
     let path = temporary_config();
+    let release_child = path.with_extension("release-child");
+    let child_side_effect = path.with_extension("child-side-effect");
+    let release_child_arg = release_child.display();
+    let child_side_effect_arg = child_side_effect.display();
+    let slow = format!(
+        "[[expansion]]\ntrigger = \":slow\"\nreplacement = \"\"\n\
+         [expansion.command]\nprogram = \"/bin/sh\"\n\
+         args = [\"-c\", \"while [ ! -e {release_child_arg} ]; do sleep 0.01; done; printf command-output; printf side-effect > {child_side_effect_arg}\"]\ntimeout_ms = 5000\n"
+    );
     write_config(&path, &format!("{slow}{}", config_text("before")));
     let mut config =
         ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
@@ -854,16 +972,18 @@ fn reload_while_a_command_runs_drops_its_result_and_keeps_typing_working() {
     assert_eq!(typed.len(), 1);
     assert_eq!(typed[0].insert, "after");
 
-    // The old engine's command must never deliver into the new engine.
-    let quiet = std::time::Instant::now() + Duration::from_millis(600);
-    while std::time::Instant::now() < quiet {
-        config.retry_async_workers();
-        assert!(config.engine.drain_completed_commands().is_empty());
-        std::thread::sleep(Duration::from_millis(20));
-    }
-
-    // The reloaded engine still runs commands.
+    // The new worker pool is not enabled until the old engine has shut down.
+    // That gives the test a synchronization point proving the old process
+    // supervisor has observed cancellation before its side effect is released.
     wait_for_command_workers(&mut config);
+    assert!(
+        !child_side_effect.exists(),
+        "the retired command process survived reload and performed its delayed side effect"
+    );
+    assert!(config.engine.drain_completed_commands().is_empty());
+
+    // The reloaded engine still runs commands once the test releases its child.
+    fs::write(&release_child, "release").unwrap();
     assert!(config
         .engine
         .process(InputEvent::Text(":slow".into()))
@@ -880,6 +1000,8 @@ fn reload_while_a_command_runs_drops_its_result_and_keeps_typing_working() {
         std::thread::sleep(Duration::from_millis(10));
     };
     assert_eq!(completed.insert, "command-output");
+    let _ = fs::remove_file(release_child);
+    let _ = fs::remove_file(child_side_effect);
     let _ = fs::remove_file(path);
 }
 

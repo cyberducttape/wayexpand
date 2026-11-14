@@ -6,6 +6,7 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+. "$project_dir/scripts/certification-attestation.sh"
 matrix="$project_dir/tests/certification/compositor-matrix.json"
 command -v jq >/dev/null 2>&1 || {
     printf '%s\n' 'error: jq is required to validate the certification matrix' >&2
@@ -22,6 +23,10 @@ backend=
 keyboard_layout=
 target_apps=
 client_versions=
+physical_keyboard=
+physical_evidence_ref=
+reviewed_by=
+physical_input_confirmed=false
 output="certification-$(date -u +%Y%m%dT%H%M%SZ).md"
 format=markdown
 results_file=
@@ -34,12 +39,16 @@ while [ "$#" -gt 0 ]; do
         --layout) keyboard_layout=${2:?missing value for --layout}; shift 2 ;;
         --target-apps) target_apps=${2:?missing value for --target-apps}; shift 2 ;;
         --client-versions) client_versions=${2:?missing value for --client-versions}; shift 2 ;;
+        --physical-keyboard) physical_keyboard=${2:?missing value for --physical-keyboard}; shift 2 ;;
+        --physical-evidence-ref) physical_evidence_ref=${2:?missing value for --physical-evidence-ref}; shift 2 ;;
+        --reviewed-by) reviewed_by=${2:?missing value for --reviewed-by}; shift 2 ;;
+        --physical-input-confirmed) physical_input_confirmed=true; shift ;;
         --output) output=${2:?missing value for --output}; shift 2 ;;
         --format) format=${2:?missing value for --format}; shift 2 ;;
         --results) results_file=${2:?missing value for --results}; shift 2 ;;
         --cli) cli=${2:?missing value for --cli}; shift 2 ;;
         --help|-h)
-            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS --client-versions JSON [--cli PATH] [--format markdown|json] [--output FILE] [--results FILE]"
+            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS --client-versions JSON [--physical-keyboard MODEL --physical-evidence-ref REF --physical-input-confirmed --reviewed-by NAME] [--cli PATH] [--format markdown|json] [--output FILE] [--results FILE]"
             printf '%s\n' 'client versions: JSON object keyed by every target app, each with application_version, toolkit_name, and toolkit_version strings'
             printf '%s\n' "results format: one SCENARIO|LAYOUT|CLIENT=pass|fail|unsupported-by-design|UNVERIFIED entry per line"
             exit 0
@@ -214,6 +223,23 @@ fi
 doctor_json=$(cat "$tmp/doctor.json")
 expected_desktop=$(jq -er --arg compositor "$compositor" \
     '.targets[] | select(.id == $compositor) | .detected_desktop' "$matrix")
+expected_session=$(jq -er --arg compositor "$compositor" \
+    '.targets[] | select(.id == $compositor) | .certification_session' "$matrix")
+session=${XDG_SESSION_TYPE:-unknown}
+session_probe_valid=0
+[ "$session" = "$expected_session" ] && session_probe_valid=1
+# Production evidence is an explicitly reviewed physical-session record.
+# The host's Wayland session type alone cannot distinguish a real desktop from
+# the project's headless compositor fixtures.
+physical_session_kind=unverified
+physical_session_attestation_valid=false
+if wayexpand_physical_session_attestation_valid \
+    "$production_certification_required" "$session_probe_valid" \
+    "$physical_input_confirmed" "$physical_keyboard" \
+    "$physical_evidence_ref" "$reviewed_by"; then
+    physical_session_kind=physical-wayland-session
+    physical_session_attestation_valid=true
+fi
 if wayexpand_version=$(printf '%s' "$doctor_json" | jq -r '.wayexpand_version // "unknown"' 2>/dev/null); then
     :
 else
@@ -371,13 +397,19 @@ certified=false
 [ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] \
     && [ "$desktop_probe_valid" -eq 1 ] && [ "$backend_probe_valid" -eq 1 ] \
     && [ "$backend_certification_eligible" = true ] && [ "$client_versions_valid" -eq 1 ] \
-    && { [ "$status_required" = false ] || [ "$status_probe_valid" -eq 1 ]; } && certified=true
+    && { [ "$status_required" = false ] || [ "$status_probe_valid" -eq 1 ]; } \
+    && { [ "$production_certification_required" = false ] || [ "$physical_session_attestation_valid" = true ]; } \
+    && certified=true
 certification_scope=compatibility
 if [ "$production_certification_required" = true ] && [ "$production_eligible" = true ]; then
     certification_scope=production
 fi
 [ "$doctor_probe_valid" -eq 1 ] || complete=0
 if [ "$status_required" = true ] && [ "$status_probe_valid" -ne 1 ]; then
+    complete=0
+fi
+if [ "$production_certification_required" = true ] \
+    && { [ "$session_probe_valid" -ne 1 ] || [ "$physical_session_attestation_valid" != true ]; }; then
     complete=0
 fi
 certification_status=incomplete
@@ -398,10 +430,16 @@ if [ "$format" = json ]; then
         --arg wayexpand_commit "$wayexpand_commit" \
         --arg compositor "$compositor" \
         --arg compositor_version "$compositor_version" \
+        --arg session_kind "$physical_session_kind" \
+        --arg physical_keyboard "$physical_keyboard" \
+        --arg physical_evidence_ref "$physical_evidence_ref" \
+        --arg reviewed_by "$reviewed_by" \
         --arg kernel_release "$kernel_release" \
         --arg cli_binary_sha256 "$cli_binary_sha256" \
         --arg expected_desktop "$expected_desktop" \
         --arg detected_desktop "$detected_desktop" \
+        --arg expected_session "$expected_session" \
+        --arg session "$session" \
         --arg backend "$backend" \
         --arg keyboard_layout "$keyboard_layout" \
         --arg desktop "${XDG_CURRENT_DESKTOP:-unknown}" \
@@ -421,6 +459,9 @@ if [ "$format" = json ]; then
         --argjson doctor_exit "$doctor_status" \
         --argjson doctor_probe_valid "$doctor_probe_valid" \
         --argjson desktop_probe_valid "$desktop_probe_valid" \
+        --argjson session_probe_valid "$session_probe_valid" \
+        --argjson physical_input_confirmed "$physical_input_confirmed" \
+        --argjson physical_session_attestation_valid "$physical_session_attestation_valid" \
         --argjson status_probe_valid "$status_probe_valid" \
         --argjson status_required "$status_required" \
         --argjson backend_probe_valid "$backend_probe_valid" \
@@ -431,11 +472,19 @@ if [ "$format" = json ]; then
         --arg production_eligible "$production_eligible" \
         --arg production_certification_required "$production_certification_required" \
         --arg certification_scope "$certification_scope" \
-        '{schema: 4, certified: $certified,
+        '{schema: 5, certified: $certified,
           wayexpand_version: $wayexpand_version, wayexpand_commit: $wayexpand_commit,
           compositor: $compositor,
           expected_desktop: $expected_desktop,
           detected_desktop: $detected_desktop,
+          expected_session: $expected_session,
+          session: $session,
+          session_kind: $session_kind,
+          physical_keyboard: $physical_keyboard,
+          physical_evidence_ref: $physical_evidence_ref,
+          physical_input_observed: $physical_input_confirmed,
+          physical_session_attestation_valid: $physical_session_attestation_valid,
+          reviewed_by: $reviewed_by,
           status: $certification_status,
           certification_scope: $certification_scope,
           kernel_release: $kernel_release,
@@ -455,6 +504,7 @@ if [ "$format" = json ]; then
           doctor_exit: $doctor_exit,
           doctor_probe_valid: ($doctor_probe_valid == 1),
           desktop_probe_valid: ($desktop_probe_valid == 1),
+          session_probe_valid: ($session_probe_valid == 1),
           status_probe_valid: ($status_probe_valid == 1),
           status_required: $status_required,
           backend_probe_valid: ($backend_probe_valid == 1),
@@ -472,6 +522,14 @@ else
     printf '%s\n' "- cli_binary_sha256: $cli_binary_sha256"
     printf '%s\n' "- expected_desktop: $expected_desktop"
     printf '%s\n' "- detected_desktop: $detected_desktop"
+    printf '%s\n' "- expected_session: $expected_session"
+    printf '%s\n' "- session: $session"
+    printf '%s\n' "- session_probe_valid: $session_probe_valid"
+    printf '%s\n' "- session_kind: $physical_session_kind"
+    printf '%s\n' "- physical_keyboard: ${physical_keyboard:-UNVERIFIED}"
+    printf '%s\n' "- physical_evidence_ref: ${physical_evidence_ref:-UNVERIFIED}"
+    printf '%s\n' "- physical_input_observed: $physical_input_confirmed"
+    printf '%s\n' "- reviewed_by: ${reviewed_by:-UNVERIFIED}"
     printf '%s\n' "- backend: $backend"
     printf '%s\n' "- certification_scope: $certification_scope"
     printf '%s\n' "- production_eligible: $production_eligible"
@@ -519,6 +577,12 @@ if [ "$certified" != true ]; then
         printf '%s\n' "certification remains incomplete: $backend_certification_block_reason" >&2
     elif [ "$doctor_probe_valid" -eq 0 ]; then
         printf '%s\n' "certification remains incomplete: doctor evidence is invalid or does not identify the requested compositor" >&2
+    elif [ "$production_certification_required" = true ] \
+        && [ "$session_probe_valid" -ne 1 ]; then
+        printf '%s\n' "certification remains incomplete: the active session is not the required $expected_session session" >&2
+    elif [ "$production_certification_required" = true ] \
+        && [ "$physical_session_attestation_valid" != true ]; then
+        printf '%s\n' 'certification remains incomplete: production evidence requires --physical-keyboard, --physical-evidence-ref, --physical-input-confirmed, and --reviewed-by' >&2
     else
         if [ "$client_versions_valid" -ne 1 ]; then
             printf '%s\n' 'certification remains incomplete: provide exact application and toolkit versions for every target client' >&2

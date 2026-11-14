@@ -6,6 +6,7 @@ use crate::*;
 pub(crate) struct StatusPublisher {
     last: Option<StatusSnapshot>,
     last_reactor_refresh: Option<std::time::Instant>,
+    backend_policy_blocked: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -23,9 +24,16 @@ pub(crate) struct StatusSnapshot {
     injection_capabilities: InjectorCapabilities,
     window_tracker_connected: bool,
     window_identity_exact: bool,
+    backend_policy_blocked: bool,
 }
 
 impl StatusPublisher {
+    pub(crate) fn update_backend_policy_blocked(&mut self, blocked: bool) -> bool {
+        let changed = self.backend_policy_blocked != blocked;
+        self.backend_policy_blocked = blocked;
+        changed
+    }
+
     /// Limit diagnostic serialization on ordinary reactor turns. State
     /// transitions and output reconnect paths still publish immediately via
     /// `publish`; this cadence only applies to the periodic refresh.
@@ -75,6 +83,7 @@ impl StatusPublisher {
             injection_capabilities,
             window_tracker_connected,
             window_identity_exact: control.focus_snapshot().exact_window_identity,
+            backend_policy_blocked: self.backend_policy_blocked,
         };
         // Always rebuild the body: other paths (output reconnect, input-method
         // pass-through setup) publish directly through `crate::status`, so an
@@ -83,7 +92,7 @@ impl StatusPublisher {
         // place after a reconnect. `ControlServer::set_status` already
         // ignores a body identical to the one being served.
         control.set_status(
-            status::daemon_status_body_with_runtime_capabilities_and_config_state(
+            status::daemon_status_body_with_runtime_capabilities_config_state_and_policy(
                 &snapshot.source,
                 &snapshot.backend,
                 &snapshot.state,
@@ -97,6 +106,7 @@ impl StatusPublisher {
                 snapshot.injection_capabilities,
                 snapshot.window_tracker_connected,
                 snapshot.window_identity_exact,
+                snapshot.backend_policy_blocked,
             ),
         );
         self.last = Some(snapshot);
@@ -319,6 +329,7 @@ mod tests {
         let mut publisher = StatusPublisher::default();
         let capabilities = InjectorCapabilities {
             atomic_replace: true,
+            replacement_guarantee: wayexpand_core::ReplacementGuarantee::Atomic,
             ..InjectorCapabilities::default()
         };
         let publish = |publisher: &mut StatusPublisher| {
@@ -332,7 +343,10 @@ mod tests {
                 true,
                 CommandMetrics::default(),
                 "ei_text",
-                InputSourceCapabilities::default(),
+                InputSourceCapabilities {
+                    layout_aware: true,
+                    ..InputSourceCapabilities::default()
+                },
                 capabilities,
                 false,
             );
@@ -378,7 +392,9 @@ mod tests {
             "hotkey_in_flight",
             "command_queue_rejected_total",
             "command_timeout_total",
+            "command_cancelled_total",
             "command_failure_total",
+            "backend_policy_blocked",
         ];
         let published = |control: &control::ControlServer| {
             let status = control.status_text();
@@ -394,7 +410,18 @@ mod tests {
             fields
         };
         publish(&mut publisher);
+        assert!(control
+            .status_text()
+            .contains("backend_policy_blocked=false\n"));
+        assert!(publisher.update_backend_policy_blocked(true));
+        publish(&mut publisher);
         let full = published(&control);
+        assert!(full
+            .iter()
+            .any(|line| line == "backend_policy_blocked=true"));
+        assert!(control
+            .status_text()
+            .contains("matching_unavailable_reason=organization_policy_route_incompatible\n"));
         assert!(
             full.iter().any(|line| line == "inject_atomic_replace=true"),
             "{full:?}"

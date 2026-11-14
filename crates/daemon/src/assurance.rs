@@ -21,8 +21,7 @@ use std::sync::{
 use tracing::warn;
 use wayexpand_core::{
     CompatibilityMode, FocusCheck, FocusStamp, FocusWitness, InjectorCapabilities, InjectorError,
-    KeyEventState, Modifiers, OutputCheckpoint, ReplacementAdmission, ReplacementGuarantee,
-    TextInjector,
+    KeyEventState, Modifiers, OutputCheckpoint, ReplacementAdmission, TextInjector,
 };
 
 /// Why an output was refused before anything was typed.
@@ -47,15 +46,9 @@ impl Refusal {
 
     fn message(self) -> &'static str {
         match self {
-            Self::CompatibilityModeOff => {
-                "refused: this route cannot verify the trigger at the target; compatibility_mode is off"
-            }
-            Self::FocusChanged => {
-                "refused: the focused window changed after the trigger was typed"
-            }
-            Self::FocusUnconfirmed => {
-                "refused: no window tracker confirmed the focused window and compatibility_mode is tracked-focus"
-            }
+            Self::CompatibilityModeOff => InjectorError::REFUSAL_COMPATIBILITY_MODE_OFF,
+            Self::FocusChanged => InjectorError::REFUSAL_FOCUS_CHANGED,
+            Self::FocusUnconfirmed => InjectorError::REFUSAL_FOCUS_UNCONFIRMED,
         }
     }
 
@@ -101,7 +94,7 @@ impl Assurance {
     ) -> Self {
         match capabilities {
             None => Self::Unavailable,
-            Some(capabilities) if has_atomic_replacement_contract(capabilities) => Self::Verified,
+            Some(capabilities) if capabilities.has_atomic_replacement_contract() => Self::Verified,
             Some(_) if mode == CompatibilityMode::Off => Self::Blocked,
             Some(_) => match focus {
                 FocusCheck::Unchanged => Self::FocusTrackedBestEffort,
@@ -135,24 +128,67 @@ impl Assurance {
     }
 }
 
-fn has_atomic_replacement_contract(capabilities: &InjectorCapabilities) -> bool {
-    // A surrounding-text check proves which text the backend intends to
-    // erase, but it does not make the erase and insertion atomic. Until a
-    // non-atomic route passes the real-session target-integrity gate, only an
-    // atomic replacement contract is sufficient for automatic replacement.
-    capabilities.atomic_replace
-        && capabilities.replacement_guarantee == ReplacementGuarantee::Atomic
-}
-
 /// The reactor's view of consent and focus, shared with output threads.
 #[derive(Default)]
 pub(crate) struct GuardState {
-    mode: AtomicU8,
+    /// Low two bits hold CompatibilityMode; upper bits form a monotonically
+    /// advancing generation so disable/re-enable cannot ABA an active output.
+    mode_state: AtomicU64,
     /// Focus identity of the window snapshot the engine currently reflects.
     stamp: Mutex<FocusStamp>,
+    /// Immutable authorization baseline for the output transaction currently
+    /// running on the serialized injector. Neither a new focus stamp nor a
+    /// changed compatibility mode can re-authorize an in-flight stream.
+    output_baseline: Mutex<Option<OutputBaseline>>,
     witness: Mutex<Option<FocusWitness>>,
     refused_total: AtomicU64,
     last_refusal: AtomicU8,
+}
+
+#[derive(Clone, Copy)]
+struct OutputBaseline {
+    stamp: FocusStamp,
+    mode: CompatibilityMode,
+    mode_state: u64,
+    focus_was_confirmed: bool,
+}
+
+/// The output worker and scheduler tests share this final admission rule.
+fn output_baseline_is_valid(
+    baseline: OutputBaseline,
+    current_mode_state: u64,
+    focus: FocusCheck,
+) -> bool {
+    if current_mode_state != baseline.mode_state {
+        return false;
+    }
+    match focus {
+        FocusCheck::Changed => false,
+        FocusCheck::Unchanged => true,
+        // Tracked focus, and any transaction that began with an exact target,
+        // must remain confirmed for the entire output. Explicit untracked
+        // consent permits only a transaction that was already unconfirmed
+        // when it started to remain unconfirmed.
+        FocusCheck::Unconfirmed => {
+            baseline.mode == CompatibilityMode::UntrackedFocus && !baseline.focus_was_confirmed
+        }
+    }
+}
+
+/// Keep the production baseline type private while allowing cross-module
+/// scheduler models to exercise the exact admission predicate.
+#[cfg(all(test, feature = "loom-tests"))]
+pub(crate) fn tracked_output_baseline_is_valid(current_mode_state: u64, focus: FocusCheck) -> bool {
+    output_baseline_is_valid(
+        OutputBaseline {
+            stamp: FocusStamp::default(),
+            mode: CompatibilityMode::TrackedFocus,
+            mode_state: (1 << 2) | 1,
+            focus_was_confirmed: true,
+        },
+        current_mode_state,
+        focus,
+    )
 }
 
 impl GuardState {
@@ -168,11 +204,33 @@ impl GuardState {
             CompatibilityMode::TrackedFocus => 1,
             CompatibilityMode::UntrackedFocus => 2,
         };
-        self.mode.store(code, Ordering::Release);
+        let mut current = self.mode_state.load(Ordering::Acquire);
+        loop {
+            if current & 0b11 == code {
+                return;
+            }
+            // Reserve two low bits for the mode. Wrapping would require more
+            // than four quintillion policy transitions in one process.
+            let generation = (current >> 2).wrapping_add(1);
+            let next = (generation << 2) | code;
+            match self.mode_state.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return,
+                Err(observed) => current = observed,
+            }
+        }
     }
 
     pub(crate) fn mode(&self) -> CompatibilityMode {
-        match self.mode.load(Ordering::Acquire) {
+        Self::mode_from_state(self.mode_state.load(Ordering::Acquire))
+    }
+
+    fn mode_from_state(state: u64) -> CompatibilityMode {
+        match state & 0b11 {
             1 => CompatibilityMode::TrackedFocus,
             2 => CompatibilityMode::UntrackedFocus,
             _ => CompatibilityMode::Off,
@@ -198,6 +256,10 @@ impl GuardState {
             .stamp
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.focus_at(stamp)
+    }
+
+    fn focus_at(&self, stamp: FocusStamp) -> FocusCheck {
         self.witness
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -205,8 +267,43 @@ impl GuardState {
             .map_or(FocusCheck::Unconfirmed, |witness| witness.check(stamp))
     }
 
-    /// Decide whether an output may start. Outputs that erase nothing, and
-    /// routes that verify the target's surrounding text are never refused here.
+    fn begin_output_transaction(&self) {
+        let mode_state = self.mode_state.load(Ordering::Acquire);
+        let mode = Self::mode_from_state(mode_state);
+        let stamp = *self
+            .stamp
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *self
+            .output_baseline
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(OutputBaseline {
+            stamp,
+            mode,
+            mode_state,
+            focus_was_confirmed: self.focus_at(stamp) == FocusCheck::Unchanged,
+        });
+    }
+
+    fn output_is_valid(&self) -> bool {
+        let baseline = *self
+            .output_baseline
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(baseline) = baseline else {
+            return self.focus() != FocusCheck::Changed;
+        };
+        output_baseline_is_valid(
+            baseline,
+            self.mode_state.load(Ordering::Acquire),
+            self.focus_at(baseline.stamp),
+        )
+    }
+
+    /// Decide whether an output may start. Insert-only output is always
+    /// admissible. Replacement is admissible without compatibility consent
+    /// only when erase and insertion are covered by the same atomic contract;
+    /// verifying surrounding text does not make separate operations atomic.
     pub(crate) fn decide(
         &self,
         capabilities: &InjectorCapabilities,
@@ -264,9 +361,9 @@ impl GuardState {
     /// Unconfirmed focus was already decided by `decide` before output.
     fn focus_checkpoint(guard: Arc<Self>) -> OutputCheckpoint {
         OutputCheckpoint::new(move || {
-            if guard.focus() == FocusCheck::Changed {
-                warn!("focused window changed during output; stopping output");
-                Err("the focused window changed during output".into())
+            if !guard.output_is_valid() {
+                warn!("focus or replacement consent changed during output; stopping output");
+                Err("focus or replacement consent changed during output".into())
             } else {
                 Ok(())
             }
@@ -319,6 +416,10 @@ impl TextInjector for AssuredInjector {
         self.inner.capabilities()
     }
 
+    fn uses_paced_synthetic_output(&self) -> bool {
+        self.inner.uses_paced_synthetic_output()
+    }
+
     fn status_detail(&self) -> &'static str {
         self.inner.status_detail()
     }
@@ -330,8 +431,13 @@ impl TextInjector for AssuredInjector {
     fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
         // Keep the focus check; add the caller's (for example cancellation).
         self.inner.set_output_checkpoint(
-            GuardState::focus_checkpoint(Arc::clone(&self.guard)).and(checkpoint),
+            checkpoint.and(GuardState::focus_checkpoint(Arc::clone(&self.guard))),
         );
+    }
+
+    fn reset_output_progress(&mut self) {
+        self.guard.begin_output_transaction();
+        self.inner.reset_output_progress();
     }
 
     fn admit(&self, erases: bool) -> Result<(), InjectorError> {
@@ -390,7 +496,8 @@ impl TextInjector for AssuredInjector {
 mod tests {
     use super::*;
     use wayexpand_core::{
-        window_update_channel, ExpansionEngine, ExpansionResult, TransactionOutcome, WindowContext,
+        window_update_channel, ExpansionEngine, ExpansionResult, ReplacementGuarantee,
+        TransactionOutcome, WindowContext,
     };
 
     /// A keystroke backend that records everything it is asked to type.
@@ -473,6 +580,8 @@ mod tests {
         typed: Arc<Mutex<String>>,
         checkpoint: OutputCheckpoint,
         focus_sender: wayexpand_core::WindowUpdateSender,
+        focus_receiver: wayexpand_core::WindowUpdateReceiver,
+        guard: Arc<GuardState>,
         switch_after: usize,
     }
 
@@ -503,6 +612,12 @@ mod tests {
             for (index, character) in text.chars().enumerate() {
                 if index == self.switch_after {
                     self.focus_sender.send(window("w2")).unwrap();
+                    // Model the daemon draining the tracker and advancing
+                    // its current-focus baseline while this output remains
+                    // in flight. The transaction checkpoint must retain the
+                    // original window's stamp.
+                    let (_, stamp) = self.focus_receiver.try_recv_stamped().unwrap();
+                    self.guard.set_stamp(stamp);
                 }
                 self.checkpoint.check().map_err(|message| InjectorError {
                     backend: "paced",
@@ -529,20 +644,86 @@ mod tests {
                 typed: Arc::clone(&typed),
                 checkpoint: OutputCheckpoint::default(),
                 focus_sender: sender,
+                focus_receiver: receiver,
+                guard: Arc::clone(&guard),
                 switch_after: 3,
             }),
             Arc::clone(&guard),
         );
 
-        let outcome = ExpansionEngine::apply(injector.as_mut(), &expansion(":sig"));
+        let mut result = expansion(":sig");
+        result.trigger = ":x".into();
+        result.matched_text = ":x".into();
+        result.insert = "data".into();
+        let outcome = ExpansionEngine::apply(injector.as_mut(), &result);
 
-        // Three characters reached the original window; nothing went to the
-        // new one, and the result is uncertain rather than retried.
-        assert_eq!(*typed.lock().unwrap(), "rep");
+        // This fixture remains within the interactive pacing budget. Three
+        // characters reached the original window; nothing went to the new
+        // one, and the result is uncertain rather than retried.
+        assert_eq!(*typed.lock().unwrap(), "dat");
         assert!(
             matches!(outcome, TransactionOutcome::UnknownPartialFailure { .. }),
             "{outcome}"
         );
+    }
+
+    #[test]
+    fn an_in_flight_output_stops_when_consent_or_confirmed_focus_is_lost() {
+        // Revoking tracked-focus consent invalidates the already-running
+        // non-atomic transaction at its next output checkpoint.
+        let consent_guard = Arc::new(GuardState::default());
+        consent_guard.set_mode(CompatibilityMode::TrackedFocus);
+        let (consent_sender, consent_receiver) = window_update_channel();
+        consent_guard.set_witness(Some(consent_receiver.focus_witness()));
+        consent_sender.send(window("window-a")).unwrap();
+        consent_guard.set_stamp(consent_receiver.try_recv_stamped().unwrap().1);
+        consent_guard.begin_output_transaction();
+        let consent_checkpoint = GuardState::focus_checkpoint(Arc::clone(&consent_guard));
+        assert!(consent_checkpoint.check().is_ok());
+        // Reapplying the same effective setting does not cancel output.
+        consent_guard.set_mode(CompatibilityMode::TrackedFocus);
+        assert!(consent_checkpoint.check().is_ok());
+        // A revoke followed by a re-grant must not ABA the generation and
+        // revive a transaction admitted under the earlier consent.
+        consent_guard.set_mode(CompatibilityMode::Off);
+        consent_guard.set_mode(CompatibilityMode::TrackedFocus);
+        assert!(consent_checkpoint.check().is_err());
+
+        // An explicitly untracked transaction may begin without a witness,
+        // but a transaction that began with exact focus cannot continue after
+        // that confirmation disappears.
+        let focus_guard = Arc::new(GuardState::default());
+        focus_guard.set_mode(CompatibilityMode::UntrackedFocus);
+        let (focus_sender, focus_receiver) = window_update_channel();
+        focus_guard.set_witness(Some(focus_receiver.focus_witness()));
+        focus_sender.send(window("window-a")).unwrap();
+        focus_guard.set_stamp(focus_receiver.try_recv_stamped().unwrap().1);
+        focus_guard.begin_output_transaction();
+        let focus_checkpoint = GuardState::focus_checkpoint(Arc::clone(&focus_guard));
+        assert!(focus_checkpoint.check().is_ok());
+        focus_guard.set_witness(None);
+        assert!(focus_checkpoint.check().is_err());
+    }
+
+    #[test]
+    fn a_focus_change_before_the_worker_starts_invalidates_its_transaction() {
+        let guard = Arc::new(GuardState::default());
+        guard.set_mode(CompatibilityMode::TrackedFocus);
+        let (sender, receiver) = window_update_channel();
+        guard.set_witness(Some(receiver.focus_witness()));
+        sender.send(window("window-a")).unwrap();
+        guard.set_stamp(receiver.try_recv_stamped().unwrap().1);
+
+        // The reactor queues a transaction for window-a, then focus changes
+        // before the serialized worker begins it. Even if focus returns to
+        // window-a before the worker runs, the witness sequence records that
+        // the queued transaction crossed a target boundary.
+        sender.send(window("window-b")).unwrap();
+        sender.send(window("window-a")).unwrap();
+        guard.begin_output_transaction();
+
+        let checkpoint = GuardState::focus_checkpoint(guard);
+        assert!(checkpoint.check().is_err());
     }
 
     #[test]
@@ -562,6 +743,62 @@ mod tests {
     }
 
     #[test]
+    fn consent_revoked_after_admission_is_reported_as_clean_refusal() {
+        struct RevokeConsentAfterPreflight {
+            inner: Box<dyn TextInjector>,
+            guard: Arc<GuardState>,
+        }
+
+        impl TextInjector for RevokeConsentAfterPreflight {
+            fn shutdown(self: Box<Self>) {
+                self.inner.shutdown();
+            }
+            fn name(&self) -> &'static str {
+                self.inner.name()
+            }
+            fn capabilities(&self) -> InjectorCapabilities {
+                self.inner.capabilities()
+            }
+            fn admit(&self, erases: bool) -> Result<(), InjectorError> {
+                self.inner.admit(erases)
+            }
+            fn preflight_text(&mut self, text: &str) -> Result<(), InjectorError> {
+                self.inner.preflight_text(text)?;
+                self.guard.set_mode(CompatibilityMode::Off);
+                Ok(())
+            }
+            fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
+                self.inner.replace(trigger, text)
+            }
+            fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
+                self.inner.erase(trigger)
+            }
+            fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
+                self.inner.insert(text)
+            }
+        }
+
+        let guard = Arc::new(GuardState::default());
+        guard.set_mode(CompatibilityMode::TrackedFocus);
+        let (sender, receiver) = window_update_channel();
+        guard.set_witness(Some(receiver.focus_witness()));
+        sender.send(window("window-a")).unwrap();
+        guard.set_stamp(receiver.try_recv_stamped().unwrap().1);
+        let (inner, typed) = guarded(&guard, ReplacementGuarantee::BestEffort);
+        let mut injector = RevokeConsentAfterPreflight { inner, guard };
+
+        let report = ExpansionEngine::apply_with_report(&mut injector, &expansion(":sig"));
+
+        assert!(matches!(
+            report.outcome,
+            TransactionOutcome::NotApplied { .. }
+        ));
+        assert_eq!(report.progress.erased_units, 0);
+        assert_eq!(report.progress.inserted_units, 0);
+        assert_eq!(*typed.lock().unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
     fn non_atomic_verified_routes_are_blocked_but_atomic_and_insert_only_are_allowed() {
         let guard = Arc::new(GuardState::default());
         let (mut verified, typed) = guarded(&guard, ReplacementGuarantee::VerifiedSurroundingText);
@@ -571,15 +808,51 @@ mod tests {
 
         let guard = Arc::new(GuardState::default());
         let (mut atomic, typed) = guarded(&guard, ReplacementGuarantee::Atomic);
-        assert!(ExpansionEngine::apply(atomic.as_mut(), &expansion(":sig")).is_applied());
+        assert!(
+            ExpansionEngine::apply(atomic.as_mut(), &expansion(":sig")).is_output_acknowledged()
+        );
         assert_eq!(typed.lock().unwrap().len(), 2);
 
         // Inserting without erasing cannot delete unverified text.
         let (mut keystrokes, typed) = guarded(&guard, ReplacementGuarantee::BestEffort);
-        assert!(ExpansionEngine::apply(keystrokes.as_mut(), &expansion("")).is_applied());
+        assert!(
+            ExpansionEngine::apply(keystrokes.as_mut(), &expansion("")).is_output_acknowledged()
+        );
         // The default replace() erases an empty trigger, which deletes nothing.
         assert_eq!(*typed.lock().unwrap(), ["erase:", "insert:replacement"]);
         assert_eq!(guard.refused_total(), 0);
+    }
+
+    #[test]
+    fn verified_non_atomic_replacement_requires_consent_and_continuous_focus() {
+        let guard = Arc::new(GuardState::default());
+        let (mut injector, typed) = guarded(&guard, ReplacementGuarantee::VerifiedSurroundingText);
+
+        // A surrounding-text precondition alone does not authorize a split
+        // erase/insert transaction.
+        let outcome = ExpansionEngine::apply(injector.as_mut(), &expansion(":sig"));
+        assert!(refused_before_typing(&outcome), "{outcome}");
+        assert!(typed.lock().unwrap().is_empty());
+
+        // Explicit compatibility consent is still tied to an exact tracker
+        // identity for tracked-focus mode.
+        guard.set_mode(CompatibilityMode::TrackedFocus);
+        let (sender, receiver) = window_update_channel();
+        guard.set_witness(Some(receiver.focus_witness()));
+        sender.send(window("window-a")).unwrap();
+        guard.set_stamp(receiver.try_recv_stamped().unwrap().1);
+        assert!(
+            ExpansionEngine::apply(injector.as_mut(), &expansion(":sig")).is_output_acknowledged()
+        );
+        let admitted_output = typed.lock().unwrap().clone();
+        assert_eq!(admitted_output.len(), 2);
+
+        // The same tracker witness invalidates the old target even before
+        // the reactor publishes a new stamp. No second erase may be issued.
+        sender.send(window("window-b")).unwrap();
+        let outcome = ExpansionEngine::apply(injector.as_mut(), &expansion(":sig"));
+        assert!(refused_before_typing(&outcome), "{outcome}");
+        assert_eq!(*typed.lock().unwrap(), admitted_output);
     }
 
     #[test]
@@ -598,7 +871,9 @@ mod tests {
         guard.set_witness(Some(receiver.focus_witness()));
         sender.send(window("w1")).unwrap();
         guard.set_stamp(receiver.try_recv_stamped().unwrap().1);
-        assert!(ExpansionEngine::apply(injector.as_mut(), &expansion(":sig")).is_applied());
+        assert!(
+            ExpansionEngine::apply(injector.as_mut(), &expansion(":sig")).is_output_acknowledged()
+        );
         assert_eq!(*typed.lock().unwrap(), ["erase::sig", "insert:replacement"]);
     }
 
@@ -639,7 +914,9 @@ mod tests {
         guard.set_mode(CompatibilityMode::UntrackedFocus);
         let (mut injector, typed) = guarded(&guard, ReplacementGuarantee::BestEffort);
 
-        assert!(ExpansionEngine::apply(injector.as_mut(), &expansion(":sig")).is_applied());
+        assert!(
+            ExpansionEngine::apply(injector.as_mut(), &expansion(":sig")).is_output_acknowledged()
+        );
         assert_eq!(typed.lock().unwrap().len(), 2);
         assert_eq!(guard.focus_assurance(), "unconfirmed");
     }
@@ -703,5 +980,240 @@ mod tests {
             ),
             Assurance::Unavailable
         );
+    }
+
+    #[test]
+    fn generated_output_sequences_never_reauthorize_after_focus_or_consent_invalidation() {
+        #[derive(Clone, Copy, Debug)]
+        enum Event {
+            Checkpoint,
+            Send,
+            FocusAway,
+            FocusBack,
+            RevokeConsent,
+            RestoreConsent,
+        }
+
+        const BASELINE_MODE: u64 = (1 << 2) | 1;
+        const REVOKED_MODE: u64 = 2 << 2;
+        const RESTORED_MODE: u64 = (3 << 2) | 1;
+        let baseline = OutputBaseline {
+            stamp: FocusStamp::default(),
+            mode: CompatibilityMode::TrackedFocus,
+            mode_state: BASELINE_MODE,
+            focus_was_confirmed: true,
+        };
+
+        fn check(events: &[Event], baseline: OutputBaseline) {
+            const BASELINE_MODE: u64 = (1 << 2) | 1;
+            let mut mode_state = BASELINE_MODE;
+            let mut focus = FocusCheck::Unchanged;
+            let mut authorized_event_pending = false;
+            let mut invalidated = false;
+            let mut sends_after_invalidation = 0;
+
+            for event in events {
+                match event {
+                    Event::Checkpoint => {
+                        authorized_event_pending =
+                            output_baseline_is_valid(baseline, mode_state, focus);
+                    }
+                    Event::Send => {
+                        if authorized_event_pending {
+                            authorized_event_pending = false;
+                            if invalidated {
+                                // One backend event can cross an invalidation
+                                // after its checkpoint. The following
+                                // checkpoint must refuse continuation.
+                                sends_after_invalidation += 1;
+                            }
+                        }
+                    }
+                    Event::FocusAway | Event::FocusBack => {
+                        // The generation changes on both transitions. Returning
+                        // to the same window does not restore the old stamp.
+                        focus = FocusCheck::Changed;
+                        invalidated = true;
+                    }
+                    Event::RevokeConsent => {
+                        mode_state = REVOKED_MODE;
+                        invalidated = true;
+                    }
+                    Event::RestoreConsent => {
+                        // Same effective mode, new generation: this is not the
+                        // authorization captured by the in-flight transaction.
+                        mode_state = RESTORED_MODE;
+                        invalidated = true;
+                    }
+                }
+
+                if invalidated {
+                    assert!(
+                        !output_baseline_is_valid(baseline, mode_state, focus),
+                        "invalidation must remain terminal for {events:?}"
+                    );
+                }
+            }
+
+            assert!(
+                sends_after_invalidation <= 1,
+                "at most one already-admitted backend event may cross invalidation: {events:?}"
+            );
+        }
+
+        let choices = [
+            Event::Checkpoint,
+            Event::Send,
+            Event::FocusAway,
+            Event::FocusBack,
+            Event::RevokeConsent,
+            Event::RestoreConsent,
+        ];
+
+        // Exhaust every event ordering through six events. This includes
+        // checkpoint/send boundaries on either side of invalidation, repeated
+        // focus changes, and consent revoke/restore ABA sequences.
+        fn enumerate(events: &mut Vec<Event>, remaining: usize, baseline: OutputBaseline) {
+            check(events, baseline);
+            if remaining == 0 {
+                return;
+            }
+            for event in [
+                Event::Checkpoint,
+                Event::Send,
+                Event::FocusAway,
+                Event::FocusBack,
+                Event::RevokeConsent,
+                Event::RestoreConsent,
+            ] {
+                events.push(event);
+                enumerate(events, remaining - 1, baseline);
+                events.pop();
+            }
+        }
+
+        for length in 0..=6 {
+            enumerate(&mut Vec::new(), length, baseline);
+        }
+
+        // Also explore longer histories with a fixed seed. Include a
+        // checkpoint/send pair in every case so generated suffixes exercise
+        // the production admission predicate even when the random prefix
+        // would otherwise contain no output boundary.
+        let mut seed = 0x7a31_9d4b_c25e_806f_u64;
+        for _case in 0..512 {
+            let mut events = vec![Event::Checkpoint, Event::Send];
+            for _ in 0..64 {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                events.push(choices[(seed as usize) % choices.len()]);
+            }
+            check(&events, baseline);
+        }
+    }
+}
+
+/// Scheduler model for focus and compatibility consent invalidation during a
+/// multi-event output stream. A checkpoint and one backend event are separate
+/// operations: a single already-admitted event may cross the invalidation,
+/// but the following checkpoint must refuse continuation.
+#[cfg(all(test, feature = "loom-tests"))]
+mod loom_models {
+    use loom::sync::{Arc, Mutex};
+    use loom::thread;
+    use wayexpand_core::{CompatibilityMode, FocusCheck, FocusStamp};
+
+    use super::{output_baseline_is_valid, OutputBaseline};
+
+    #[derive(Default)]
+    struct State {
+        focus_sequence: u64,
+        mode_state: u64,
+        invalidated: bool,
+        events_after_invalidation: usize,
+    }
+
+    fn model_invalidation(focus_change: bool) {
+        loom::model(move || {
+            const BASELINE_MODE: u64 = (1 << 2) | 1; // generation 1, tracked focus
+            const REVOKED_AND_REGRANTED_MODE: u64 = (3 << 2) | 1;
+            const BASELINE_FOCUS_SEQUENCE: u64 = 1;
+
+            let baseline = OutputBaseline {
+                stamp: FocusStamp::default(),
+                mode: CompatibilityMode::TrackedFocus,
+                mode_state: BASELINE_MODE,
+                focus_was_confirmed: true,
+            };
+            let state = Arc::new(Mutex::new(State {
+                focus_sequence: BASELINE_FOCUS_SEQUENCE,
+                mode_state: BASELINE_MODE,
+                ..State::default()
+            }));
+
+            let worker_state = Arc::clone(&state);
+            let worker = thread::spawn(move || {
+                // Each loop is one paced output unit. The backend checks the
+                // production admission predicate before each unit.
+                for _ in 0..3 {
+                    let admitted = {
+                        let state = worker_state.lock().unwrap();
+                        let focus = if state.focus_sequence == BASELINE_FOCUS_SEQUENCE {
+                            FocusCheck::Unchanged
+                        } else {
+                            FocusCheck::Changed
+                        };
+                        output_baseline_is_valid(baseline, state.mode_state, focus)
+                    };
+                    if !admitted {
+                        break;
+                    }
+
+                    // Model the gap between a successful checkpoint and a
+                    // backend event. At most this one event can be in flight
+                    // when the tracker or consent changes.
+                    thread::yield_now();
+                    let mut state = worker_state.lock().unwrap();
+                    if state.invalidated {
+                        state.events_after_invalidation += 1;
+                    }
+                }
+            });
+
+            let invalidator_state = Arc::clone(&state);
+            let invalidator = thread::spawn(move || {
+                thread::yield_now();
+                let mut state = invalidator_state.lock().unwrap();
+                if focus_change {
+                    // Sequence changes even if focus returns to the original
+                    // application: A→B→A is still a different visit.
+                    state.focus_sequence += 1;
+                    state.focus_sequence += 1;
+                } else {
+                    // Revoke then restore the same effective mode. The
+                    // generation prevents an ABA from reviving old consent.
+                    state.mode_state = REVOKED_AND_REGRANTED_MODE;
+                }
+                state.invalidated = true;
+            });
+
+            worker.join().unwrap();
+            invalidator.join().unwrap();
+
+            let state = state.lock().unwrap();
+            assert!(state.invalidated);
+            assert!(state.events_after_invalidation <= 1);
+        });
+    }
+
+    #[test]
+    fn focus_away_and_back_does_not_reauthorize_output() {
+        model_invalidation(true);
+    }
+
+    #[test]
+    fn revoking_and_restoring_consent_does_not_reauthorize_output() {
+        model_invalidation(false);
     }
 }

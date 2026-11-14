@@ -13,6 +13,7 @@
       "id": "kde",
       "display": "KDE Plasma / KWin",
       "detected_desktop": "KDE Plasma",
+      "certification_session": "wayland",
       "input_paths": ["ibus", "evdev+libei"],
       "certification_backend": "ibus",
       "toolkits": ["GTK", "Qt"],
@@ -29,6 +30,7 @@
       "id": "gnome",
       "display": "GNOME Shell / Mutter",
       "detected_desktop": "GNOME",
+      "certification_session": "wayland",
       "input_paths": ["ibus", "evdev+libei"],
       "certification_backend": "ibus",
       "toolkits": ["GTK", "Qt"],
@@ -39,12 +41,13 @@
       "certification_status": "not-certified",
       "certification_evidence": null,
       "application_filter": "implemented",
-      "window_tracker": "WayExpand GNOME Shell extension (GNOME 45+)"
+      "window_tracker": "WayExpand GNOME Shell extension (headless runtime gates: GNOME 46, 50, 51)"
     },
     {
       "id": "sway",
       "display": "Sway / wlroots",
       "detected_desktop": "Sway/wlroots",
+      "certification_session": "wayland",
       "input_paths": ["evdev+wlroots", "input-method-v2"],
       "certification_backend": "input-method-v2",
       "toolkits": ["GTK", "Qt"],
@@ -61,6 +64,7 @@
       "id": "hyprland",
       "display": "Hyprland / wlroots",
       "detected_desktop": "Hyprland/wlroots",
+      "certification_session": "wayland",
       "input_paths": ["evdev+wlroots", "input-method-v2"],
       "certification_backend": "input-method-v2",
       "toolkits": ["GTK", "Qt"],

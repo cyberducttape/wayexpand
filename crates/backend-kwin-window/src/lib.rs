@@ -17,7 +17,7 @@ use std::{
     path::Path,
     process,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc, Mutex,
     },
     time::{Duration, Instant},
@@ -25,8 +25,8 @@ use std::{
 use thiserror::Error;
 use tracing::info;
 use wayexpand_core::{
-    window_update_channel, WindowContext, WindowTracker, WindowTrackerError, WindowUpdateReceiver,
-    WindowUpdateSender,
+    window_update_channel, ProcessIdentityState, WindowContext, WindowIdentitySource,
+    WindowTracker, WindowTrackerError, WindowUpdateReceiver, WindowUpdateSender,
 };
 use zbus::{blocking::Connection, interface};
 
@@ -56,6 +56,41 @@ const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
 const ORPHAN_SCAN_ENTRY_LIMIT: usize = 512;
 const ORPHAN_CHECK_LIMIT: usize = 4;
 static REJECTED_KWIN_CALLBACKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn identity_source_from_label(source: &str) -> WindowIdentitySource {
+    match source {
+        "resource-class" => WindowIdentitySource::ResourceClass,
+        "desktop-file-name" => WindowIdentitySource::DesktopFileName,
+        "resource-name" => WindowIdentitySource::ResourceName,
+        "compositor-identity-only" => WindowIdentitySource::CompositorIdentityOnly,
+        "process-executable" => WindowIdentitySource::ProcessExecutable,
+        "process-name" => WindowIdentitySource::ProcessName,
+        _ => WindowIdentitySource::Unavailable,
+    }
+}
+
+fn effective_identity_source(
+    compositor_source: WindowIdentitySource,
+    process_identity_requested: bool,
+    process_executable_resolved: bool,
+    process_name_resolved: bool,
+) -> WindowIdentitySource {
+    let needs_process_fallback = matches!(
+        compositor_source,
+        WindowIdentitySource::Unavailable | WindowIdentitySource::CompositorIdentityOnly
+    );
+    if process_identity_requested && needs_process_fallback {
+        if process_executable_resolved {
+            WindowIdentitySource::ProcessExecutable
+        } else if process_name_resolved {
+            WindowIdentitySource::ProcessName
+        } else {
+            WindowIdentitySource::ProcessExecutableUnavailable
+        }
+    } else {
+        compositor_source
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum KwinWindowError {
@@ -87,12 +122,15 @@ pub enum KwinWindowError {
 
 struct WindowTrackerService {
     sender: Mutex<WindowUpdateSender>,
+    identity_source: std::sync::Arc<AtomicU8>,
+    process_identity_state: std::sync::Arc<AtomicU8>,
     // KWin's callDBus() helper sends script callbacks over a distinct D-Bus
     // connection, so the message sender is not necessarily the connection
     // that owns org.kde.KWin. Authenticate either the owner name or a sender
     // whose bus credentials identify the same KWin process.
     kwin_owner: String,
     kwin_pid: u32,
+    process_identity_enabled: std::sync::Arc<AtomicBool>,
 }
 
 fn is_kwin_sender(
@@ -104,29 +142,226 @@ fn is_kwin_sender(
     sender == Some(kwin_owner) || sender_pid == Some(kwin_pid)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExecutableLookupFailure {
+    ProcessIdUnavailable,
+    ProcessMetadataUnavailable,
+    DifferentUser,
+    ExecutablePermissionDenied,
+    ExecutableInvalid,
+    ProcessChanged,
+    ExecutableLinkUnavailable,
+}
+
+impl ExecutableLookupFailure {
+    fn diagnostic_state(self) -> ProcessIdentityState {
+        match self {
+            Self::ProcessIdUnavailable => ProcessIdentityState::ProcessIdUnavailable,
+            Self::ProcessMetadataUnavailable => ProcessIdentityState::ProcessMetadataUnavailable,
+            Self::DifferentUser => ProcessIdentityState::DifferentUser,
+            Self::ExecutablePermissionDenied => ProcessIdentityState::ExecutablePermissionDenied,
+            Self::ExecutableInvalid => ProcessIdentityState::ExecutableInvalid,
+            Self::ProcessChanged => ProcessIdentityState::ProcessChanged,
+            Self::ExecutableLinkUnavailable => ProcessIdentityState::ExecutableLinkUnavailable,
+        }
+    }
+}
+
 fn window_context_from_signal(
     app_id: String,
     title: String,
     instance_id: String,
+    identity_source: WindowIdentitySource,
+    process_executable: Option<String>,
+    process_name: Option<String>,
 ) -> Option<WindowContext> {
-    if app_id.is_empty() && title.is_empty() && instance_id.is_empty() {
+    let identity_source_is_application = matches!(
+        identity_source,
+        WindowIdentitySource::ResourceClass
+            | WindowIdentitySource::DesktopFileName
+            | WindowIdentitySource::ResourceName
+    );
+    let mut app_id = (identity_source_is_application
+        && !app_id.is_empty()
+        && !is_kwin_compositor_app_id(&app_id))
+    .then_some(app_id);
+    if app_id.is_none() {
+        if let Some(path) = process_executable.filter(|path| is_valid_executable_path(path)) {
+            app_id = Some(format!(
+                "{}{}",
+                wayexpand_core::PROCESS_EXECUTABLE_APP_ID_PREFIX,
+                path
+            ));
+        }
+    }
+    if app_id.is_none() {
+        if let Some(name) = process_name.filter(|name| is_valid_process_name(name)) {
+            app_id = Some(format!(
+                "{}{}",
+                wayexpand_core::PROCESS_NAME_APP_ID_PREFIX,
+                name.to_ascii_lowercase()
+            ));
+        }
+    }
+    if app_id.is_none() && title.is_empty() && instance_id.is_empty() {
         None
     } else {
         Some(WindowContext {
-            app_id: (!app_id.is_empty()).then_some(app_id),
+            app_id,
             title: (!title.is_empty()).then_some(title),
             instance_id: (!instance_id.is_empty()).then_some(instance_id),
         })
     }
 }
 
+/// Resolve an executable only after the callback has been authenticated as
+/// KWin. PID and path values from any other D-Bus caller are never consulted.
+/// The before/after start-time check rejects PID reuse during the lookup.
+fn process_executable_path(pid: i32, expected_uid: u32) -> Result<String, ExecutableLookupFailure> {
+    if pid <= 0 {
+        return Err(ExecutableLookupFailure::ProcessIdUnavailable);
+    }
+    let process_dir = Path::new("/proc").join(pid.to_string());
+    let before = process_start_time(&process_dir)
+        .ok_or(ExecutableLookupFailure::ProcessMetadataUnavailable)?;
+    let metadata = fs::metadata(&process_dir)
+        .map_err(|_| ExecutableLookupFailure::ProcessMetadataUnavailable)?;
+    if metadata.uid() != expected_uid {
+        return Err(ExecutableLookupFailure::DifferentUser);
+    }
+    let executable = fs::read_link(process_dir.join("exe")).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::PermissionDenied {
+            ExecutableLookupFailure::ExecutablePermissionDenied
+        } else {
+            ExecutableLookupFailure::ExecutableLinkUnavailable
+        }
+    })?;
+    if !executable.is_absolute() {
+        return Err(ExecutableLookupFailure::ExecutableInvalid);
+    }
+    let path = executable
+        .to_str()
+        .ok_or(ExecutableLookupFailure::ExecutableInvalid)?;
+    if path.ends_with(" (deleted)") || !is_valid_executable_path(path) {
+        return Err(ExecutableLookupFailure::ExecutableInvalid);
+    }
+    if process_start_time(&process_dir) != Some(before) {
+        return Err(ExecutableLookupFailure::ProcessChanged);
+    }
+    Ok(path.to_owned())
+}
+
+/// Read Linux's bounded task name only as a lower-assurance fallback. The
+/// process can change this value; callers must require an explicit
+/// `process_name_exact:` allowlist entry before it can authorize matching.
+fn process_name(pid: i32, expected_uid: u32) -> Option<String> {
+    if pid <= 0 {
+        return None;
+    }
+    let process_dir = Path::new("/proc").join(pid.to_string());
+    let before = process_start_time(&process_dir)?;
+    let metadata = fs::metadata(&process_dir).ok()?;
+    if metadata.uid() != expected_uid {
+        return None;
+    }
+    let name = fs::read_to_string(process_dir.join("comm")).ok()?;
+    let name = name.trim_end_matches(['\r', '\n']);
+    if !is_valid_process_name(name) || process_start_time(&process_dir)? != before {
+        return None;
+    }
+    Some(name.to_ascii_lowercase())
+}
+
+/// Resolve a KWin-reported PID only when it can identify the client process.
+/// Some compositor-owned surfaces report KWin's own PID; that PID must never
+/// be turned into an application identity, including the lower-assurance
+/// process-name fallback.
+fn window_process_identity(
+    process_id: i32,
+    kwin_pid: u32,
+    expected_uid: u32,
+) -> (Option<String>, Option<String>, ProcessIdentityState) {
+    if process_id > 0 && process_id as u32 == kwin_pid {
+        return (None, None, ProcessIdentityState::CompositorProcessId);
+    }
+    match process_executable_path(process_id, expected_uid) {
+        Ok(executable) => (
+            Some(executable),
+            None,
+            ProcessIdentityState::ProcessExecutable,
+        ),
+        Err(failure) => (
+            None,
+            process_name(process_id, expected_uid),
+            failure.diagnostic_state(),
+        ),
+    }
+}
+
+fn is_valid_process_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= wayexpand_core::limits::MAX_PROCESS_NAME_BYTES
+        && name.is_ascii()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+}
+
+fn process_start_time(process_dir: &Path) -> Option<u64> {
+    let stat = fs::read_to_string(process_dir.join("stat")).ok()?;
+    // comm is parenthesized and may itself contain spaces or ')'.
+    let close = stat.rfind(')')?;
+    let fields = stat
+        .get(close + 1..)?
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    fields.get(19)?.parse().ok() // field 22 (starttime), with field 3 at index 0
+}
+
+fn is_valid_executable_path(path: &str) -> bool {
+    let candidate = Path::new(path);
+    if !candidate.is_absolute()
+        || path.chars().any(char::is_control)
+        || candidate.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir | std::path::Component::CurDir
+            )
+        })
+        || path
+            .split('/')
+            .skip(1)
+            .any(|component| component.is_empty() || matches!(component, "." | ".."))
+        || path.chars().count() > wayexpand_core::limits::MAX_PROCESS_EXECUTABLE_PATH_CHARS
+    {
+        return false;
+    }
+    fs::metadata(candidate)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+fn is_kwin_compositor_app_id(app_id: &str) -> bool {
+    let basename = app_id
+        .rsplit('/')
+        .next()
+        .unwrap_or(app_id)
+        .to_ascii_lowercase();
+    let basename = basename.strip_suffix(".desktop").unwrap_or(&basename);
+    basename == "kwin_wayland" || basename == "kwin_x11"
+}
+
 #[interface(name = "org.wayexpand.WindowTracker1")]
 impl WindowTrackerService {
+    // D-Bus method arguments must remain positional and independently typed
+    // to match the bundled KWin script's callback signature.
+    #[allow(clippy::too_many_arguments)]
     async fn window_changed(
         &self,
         app_id: String,
         title: String,
         instance_id: String,
+        identity_source: String,
+        process_id: i32,
         #[zbus(header)] header: zbus::message::Header<'_>,
         #[zbus(connection)] connection: &zbus::Connection,
     ) -> bool {
@@ -173,7 +408,39 @@ impl WindowTrackerService {
             }
             return false;
         }
-        let context = window_context_from_signal(app_id, title, instance_id);
+        let identity_source = identity_source_from_label(&identity_source);
+        let process_identity_requested = self.process_identity_enabled.load(Ordering::Acquire);
+        let process_identity_needed = process_identity_requested
+            && matches!(
+                identity_source,
+                WindowIdentitySource::Unavailable | WindowIdentitySource::CompositorIdentityOnly
+            );
+        let (process_executable, process_name, process_identity_state) =
+            if !process_identity_requested {
+                (None, None, ProcessIdentityState::NotRequested)
+            } else if !process_identity_needed {
+                (None, None, ProcessIdentityState::CompositorApplicationId)
+            } else {
+                window_process_identity(process_id, self.kwin_pid, unsafe { libc::geteuid() })
+            };
+        let effective_identity_source = effective_identity_source(
+            identity_source,
+            process_identity_requested,
+            process_executable.is_some(),
+            process_name.is_some(),
+        );
+        self.identity_source
+            .store(effective_identity_source.code(), Ordering::Release);
+        self.process_identity_state
+            .store(process_identity_state.code(), Ordering::Release);
+        let context = window_context_from_signal(
+            app_id,
+            title,
+            instance_id,
+            identity_source,
+            process_executable,
+            process_name,
+        );
         info!(
             has_context = context.is_some(),
             has_app_id = context
@@ -185,6 +452,8 @@ impl WindowTrackerService {
             has_instance_id = context
                 .as_ref()
                 .is_some_and(|window| window.instance_id.is_some()),
+            identity_source = effective_identity_source.as_str(),
+            process_identity_state = process_identity_state.as_str(),
             "accepted a KWin focus update"
         );
         // The receiver may already be gone if the tracker was dropped
@@ -210,6 +479,8 @@ pub struct KwinWindowTracker {
     // Kept alive for the object's lifetime: dropping it stops serving the
     // callback interface the loaded script calls into.
     connection: Connection,
+    identity_source: std::sync::Arc<AtomicU8>,
+    process_identity_state: std::sync::Arc<AtomicU8>,
     receiver: WindowUpdateReceiver,
     #[cfg(test)]
     service_name: String,
@@ -222,6 +493,19 @@ pub struct KwinWindowTracker {
 }
 
 impl KwinWindowTracker {
+    /// Return the content-free KWin metadata source for the latest focused
+    /// window identity report. This is diagnostic only and never changes
+    /// fail-closed matching behavior.
+    pub fn last_identity_source(&self) -> WindowIdentitySource {
+        WindowIdentitySource::from_code(self.identity_source.load(Ordering::Acquire))
+    }
+
+    /// Return the sanitized outcome of KWin's latest optional `/proc`
+    /// identity lookup. No process identifiers or names are retained here.
+    pub fn last_process_identity_state(&self) -> ProcessIdentityState {
+        ProcessIdentityState::from_code(self.process_identity_state.load(Ordering::Acquire))
+    }
+
     /// A side-effect-free check for whether this session is even worth
     /// trying: confirms `org.kde.KWin` answers on the session bus and
     /// advertises the scripting interface, without loading or running
@@ -265,10 +549,26 @@ impl KwinWindowTracker {
         Self::new_cancellable(None)
     }
 
+    pub fn new_with_process_identity(
+        process_identity_enabled: std::sync::Arc<AtomicBool>,
+    ) -> Result<Self, KwinWindowError> {
+        Self::new_cancellable_with_process_identity(None, process_identity_enabled)
+    }
+
     /// Like `new`, but allows an owning UI/task to stop the bounded script
     /// readiness retry loop. An in-flight D-Bus call is bounded by
     /// `DBUS_METHOD_TIMEOUT`.
     pub fn new_cancellable(cancelled: Option<&AtomicBool>) -> Result<Self, KwinWindowError> {
+        Self::new_cancellable_with_process_identity(
+            cancelled,
+            std::sync::Arc::new(AtomicBool::new(false)),
+        )
+    }
+
+    fn new_cancellable_with_process_identity(
+        cancelled: Option<&AtomicBool>,
+        process_identity_enabled: std::sync::Arc<AtomicBool>,
+    ) -> Result<Self, KwinWindowError> {
         if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             return Err(KwinWindowError::ScriptNotReady);
         }
@@ -288,6 +588,10 @@ impl KwinWindowTracker {
         let tracker_id = u64::from_le_bytes(tracker_id_bytes);
         let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{tracker_id:x}");
         let (sender, receiver) = window_update_channel();
+        let identity_source =
+            std::sync::Arc::new(AtomicU8::new(WindowIdentitySource::Unavailable.code()));
+        let process_identity_state =
+            std::sync::Arc::new(AtomicU8::new(ProcessIdentityState::NotApplicable.code()));
         let owner_connection = bounded_session_connection(
             zbus::connection::Builder::session()?.method_timeout(DBUS_METHOD_TIMEOUT),
             DBUS_CONNECTION_TIMEOUT,
@@ -327,8 +631,11 @@ impl KwinWindowTracker {
                     "/WindowTracker",
                     WindowTrackerService {
                         sender: Mutex::new(sender),
+                        identity_source: std::sync::Arc::clone(&identity_source),
+                        process_identity_state: std::sync::Arc::clone(&process_identity_state),
                         kwin_owner,
                         kwin_pid,
+                        process_identity_enabled,
                     },
                 )?,
             DBUS_CONNECTION_TIMEOUT,
@@ -410,6 +717,8 @@ impl KwinWindowTracker {
 
         let mut tracker = Self {
             connection,
+            identity_source,
+            process_identity_state,
             receiver,
             #[cfg(test)]
             service_name: bus_name,
@@ -701,6 +1010,14 @@ impl WindowTracker for KwinWindowTracker {
         BACKEND_NAME
     }
 
+    fn identity_source(&self) -> WindowIdentitySource {
+        self.last_identity_source()
+    }
+
+    fn process_identity_state(&self) -> ProcessIdentityState {
+        self.last_process_identity_state()
+    }
+
     fn next_window_timeout(
         &mut self,
         timeout: Duration,
@@ -782,7 +1099,8 @@ impl WindowTracker for KwinWindowTracker {
 #[cfg(test)]
 mod tests {
     use super::{
-        bounded_session_connection, cleanup_orphan_tracker_scripts, is_kwin_sender,
+        bounded_session_connection, cleanup_orphan_tracker_scripts, effective_identity_source,
+        is_kwin_compositor_app_id, is_kwin_sender, is_valid_executable_path,
         parse_tracker_script_filename, validate_tracker_script_directory, wait_for_initial_window,
         window_context_from_signal, KwinWindowError, KwinWindowTracker, ORPHAN_CHECK_LIMIT,
         SCRIPT_TEMPLATE, TRACKER_HEALTH_CHECK_INTERVAL,
@@ -796,7 +1114,52 @@ mod tests {
         process, thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
+    use wayexpand_core::WindowIdentitySource;
     use wayexpand_core::{WindowContext, WindowTracker};
+
+    #[test]
+    fn process_identity_failure_is_distinct_from_unrequested_lookup() {
+        assert_eq!(
+            effective_identity_source(
+                WindowIdentitySource::CompositorIdentityOnly,
+                true,
+                false,
+                false,
+            ),
+            WindowIdentitySource::ProcessExecutableUnavailable
+        );
+        assert_eq!(
+            effective_identity_source(
+                WindowIdentitySource::CompositorIdentityOnly,
+                true,
+                true,
+                false,
+            ),
+            WindowIdentitySource::ProcessExecutable
+        );
+        assert_eq!(
+            effective_identity_source(
+                WindowIdentitySource::CompositorIdentityOnly,
+                true,
+                false,
+                true,
+            ),
+            WindowIdentitySource::ProcessName
+        );
+        assert_eq!(
+            effective_identity_source(
+                WindowIdentitySource::CompositorIdentityOnly,
+                false,
+                false,
+                false,
+            ),
+            WindowIdentitySource::CompositorIdentityOnly
+        );
+        assert_eq!(
+            effective_identity_source(WindowIdentitySource::DesktopFileName, true, false, false,),
+            WindowIdentitySource::DesktopFileName
+        );
+    }
 
     #[test]
     fn initial_empty_focus_report_does_not_mark_tracker_ready() {
@@ -849,22 +1212,268 @@ mod tests {
 
     #[test]
     fn empty_signal_represents_window_disappearance() {
-        assert!(window_context_from_signal(String::new(), String::new(), String::new()).is_none());
+        assert!(window_context_from_signal(
+            String::new(),
+            String::new(),
+            String::new(),
+            WindowIdentitySource::Unavailable,
+            None,
+            None,
+        )
+        .is_none());
     }
 
     #[test]
     fn missing_app_id_fails_closed_but_preserves_title() {
-        let context =
-            window_context_from_signal(String::new(), "Terminal".into(), String::new()).unwrap();
+        let context = window_context_from_signal(
+            String::new(),
+            "Terminal".into(),
+            String::new(),
+            WindowIdentitySource::Unavailable,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(context.app_id, None);
         assert_eq!(context.title.as_deref(), Some("Terminal"));
     }
 
     #[test]
+    fn executable_identity_is_used_only_when_compositor_app_identity_is_unavailable() {
+        let executable = std::env::current_exe().unwrap().display().to_string();
+        let context = window_context_from_signal(
+            String::new(),
+            "Terminal".into(),
+            "window-1".into(),
+            WindowIdentitySource::Unavailable,
+            Some(executable.clone()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            context.app_id.as_deref(),
+            Some(
+                format!(
+                    "{}{}",
+                    wayexpand_core::PROCESS_EXECUTABLE_APP_ID_PREFIX,
+                    executable
+                )
+                .as_str()
+            )
+        );
+
+        let context = window_context_from_signal(
+            "org.kde.konsole".into(),
+            "Terminal".into(),
+            "window-1".into(),
+            WindowIdentitySource::DesktopFileName,
+            Some("/usr/bin/other-terminal".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(context.app_id.as_deref(), Some("org.kde.konsole"));
+    }
+
+    #[test]
+    fn invalid_or_untrusted_executable_paths_do_not_create_identity() {
+        for path in ["relative/program", "/tmp/../bin/sh", "/definitely/missing"] {
+            assert!(!super::is_valid_executable_path(path), "{path}");
+        }
+        let context = window_context_from_signal(
+            String::new(),
+            "Terminal".into(),
+            String::new(),
+            WindowIdentitySource::Unavailable,
+            Some("relative/program".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(context.app_id, None);
+    }
+
+    #[test]
+    fn proc_executable_resolution_is_same_uid_and_pid_stable() {
+        let uid = unsafe { libc::geteuid() };
+        let path = super::process_executable_path(process::id() as i32, uid)
+            .expect("the current test process has an executable identity");
+        assert!(super::is_valid_executable_path(&path));
+        assert_eq!(
+            super::process_executable_path(process::id() as i32, uid.saturating_add(1)),
+            Err(super::ExecutableLookupFailure::DifferentUser)
+        );
+        assert_eq!(
+            super::process_executable_path(0, uid),
+            Err(super::ExecutableLookupFailure::ProcessIdUnavailable)
+        );
+    }
+
+    #[test]
+    fn process_executable_failure_categories_are_content_free_and_stable() {
+        use wayexpand_core::ProcessIdentityState;
+
+        let cases = [
+            (
+                super::ExecutableLookupFailure::ProcessIdUnavailable,
+                ProcessIdentityState::ProcessIdUnavailable,
+            ),
+            (
+                super::ExecutableLookupFailure::ProcessMetadataUnavailable,
+                ProcessIdentityState::ProcessMetadataUnavailable,
+            ),
+            (
+                super::ExecutableLookupFailure::DifferentUser,
+                ProcessIdentityState::DifferentUser,
+            ),
+            (
+                super::ExecutableLookupFailure::ExecutablePermissionDenied,
+                ProcessIdentityState::ExecutablePermissionDenied,
+            ),
+            (
+                super::ExecutableLookupFailure::ExecutableLinkUnavailable,
+                ProcessIdentityState::ExecutableLinkUnavailable,
+            ),
+            (
+                super::ExecutableLookupFailure::ExecutableInvalid,
+                ProcessIdentityState::ExecutableInvalid,
+            ),
+            (
+                super::ExecutableLookupFailure::ProcessChanged,
+                ProcessIdentityState::ProcessChanged,
+            ),
+        ];
+        for (failure, expected) in cases {
+            let state = failure.diagnostic_state();
+            assert_eq!(state, expected);
+            assert_eq!(ProcessIdentityState::from_code(state.code()), expected);
+            assert!(!state.as_str().contains('/'));
+        }
+    }
+
+    #[test]
+    fn compositor_pid_is_never_used_as_application_identity() {
+        use wayexpand_core::ProcessIdentityState;
+
+        let pid = process::id();
+        let (executable, name, state) =
+            super::window_process_identity(pid as i32, pid, unsafe { libc::geteuid() });
+        assert_eq!(executable, None);
+        assert_eq!(name, None);
+        assert_eq!(state, ProcessIdentityState::CompositorProcessId);
+        assert_eq!(
+            ProcessIdentityState::from_code(state.code()),
+            ProcessIdentityState::CompositorProcessId
+        );
+        assert_eq!(state.as_str(), "compositor-process-id");
+    }
+
+    #[test]
+    fn proc_name_resolution_is_same_uid_and_pid_stable() {
+        let uid = unsafe { libc::geteuid() };
+        let name = super::process_name(process::id() as i32, uid)
+            .expect("the current test process has a kernel task name");
+        assert!(super::is_valid_process_name(&name));
+        assert_eq!(
+            super::process_name(process::id() as i32, uid.saturating_add(1)),
+            None
+        );
+        assert_eq!(super::process_name(0, uid), None);
+        for invalid in ["", "bad/name", "bad name", "é", "1234567890123456"] {
+            assert!(!super::is_valid_process_name(invalid), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn process_name_is_used_only_as_explicit_lower_assurance_identity() {
+        let context = window_context_from_signal(
+            String::new(),
+            "Terminal".into(),
+            "window-1".into(),
+            WindowIdentitySource::CompositorIdentityOnly,
+            None,
+            Some("konsole".into()),
+        )
+        .unwrap();
+        assert_eq!(context.app_id.as_deref(), Some("process-name:konsole"));
+
+        let context = window_context_from_signal(
+            "org.kde.konsole".into(),
+            "Terminal".into(),
+            "window-1".into(),
+            WindowIdentitySource::DesktopFileName,
+            None,
+            Some("other-terminal".into()),
+        )
+        .unwrap();
+        assert_eq!(context.app_id.as_deref(), Some("org.kde.konsole"));
+
+        let context = window_context_from_signal(
+            String::new(),
+            "Terminal".into(),
+            "window-1".into(),
+            WindowIdentitySource::CompositorIdentityOnly,
+            None,
+            Some("bad/name".into()),
+        )
+        .unwrap();
+        assert_eq!(context.app_id, None);
+    }
+
+    #[test]
+    fn compositor_identity_never_becomes_a_focused_application_id() {
+        for compositor in [
+            "kwin_wayland",
+            "KWIN_X11",
+            "/usr/share/applications/kwin_wayland.desktop",
+        ] {
+            let context = window_context_from_signal(
+                compositor.into(),
+                "Terminal window".into(),
+                "window-kwin".into(),
+                WindowIdentitySource::CompositorIdentityOnly,
+                None,
+                None,
+            )
+            .expect("the title and exact window identity remain available");
+            assert_eq!(context.app_id, None, "{compositor} is not an app identity");
+            assert_eq!(context.title.as_deref(), Some("Terminal window"));
+            assert_eq!(context.instance_id.as_deref(), Some("window-kwin"));
+        }
+        assert!(is_kwin_compositor_app_id("KWin_Wayland"));
+        assert!(is_kwin_compositor_app_id("kwin_x11.desktop"));
+        assert!(!is_kwin_compositor_app_id("org.kde.konsole"));
+    }
+
+    #[test]
+    fn untrusted_or_missing_identity_provenance_never_authorizes_an_app_id() {
+        for source in [
+            WindowIdentitySource::Unavailable,
+            WindowIdentitySource::CompositorIdentityOnly,
+        ] {
+            let context = window_context_from_signal(
+                "org.kde.konsole".into(),
+                "Terminal window".into(),
+                "window-kwin".into(),
+                source,
+                None,
+                None,
+            )
+            .expect("exact window context remains useful for non-app scoped diagnostics");
+            assert_eq!(context.app_id, None, "{source:?} cannot authorize app ID");
+            assert_eq!(context.instance_id.as_deref(), Some("window-kwin"));
+        }
+    }
+
+    #[test]
     fn missing_title_preserves_app_id() {
-        let context =
-            window_context_from_signal("org.example.Editor".into(), String::new(), String::new())
-                .unwrap();
+        let context = window_context_from_signal(
+            "org.example.Editor".into(),
+            String::new(),
+            String::new(),
+            WindowIdentitySource::DesktopFileName,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(context.app_id.as_deref(), Some("org.example.Editor"));
         assert_eq!(context.title, None);
     }
@@ -875,6 +1484,9 @@ mod tests {
             "org.example.Editor".into(),
             "Document".into(),
             "window-1".into(),
+            WindowIdentitySource::ResourceClass,
+            None,
+            None,
         )
         .unwrap();
         assert_eq!(context.app_id.as_deref(), Some("org.example.Editor"));
@@ -1143,13 +1755,6 @@ mod tests {
                 .is_some_and(|identity| !identity.is_empty()),
             "KWin should provide a strong identity for the exact focused window"
         );
-        assert!(
-            initial_window
-                .app_id
-                .as_deref()
-                .is_some_and(|app_id| !app_id.is_empty()),
-            "KWin should provide an application identity for the focused window"
-        );
         assert_eq!(
             std::fs::metadata(&tracker.script_path).unwrap().mode() & 0o777,
             0o600,
@@ -1164,7 +1769,13 @@ mod tests {
                 "/WindowTracker",
                 Some("org.wayexpand.WindowTracker1"),
                 "WindowChanged",
-                &("org.example.Spoof", "fake-window", "not-a-kwin-id"),
+                &(
+                    "org.example.Spoof",
+                    "fake-window",
+                    "not-a-kwin-id",
+                    "resource-class",
+                    0_i32,
+                ),
             )
             .expect("the tracker method should reject an untrusted caller without disconnecting")
             .body()
@@ -1221,6 +1832,71 @@ mod tests {
                     assert!(error.message.contains("no longer reports"));
                     break;
                 }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a live KDE Plasma Wayland session and a focused application window"]
+    fn live_kwin_tracker_requires_trustworthy_application_identity() {
+        let process_identity_enabled =
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut tracker = KwinWindowTracker::new_with_process_identity(process_identity_enabled)
+            .expect("connect to the live KWin scripting API");
+        let initial = tracker
+            .next_window_timeout(std::time::Duration::from_secs(2))
+            .expect("receive the initial active-window snapshot");
+        assert!(
+            initial.is_some(),
+            "KWin should report its initial active-window snapshot"
+        );
+        let initial_window = initial
+            .flatten()
+            .expect("KWin should identify its initially focused window");
+        assert!(
+            initial_window
+                .instance_id
+                .as_deref()
+                .is_some_and(|identity| !identity.is_empty()),
+            "KWin should provide a strong identity for the exact focused window"
+        );
+        match tracker.last_identity_source() {
+            WindowIdentitySource::ProcessExecutable => {
+                let path = initial_window
+                    .app_id
+                    .as_deref()
+                    .and_then(|app_id| {
+                        app_id.strip_prefix(wayexpand_core::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                    })
+                    .expect("process identity source must carry its exact executable path");
+                assert!(
+                    is_valid_executable_path(path),
+                    "KWin fallback must resolve a live same-user executable path"
+                );
+            }
+            WindowIdentitySource::ProcessName => {
+                panic!(
+                    "KWin exposed only a mutable Linux process name (executable lookup: {}); this is insufficient for the trusted-identity certification gate",
+                    tracker.last_process_identity_state().as_str()
+                );
+            }
+            WindowIdentitySource::ProcessExecutableUnavailable
+                if tracker.last_process_identity_state()
+                    == wayexpand_core::ProcessIdentityState::CompositorProcessId =>
+            {
+                panic!(
+                    "KWin reported its own PID for the focused compositor surface; focus a real application window and rerun the identity test"
+                );
+            }
+            source => {
+                assert!(
+                    initial_window
+                        .app_id
+                        .as_deref()
+                        .is_some_and(|app_id| !app_id.is_empty()),
+                    "KWin must provide an app ID or verified process executable; metadata source: {}",
+                    source.as_str()
+                );
             }
         }
     }

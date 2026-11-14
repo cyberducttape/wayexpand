@@ -38,5 +38,11 @@ async-io.workspace = true
 futures-lite.workspace = true
 xkbcommon-rs.workspace = true
 
+[features]
+loom-tests = []
+
+[dev-dependencies]
+loom = "0.7.2"
+
 [build-dependencies]
 wayexpand-build-info = { path = "../build-info" }

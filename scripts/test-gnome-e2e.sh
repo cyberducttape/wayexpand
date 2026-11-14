@@ -37,6 +37,16 @@ if [ "$utf8_charmap" != UTF-8 ]; then
     exit 1
 fi
 shell_version=$(gnome-shell --version | sed -n 's/.* \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1/p')
+expected_shell_version=${WX_GNOME_EXPECTED_SHELL_MAJOR:-}
+if [ -n "$expected_shell_version" ] && [ "$shell_version" != "$expected_shell_version" ]; then
+    printf '%s\n' "fail gnome-shell-runtime-version expected GNOME Shell $expected_shell_version, found ${shell_version:-unknown}" >&2
+    exit 1
+fi
+if [ -n "$expected_shell_version" ]; then
+    printf '%s\n' "pass gnome-shell-runtime-version GNOME Shell $shell_version matches its compatibility gate"
+else
+    printf '%s\n' "pass gnome-shell-runtime-version GNOME Shell $shell_version detected; no version-specific CI gate was requested"
+fi
 if [ -z "$shell_version" ] || ! python3 - "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" "$shell_version" <<'PY'
 import json
 import sys
@@ -1501,7 +1511,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-x11-terminal-baseline gnome-gtk-wayland-baseline gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
+expected_checks='gnome-shell-runtime-version extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered ibus-engine-active deprecated-current-no-activation gnome-ibus-source-active gnome-x11-terminal-baseline gnome-gtk-wayland-baseline gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then

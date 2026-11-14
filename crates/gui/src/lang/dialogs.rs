@@ -437,13 +437,13 @@ impl Strings {
     pub fn undo_chord_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Pressed right after an expansion with nothing typed in between, reverts it. Leave empty to disable."
+                "Only works when the active route verifies the target document. Current IBus and daemon routes cannot verify their output, so this shortcut cannot undo it. Leave empty to disable."
             }
             Language::Indonesian => {
-                "Ditekan tepat setelah ekspansi tanpa ada ketikan di antaranya, akan membatalkannya. Kosongkan untuk menonaktifkan."
+                "Hanya berfungsi jika rute aktif memverifikasi dokumen target. Rute IBus dan daemon saat ini tidak dapat memverifikasi keluarannya, jadi pintasan ini tidak dapat membatalkannya. Kosongkan untuk menonaktifkan."
             }
             Language::German => {
-                "Direkt nach einer Erweiterung gedrückt (ohne dazwischen zu tippen), macht sie rückgängig. Leer lassen zum Deaktivieren."
+                "Funktioniert nur, wenn die aktive Route das Zieldokument verifiziert. Die aktuellen IBus- und Daemon-Routen können ihre Ausgabe nicht verifizieren, daher kann diese Tastenkombination sie nicht rückgängig machen. Leer lassen zum Deaktivieren."
             }
         }
     }

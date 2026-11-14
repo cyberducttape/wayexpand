@@ -12,7 +12,7 @@ use wayexpand_backend_selection::{
     plan_routes, probe_capabilities, recommended_route, Capabilities, RecommendedRoute, RoutePlan,
 };
 use wayexpand_core::{
-    discover_backends, plan_insertion, CompatibilityMode, Config, DaemonStatus, FleetConfig,
+    discover_backends, CompatibilityMode, Config, DaemonStatus, FleetConfig,
     InsertionRouteCapabilities, InsertionStrategy, CONTROL_STATUS_SCHEMA,
 };
 
@@ -114,6 +114,7 @@ pub(crate) struct DaemonCapabilities {
     pub raw_capture_fallback_enabled: Option<bool>,
     pub raw_capture_app_count: Option<usize>,
     pub capture_app_scope_state: Option<String>,
+    pub window_process_identity_state: Option<String>,
     pub injection_mode: Option<&'static str>,
     pub injection_max_text_chars: Option<usize>,
     pub injection_throughput_chars_per_sec: Option<u32>,
@@ -121,6 +122,11 @@ pub(crate) struct DaemonCapabilities {
     pub injection_latency_mean_us: Option<u64>,
     pub injection_latency_p95_us: Option<u64>,
     pub injection_latency_p99_us: Option<u64>,
+    pub output_interrupt_sample_count: Option<u64>,
+    pub output_interrupt_dropped_total: Option<u64>,
+    pub output_interrupt_p50_us: Option<u64>,
+    pub output_interrupt_p95_us: Option<u64>,
+    pub output_interrupt_p99_us: Option<u64>,
     pub matcher_latency_p50_us: Option<u64>,
     pub matcher_latency_p95_us: Option<u64>,
     pub matcher_latency_p99_us: Option<u64>,
@@ -166,13 +172,17 @@ pub(crate) struct DaemonCapabilities {
 #[serde(default)]
 pub(crate) struct ExpansionTrace {
     pub at_unix: u64,
+    pub duration_us: Option<u64>,
+    pub interrupt_to_backend_return_us: Option<u64>,
     pub backend: String,
+    pub expected_insert_units: Option<usize>,
     pub trigger_recognized: String,
     pub focus_admission: String,
     pub backend_selected: String,
     pub erase_acknowledged: String,
     pub insertion_attempted: bool,
     pub completion: String,
+    pub application_result: String,
     pub recovery: String,
     pub progress_tracked: bool,
     pub erased_units: usize,
@@ -202,7 +212,11 @@ pub(crate) enum OutputRefusal {
 }
 
 impl DaemonCapabilities {
-    pub fn insertion_plan(&self, characters: usize) -> InsertionStrategy {
+    pub fn insertion_plan(
+        &self,
+        output_characters: usize,
+        paced_events: usize,
+    ) -> InsertionStrategy {
         let route = self.injection_mode.map(|mode| InsertionRouteCapabilities {
             atomic_verified_replace: self.inject_atomic_replace == Some(true)
                 && self.replacement_assurance == Some(ReplacementAssurance::Verified),
@@ -211,8 +225,9 @@ impl DaemonCapabilities {
             paced_throughput_chars_per_sec: self.injection_throughput_chars_per_sec,
             max_text_chars: self.injection_max_text_chars.unwrap_or(0),
         });
-        plan_insertion(
-            characters,
+        wayexpand_core::plan_replacement(
+            output_characters,
+            paced_events,
             route,
             self.compatibility_mode.unwrap_or(CompatibilityMode::Off),
         )
@@ -307,6 +322,33 @@ impl DaemonCapabilities {
                 found = true;
             }
         }
+        for (key, slot) in [
+            (
+                "output_interrupt_to_backend_return_sample_count",
+                &mut capabilities.output_interrupt_sample_count,
+            ),
+            (
+                "output_interrupt_to_backend_return_dropped_total",
+                &mut capabilities.output_interrupt_dropped_total,
+            ),
+            (
+                "output_interrupt_to_backend_return_p50_us",
+                &mut capabilities.output_interrupt_p50_us,
+            ),
+            (
+                "output_interrupt_to_backend_return_p95_us",
+                &mut capabilities.output_interrupt_p95_us,
+            ),
+            (
+                "output_interrupt_to_backend_return_p99_us",
+                &mut capabilities.output_interrupt_p99_us,
+            ),
+        ] {
+            if let Some(value) = status.u64_field(key) {
+                *slot = Some(value);
+                found = true;
+            }
+        }
         capabilities.replacement_assurance =
             status
                 .field("replacement_assurance")
@@ -340,6 +382,28 @@ impl DaemonCapabilities {
             })
             .map(str::to_owned);
         found |= capabilities.capture_app_scope_state.is_some();
+        capabilities.window_process_identity_state = status
+            .field("window_process_identity_state")
+            .filter(|value| {
+                matches!(
+                    *value,
+                    "not-applicable"
+                        | "not-requested"
+                        | "compositor-application-id"
+                        | "process-executable"
+                        | "process-id-unavailable"
+                        | "process-metadata-unavailable"
+                        | "different-user"
+                        | "executable-permission-denied"
+                        | "executable-invalid"
+                        | "process-changed-during-lookup"
+                        | "process-name-unavailable"
+                        | "executable-link-unavailable"
+                        | "compositor-process-id"
+                )
+            })
+            .map(str::to_owned);
+        found |= capabilities.window_process_identity_state.is_some();
         capabilities.window_tracker_state = status
             .field("window_tracker_state")
             .filter(|value| {
@@ -845,6 +909,13 @@ pub(crate) fn insert_target(generation: u64, token: &str, trigger: &str) -> anyh
 
 #[cfg(test)]
 mod tests {
+    fn current_schema_fixture(fixture: &str) -> String {
+        let (_, fields) = fixture
+            .split_once('\n')
+            .expect("status fixture includes a schema line");
+        format!("status_schema={}\n{fields}", super::CONTROL_STATUS_SCHEMA)
+    }
+
     #[test]
     fn status_field_uses_the_shared_daemon_parser() {
         assert_eq!(
@@ -856,9 +927,9 @@ mod tests {
 
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
-        let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=34\nsource=evdev\nraw_capture_fallback_enabled=true\nraw_capture_app_count=14\ncapture_app_scope_state=allowed\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\nwindow_tracker_state=reconnecting\nwindow_tracker_reconnect_attempts_total=3\nwindow_tracker_disconnects_total=2\nwindow_tracker_last_failure_reason=tracker_disconnected\nwindow_tracker_last_connected_unix=1794268800\nwindow_tracker_reconnect_backoff_ms=1000\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
-        )
+        let capabilities = super::DaemonCapabilities::parse(&current_schema_fixture(
+            "status_schema=38\nsource=evdev\nraw_capture_fallback_enabled=true\nraw_capture_app_count=14\ncapture_app_scope_state=allowed\nwindow_process_identity_state=compositor-process-id\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\nwindow_tracker_state=reconnecting\nwindow_tracker_reconnect_attempts_total=3\nwindow_tracker_disconnects_total=2\nwindow_tracker_last_failure_reason=tracker_disconnected\nwindow_tracker_last_connected_unix=1794268800\nwindow_tracker_reconnect_backoff_ms=1000\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
+        ))
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
         assert_eq!(capabilities.injection_max_text_chars, Some(250));
@@ -870,6 +941,10 @@ mod tests {
         assert_eq!(
             capabilities.capture_app_scope_state.as_deref(),
             Some("allowed")
+        );
+        assert_eq!(
+            capabilities.window_process_identity_state.as_deref(),
+            Some("compositor-process-id")
         );
         assert_eq!(capabilities.capture_exclusive, Some(true));
         assert_eq!(capabilities.capture_composition_aware, Some(false));
@@ -912,9 +987,9 @@ mod tests {
 
     #[test]
     fn tracker_diagnostic_labels_are_allowlisted_before_gui_display() {
-        let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=34\nwindow_tracker_connected=false\nwindow_tracker_state=title=private-window\nwindow_tracker_last_failure_reason=/home/user/secret\n",
-        )
+        let capabilities = super::DaemonCapabilities::parse(&current_schema_fixture(
+            "status_schema=38\nwindow_tracker_connected=false\nwindow_tracker_state=title=private-window\nwindow_tracker_last_failure_reason=/home/user/secret\n",
+        ))
         .unwrap();
         assert_eq!(capabilities.window_tracker_state, None);
         assert_eq!(capabilities.window_tracker_last_failure_reason, None);
@@ -975,9 +1050,9 @@ mod tests {
 
     #[test]
     fn daemon_capability_parser_recognizes_the_negotiated_libei_fallback_label() {
-        let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=34\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\ninject_max_text_chars=8\ninject_expected_throughput_chars_per_sec=83\ncompatibility_mode=tracked-focus\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
-        )
+        let capabilities = super::DaemonCapabilities::parse(&current_schema_fixture(
+            "status_schema=38\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\ninject_max_text_chars=8\ninject_expected_throughput_chars_per_sec=83\ncompatibility_mode=tracked-focus\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
+        ))
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
         assert_eq!(
@@ -987,20 +1062,20 @@ mod tests {
         assert_eq!(capabilities.matcher_latency_p50_us, Some(12));
         assert_eq!(capabilities.injection_latency_p95_us, Some(3400));
         assert_eq!(
-            capabilities.insertion_plan(8),
+            capabilities.insertion_plan(8, 8),
             super::InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms: 97 }
         );
         assert_eq!(
-            capabilities.insertion_plan(9),
+            capabilities.insertion_plan(9, 9),
             super::InsertionStrategy::ClipboardAssistedPaste
         );
     }
 
     #[test]
     fn daemon_capability_parser_reads_usage_persistence_health() {
-        let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=34\nusage_flush_max_duration_us=1200\nusage_flush_failures_total=2\nusage_worker_failures_total=1\nusage_queue_rejected_total=3\nusage_events_recorded_total=100\nusage_events_persisted_total=94\nusage_events_dropped_total=6\n",
-        )
+        let capabilities = super::DaemonCapabilities::parse(&current_schema_fixture(
+            "status_schema=38\nusage_flush_max_duration_us=1200\nusage_flush_failures_total=2\nusage_worker_failures_total=1\nusage_queue_rejected_total=3\nusage_events_recorded_total=100\nusage_events_persisted_total=94\nusage_events_dropped_total=6\n",
+        ))
         .unwrap();
         assert_eq!(capabilities.usage_flush_max_duration_us, Some(1200));
         assert_eq!(capabilities.usage_flush_failures_total, Some(2));
@@ -1013,9 +1088,9 @@ mod tests {
 
     #[test]
     fn daemon_capability_parser_reads_replacement_assurance_and_refusals() {
-        let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=34\nreplacement_assurance=focus-tracked-best-effort\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\noutput_partial_total=1\nevdev_quarantined_events_total=7\n",
-        )
+        let capabilities = super::DaemonCapabilities::parse(&current_schema_fixture(
+            "status_schema=38\nreplacement_assurance=focus-tracked-best-effort\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\noutput_partial_total=1\nevdev_quarantined_events_total=7\n",
+        ))
         .unwrap();
         assert_eq!(
             capabilities.replacement_assurance,
@@ -1031,9 +1106,9 @@ mod tests {
         assert_eq!(capabilities.evdev_quarantined_events_total, Some(7));
         assert!(!capabilities.recent_expansion_outcomes_reported);
 
-        let blocked = super::DaemonCapabilities::parse(
-            "status_schema=34\nreplacement_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
-        )
+        let blocked = super::DaemonCapabilities::parse(&current_schema_fixture(
+            "status_schema=38\nreplacement_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
+        ))
         .unwrap();
         assert_eq!(
             blocked.replacement_assurance,
@@ -1041,22 +1116,66 @@ mod tests {
         );
         assert_eq!(blocked.output_last_refusal, None);
 
-        let traced = super::DaemonCapabilities::parse(
-            r#"status_schema=34
-recent_expansion_outcomes=[{"at_unix":1,"backend":"input-method-v2","trigger_recognized":"yes","focus_admission":"passed","backend_selected":"yes","erase_acknowledged":"atomic replacement acknowledged","insertion_attempted":true,"completion":"applied"},{"at_unix":2,"backend":"libei","trigger_recognized":"yes","focus_admission":"passed","backend_selected":"yes","erase_acknowledged":"yes","insertion_attempted":true,"completion":"partial_write","recovery":"manual_review","progress_tracked":true,"erased_units":4,"inserted_units":3}]
+        let traced = super::DaemonCapabilities::parse(&current_schema_fixture(
+            r#"status_schema=38
+recent_expansion_outcomes=[{"at_unix":1,"duration_us":42,"backend":"input-method-v2","expected_insert_units":5,"trigger_recognized":"yes","focus_admission":"passed","backend_selected":"yes","erase_acknowledged":"atomic replacement acknowledged","insertion_attempted":true,"completion":"applied","application_result":"unverified"},{"at_unix":2,"duration_us":900,"backend":"libei","expected_insert_units":11,"trigger_recognized":"yes","focus_admission":"passed","backend_selected":"yes","erase_acknowledged":"yes","insertion_attempted":true,"completion":"partial_write","application_result":"unknown","recovery":"manual_review","progress_tracked":true,"erased_units":4,"inserted_units":3}]
 "#,
-        )
+        ))
         .unwrap();
         assert_eq!(traced.recent_expansion_outcomes.len(), 2);
         assert_eq!(traced.recent_expansion_outcomes[0].completion, "applied");
+        assert_eq!(traced.recent_expansion_outcomes[0].duration_us, Some(42));
+        assert_eq!(
+            traced.recent_expansion_outcomes[0].expected_insert_units,
+            Some(5)
+        );
+        assert_eq!(
+            traced.recent_expansion_outcomes[0].application_result,
+            "unverified"
+        );
         assert_eq!(
             traced.recent_expansion_outcomes[1].completion,
             "partial_write"
         );
+        assert_eq!(
+            traced.recent_expansion_outcomes[1].application_result,
+            "unknown"
+        );
         assert!(traced.recent_expansion_outcomes[1].progress_tracked);
         assert_eq!(traced.recent_expansion_outcomes[1].erased_units, 4);
         assert_eq!(traced.recent_expansion_outcomes[1].inserted_units, 3);
+        assert_eq!(
+            traced.recent_expansion_outcomes[1].interrupt_to_backend_return_us,
+            None
+        );
         assert!(traced.recent_expansion_outcomes_reported);
+    }
+
+    #[test]
+    fn interrupted_output_timing_is_parsed_without_claiming_visible_text_latency() {
+        let traced = super::DaemonCapabilities::parse(&current_schema_fixture(
+            r#"status_schema=38
+output_interrupt_to_backend_return_sample_count=8
+output_interrupt_to_backend_return_p50_us=1200
+output_interrupt_to_backend_return_p95_us=2400
+output_interrupt_to_backend_return_p99_us=4100
+recent_expansion_outcomes=[{"completion":"partial_write","application_result":"unknown","interrupt_to_backend_return_us":1800}]
+"#,
+        ))
+        .unwrap();
+        assert_eq!(
+            traced.recent_expansion_outcomes[0].interrupt_to_backend_return_us,
+            Some(1800)
+        );
+        assert_eq!(traced.output_interrupt_sample_count, Some(8));
+        assert_eq!(traced.output_interrupt_p50_us, Some(1200));
+        assert_eq!(traced.output_interrupt_p95_us, Some(2400));
+        assert_eq!(traced.output_interrupt_p99_us, Some(4100));
+        let label = crate::lang::Strings::new(crate::lang::Language::English)
+            .trace_interrupt_timing(Some(1800))
+            .unwrap();
+        assert!(label.contains("backend returned in 1800 µs"));
+        assert!(label.contains("client result unverified"));
     }
 
     #[test]

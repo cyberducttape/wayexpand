@@ -50,8 +50,18 @@ marker appeared once. The one-shot check does not persist a new portal
 restoration token. A passing capture check and a passing injection check
 are separate evidence; neither certifies the combined route or other apps.
 
-Injectors declare how safely they erase (`ReplacementGuarantee`). Routes that
-verify the field's text (input-method-v2, IBus) replace triggers directly.
+The route catalog reports three separate facts: `trigger_precondition` says
+what is checked before erasing, `output_transaction` says whether erasure and
+insertion are one protocol batch or separate operations, and
+`application_result` says whether the backend can observe the resulting
+document. Current routes report `unobservable`; an accepted backend request
+does not prove that the target application applied the expected text. IBus
+checks surrounding text against the trigger, but emits deletion and commit as
+separate signals, so that precondition does not make its replacement atomic.
+Input-method-v2 submits deletion and commit in one protocol batch, but still
+cannot observe the target application's final document.
+`wayexpand backend list --json` schema 2 exposes these as separate fields.
+
 Keystroke injectors (libei, wlroots virtual keyboard) are wrapped by the
 daemon's assurance gate when they connect: they erase only with the user's
 `compatibility_mode` consent and a focus check immediately before typing, and
@@ -130,8 +140,9 @@ layout-dependent keysym fallback, the bridge is tried before requiring an
 active EIS layout group. Thus a verified Fcitx5 Unicode commit can still work
 when KWin omits that group. If the bridge reports that no Fcitx input context
 is focused, the ordinary fallback's layout, representability and pacing
-checks are applied before any raw erase. A missing group never selects the
-first configured layout.
+checks are applied before any raw erase; a paced fallback over 100 ms is
+refused even when `keystroke_max_chars` was raised. A missing group never
+selects the first configured layout.
 
 **Character insertion latency (ei_keyboard fallback):**
 When the EIS server provides only `ei_keyboard` (no `ei_text`), the backend
@@ -146,12 +157,14 @@ For short snippets (signatures, small templates), this is imperceptible.
 For long replacements (multi-paragraph code blocks, long administrative text),
 the total insertion time becomes noticeable:
 
-- 8-character replacement: under 100ms by the planner estimate (default limit)
-- 100-character replacement: ~1.2 seconds
+- An 8-character replacement payload alone is about 97ms at 83 events/sec;
+  trigger erasure, delimiters, and cursor movement add to the transaction time.
+- 100-character replacement payload: ~1.2 seconds, plus trigger erasure and any
+  delimiter or cursor work
 
-Longer replacements are rejected before any erase or insertion. The limit is
-`[settings] keystroke_max_chars` (default 8, at most 5000; also under
-Settings > Engine in the GUI):
+Longer replacements are rejected before any erase or insertion. The configured
+character ceiling is `[settings] keystroke_max_chars` (default 8, at most 5000;
+also under Settings > Engine in the GUI):
 
 ```toml
 [settings]
@@ -159,18 +172,21 @@ keystroke_max_chars = 1000   # explicit opt-in to longer paced output
 ```
 
 The insertion planner previews a route-native, manual-paste, or short paced-key
-strategy from active daemon capabilities and compatibility consent. Paced
-synthesis is recommended only when its estimate is at most 100 ms; this
-threshold is a routing objective, not a certified latency guarantee. For long
-configuration files and runbooks, use the
-preview's Copy action or `wayexpand new` to write a file instead of typing the
-content through the virtual keyboard. The estimate is advisory; it does not
-make an unverified or non-atomic route safe for automatic replacement.
+strategy from active daemon capabilities and compatibility consent. The GUI
+estimates the whole transaction, including trigger erasure, replacement text,
+delimiter handling, and a conservative cursor-travel bound. Runtime preflight
+uses the actual matched text and cursor offset, and refuses the replacement
+before erasing the trigger if its estimate exceeds 100 ms. Raising
+`keystroke_max_chars` cannot bypass that interactive budget. These estimates
+use advertised throughput; they are not certified latency guarantees. For
+long configuration files and runbooks, use the preview's Copy action or
+`wayexpand new` to write a file instead of typing the content through the
+virtual keyboard. This does not make an unverified or non-atomic route safe for
+automatic replacement.
 
-Raising it trades speed for reach: anything you type while a long
-replacement is being typed is mixed into it, and a focus change or the
-insertion timeout stops it partway. A changed limit applies to the running
-daemon on the next configuration reload.
+The setting remains an upper bound for backends that support longer payloads;
+it does not authorize a paced transaction that exceeds the runtime budget. A
+changed limit applies to the running daemon on the next configuration reload.
 
 This is intentional: the delay prioritizes correctness and reliability over speed
 when the fast path isn't available.
@@ -273,6 +289,18 @@ works across compositors: `wlr-foreign-toplevel-management-unstable-v1`
 is implemented by some wlroots compositors (Sway, Hyprland), but WayExpand
 does not currently ship a tracker using it. KDE Plasma's KWin implements
 neither it nor the newer `ext-foreign-toplevel-list-v1` staging protocol.
+KWin's authenticated window tracker can use the focused process's exact
+same-user executable path when no desktop application ID is available. In
+terminal-only mode, KWin resolves this fallback only for a focused window whose
+compositor identity is not a usable app ID. The path is returned only by the
+explicit `wayexpand debug --focused-app-id` command. Opt in to matching with
+`process_executable_exact:/absolute/path` in `app_filter`,
+`settings.terminal_apps`, or `settings.raw_capture_apps`; for example,
+`process_executable_exact:/usr/bin/konsole`. This is an exact path comparison,
+not a basename or title heuristic. It is currently KWin-specific. A missing,
+cross-user, deleted, or changing process identity remains unknown and matching
+fails closed. An executable allowlist limits which app receives expansion; it
+does not provide password-field detection or make raw evdev capture private.
 Input-method and virtual-keyboard protocol availability must be checked in the
 configured session: KWin lets users select a virtual keyboard, and a headless
 run without that session configuration is not a universal KWin capability
@@ -334,7 +362,9 @@ GNOME (Mutter) exposes no Wayland protocol or public D-Bus API for the focused
 window: `org.gnome.Shell.Introspect` answers only allowlisted callers and
 `org.gnome.Shell.Eval` is disabled. WayExpand therefore ships a small GNOME
 Shell extension (`gnome-extension/wayexpand-window-tracker@cyberducttape.github.io`,
-GNOME 45 or newer) that runs inside GNOME Shell. A tracker calls its
+currently runtime-gated on GNOME Shell 46, 50, and 51) that runs inside GNOME
+Shell. Other Shell majors are not declared compatible until they have a
+version-pinned runtime gate. A tracker calls its
 `Subscribe()` method and gets the focused window (app ID, title, Mutter window
 ID) in the reply; later focus and title changes are pushed only to
 subscribers, by calling `WindowChanged` on their private bus connection.
@@ -374,6 +404,10 @@ cargo run -p wayexpand-backend-wlroots --bin wlroots-type -- 'Hello 🙂'
 ```
 
 This is an output diagnostic, not the daemon's automatic expansion path.
+The daemon treats this route as paced synthetic keyboard output. Since the
+backend does not yet advertise a measured positive throughput bound, automatic
+replacement is refused before trigger erasure; use a manual paste route or a
+native text-output backend until that bound is established.
 
 UTF-8/Unicode-aware matching describes committed text only. WayExpand does not
 support IME preedit/composition state; CJK, dead-key, Compose, Fcitx, and IBus

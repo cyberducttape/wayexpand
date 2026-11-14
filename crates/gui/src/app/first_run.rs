@@ -4,6 +4,61 @@ use crate::*;
 const ONBOARDING_TRIGGER: &str = ":wayexpand-test";
 const ONBOARDING_REPLACEMENT: &str = "WayExpand is working!";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FirstRunOutcome {
+    WorkingInTestedApplication,
+    SafeFallback,
+    SetupIncomplete,
+}
+
+fn first_run_outcome(
+    route_ready: bool,
+    replacement_admitted: bool,
+    test_snippet_available: bool,
+    real_app_test_verified: bool,
+) -> FirstRunOutcome {
+    if !route_ready {
+        FirstRunOutcome::SetupIncomplete
+    } else if replacement_admitted && test_snippet_available && real_app_test_verified {
+        FirstRunOutcome::WorkingInTestedApplication
+    } else {
+        FirstRunOutcome::SafeFallback
+    }
+}
+
+fn first_run_outcome_label(outcome: FirstRunOutcome) -> &'static str {
+    match outcome {
+        FirstRunOutcome::WorkingInTestedApplication => "Working in tested application",
+        FirstRunOutcome::SafeFallback => "Safe fallback",
+        FirstRunOutcome::SetupIncomplete => "Setup incomplete",
+    }
+}
+
+fn verification_scope_label(outcome: FirstRunOutcome, application: Option<&str>) -> String {
+    match (outcome, application) {
+        (FirstRunOutcome::WorkingInTestedApplication, Some(application)) => {
+            format!("Verified in tested application: {application}")
+        }
+        (FirstRunOutcome::WorkingInTestedApplication, None) => {
+            "Verified in tested application: the tested application".to_owned()
+        }
+        _ => "Verified in tested application: not tested".to_owned(),
+    }
+}
+
+fn replacement_test_is_admitted(
+    route_ready: bool,
+    atomic_replace: Option<bool>,
+    replacement_assurance: Option<runtime::ReplacementAssurance>,
+    compatibility_mode: Option<wayexpand_core::CompatibilityMode>,
+) -> bool {
+    route_ready
+        && (atomic_replace == Some(true)
+            && replacement_assurance == Some(runtime::ReplacementAssurance::Verified)
+            || compatibility_mode
+                .is_some_and(|mode| mode != wayexpand_core::CompatibilityMode::Off))
+}
+
 fn gnome_ibus_is_configured(
     ibus_route_active: bool,
     source_registered: wayexpand_backend_ibus::chain::IbusCheckState,
@@ -42,6 +97,8 @@ impl GuiApp {
         self.onboarding_completed = false;
         self.onboarding_visible = true;
         self.desktop_test_dialog_required = true;
+        self.desktop_test_verified = false;
+        self.desktop_test_verified_application = None;
         save_gui_prefs(
             self.language,
             self.colorpack,
@@ -51,6 +108,21 @@ impl GuiApp {
         )
         .err()
         .map(|error| error.to_string())
+    }
+
+    fn begin_onboarding_desktop_test(&mut self) {
+        if !self.select_default_desktop_test() {
+            self.status = Status::warning(
+                "Create or enable the harmless WayExpand test expansion before testing insertion.",
+            );
+            return;
+        }
+        if let Some(error) = self.require_desktop_test() {
+            self.status = Status::warning(format!(
+                "A real-app test is still required, but the pending first-run state could not be saved: {error}"
+            ));
+        }
+        self.test_expansion_dialog_open = true;
     }
 
     pub(crate) fn finish_onboarding(&mut self) {
@@ -269,6 +341,31 @@ impl GuiApp {
             .as_ref()
             .and_then(|capabilities| capabilities.replacement_assurance)
             .map(|assurance| self.strings.replacement_explanation(assurance));
+        let replacement_test_admitted = if gnome_ibus {
+            route_ready
+                && self
+                    .ibus_route
+                    .as_ref()
+                    .and_then(|report| report.check("consent"))
+                    .is_some_and(|check| {
+                        check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+                    })
+        } else {
+            self.daemon_capabilities.as_ref().is_some_and(|caps| {
+                replacement_test_is_admitted(
+                    route_ready,
+                    caps.inject_atomic_replace,
+                    caps.replacement_assurance,
+                    caps.compatibility_mode,
+                )
+            })
+        };
+        let outcome = first_run_outcome(
+            route_ready,
+            replacement_test_admitted,
+            test_snippet.is_some(),
+            self.desktop_test_verified,
+        );
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -290,14 +387,14 @@ impl GuiApp {
                             "Configured: {}",
                             if route_ready { "ready" } else { "incomplete" }
                         ));
-                        ui.label(format!(
-                            "Verified working: {}",
-                            if self.desktop_test_verified {
-                                "yes"
-                            } else {
-                                "not tested"
-                            }
-                        ));
+                        if outcome == FirstRunOutcome::WorkingInTestedApplication {
+                            ui.label(verification_scope_label(
+                                outcome,
+                                self.desktop_test_verified_application.as_deref(),
+                            ));
+                        } else {
+                            ui.label(verification_scope_label(outcome, None));
+                        }
                     });
                     ui.add_space(8.0);
                     theme::brand_mark(ui, 36.0, palette.accent);
@@ -326,6 +423,100 @@ impl GuiApp {
                     });
                     ui.add_space(10.0);
                 }
+                theme::card(ui, palette, |ui| {
+                    ui.set_width(ui.available_width());
+                    match outcome {
+                        FirstRunOutcome::WorkingInTestedApplication => {
+                            ui.colored_label(palette.success, first_run_outcome_label(outcome));
+                            let application = self
+                                .desktop_test_verified_application
+                                .as_deref()
+                                .unwrap_or("the tested application");
+                            ui.label(format!(
+                                "You confirmed the exact test replacement in {application}. This verifies that application and session only."
+                            ));
+                        }
+                        FirstRunOutcome::SafeFallback => {
+                            ui.colored_label(palette.warning, "Safe fallback");
+                            if matcher_passed {
+                                ui.label("The local matcher produced the expected result. Automatic replacement has not been verified in a real application.");
+                            } else {
+                                ui.label("No real-application insertion has been verified. Use Quick Picker to copy a snippet and paste it yourself.");
+                            }
+                            if let Some(assurance) = &route_assurance {
+                                ui.label(RichText::new(*assurance).small().color(palette.muted));
+                            }
+                            ui.horizontal_wrapped(|ui| {
+                                if replacement_test_admitted
+                                    && test_snippet.is_some()
+                                    && theme::primary_button(
+                                        ui,
+                                        palette,
+                                        "Test in a real application",
+                                    )
+                                    .clicked()
+                                {
+                                    self.begin_onboarding_desktop_test();
+                                }
+                                if !replacement_test_admitted
+                                    && theme::primary_button(
+                                        ui,
+                                        palette,
+                                        "Review setup and replacement consent",
+                                    )
+                                    .clicked()
+                                {
+                                    self.start_guided_setup();
+                                }
+                                if theme::secondary_button(
+                                    ui,
+                                    palette,
+                                    "Open Quick Picker (copy and paste)",
+                                )
+                                .clicked()
+                                {
+                                    self.open_copy_only_picker();
+                                }
+                            });
+                        }
+                        FirstRunOutcome::SetupIncomplete => {
+                            ui.colored_label(palette.danger, "Setup incomplete");
+                            ui.label(format!(
+                                "WayExpand cannot use the selected input route yet: {route_state_detail}."
+                            ));
+                            ui.horizontal_wrapped(|ui| {
+                                if theme::primary_button(
+                                    ui,
+                                    palette,
+                                    "Continue guided setup",
+                                )
+                                .clicked()
+                                {
+                                    self.start_guided_setup();
+                                }
+                                if theme::secondary_button(
+                                    ui,
+                                    palette,
+                                    self.strings.onboarding_refresh_checks(),
+                                )
+                                .clicked()
+                                {
+                                    self.refresh_diagnostics(true);
+                                }
+                                if theme::secondary_button(
+                                    ui,
+                                    palette,
+                                    "Open Quick Picker (copy and paste)",
+                                )
+                                .clicked()
+                                {
+                                    self.open_copy_only_picker();
+                                }
+                            });
+                        }
+                    }
+                });
+                ui.add_space(10.0);
                 theme::card(ui, palette, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
@@ -553,7 +744,7 @@ impl GuiApp {
                         palette,
                         5,
                         self.strings.onboarding_real_app_title(),
-                        self.desktop_test_verified,
+                        outcome == FirstRunOutcome::WorkingInTestedApplication,
                     );
                     ui.indent("first_run_real_app", |ui| {
                         ui.label(
@@ -561,61 +752,26 @@ impl GuiApp {
                                 .color(palette.muted),
                         );
                         let has_static_test = test_snippet.is_some();
-                        if has_static_test && route_ready {
-                            ui.horizontal_wrapped(|ui| {
-                                if theme::primary_button(
-                                    ui,
-                                    palette,
-                                    "Start Desktop Integration Test",
-                                )
-                                .clicked()
-                                {
-                                    self.select_default_desktop_test();
-                                    if let Some(error) = self.require_desktop_test() {
-                                        self.status = Status::warning(format!(
-                                            "Desktop testing is still required, but the pending first-run state could not be saved: {error}"
-                                        ));
-                                    }
-                                    self.test_expansion_dialog_open = true;
-                                }
-                            });
-                        } else if test_snippet.is_none() {
+                        if !has_static_test {
                             ui.label(
                                 RichText::new(self.strings.onboarding_create_sample_first())
                                     .color(palette.warning),
                             );
-                        } else if daemon_build == Some(runtime::DaemonBuildState::RestartRequired) {
+                        } else if outcome == FirstRunOutcome::SetupIncomplete
+                            && daemon_build == Some(runtime::DaemonBuildState::RestartRequired)
+                        {
                             ui.label(
                                 RichText::new(
                                     self.strings.onboarding_stale_daemon_state(restart_command),
                                 )
-                                .color(palette.warning),
-                            );
-                        } else if daemon_build == Some(runtime::DaemonBuildState::Unverified) {
-                            ui.label(
-                                RichText::new(self.strings.onboarding_unverified_daemon_state())
                                     .color(palette.warning),
                             );
-                        } else {
-                            ui.label(
-                                RichText::new(self.strings.onboarding_backend_first())
-                                    .color(palette.warning),
-                            );
-                        }
-                        ui.add_space(8.0);
-                        ui.label(
-                            RichText::new("Lower-privilege fallback: copy a snippet and paste it yourself. This does not enable raw keyboard capture or verify automatic expansion.")
-                                .small()
-                                .color(palette.muted),
-                        );
-                        if theme::secondary_button(
-                            ui,
-                            palette,
-                            "Open Quick Picker (copy and paste)",
-                        )
-                        .clicked()
+                        } else if outcome == FirstRunOutcome::SafeFallback
+                            && !replacement_test_admitted
                         {
-                            self.open_copy_only_picker();
+                            ui.label(RichText::new("Use the review action above to authorize compatibility replacement, or keep using Quick Picker for manual paste.").color(palette.warning));
+                        } else if outcome == FirstRunOutcome::SafeFallback {
+                            ui.label(RichText::new("Use the test action above to verify this route in a real application.").color(palette.muted));
                         }
                         if self.onboarding_show_troubleshooting {
                             ui.add_space(8.0);
@@ -696,8 +852,91 @@ impl GuiApp {
 
 #[cfg(test)]
 mod guided_setup_tests {
-    use super::{gnome_ibus_is_configured, uses_gnome_ibus_route};
+    use super::{
+        first_run_outcome, first_run_outcome_label, gnome_ibus_is_configured,
+        replacement_test_is_admitted, uses_gnome_ibus_route, verification_scope_label,
+        FirstRunOutcome,
+    };
+    use crate::runtime::ReplacementAssurance;
     use wayexpand_backend_ibus::chain::IbusCheckState;
+    use wayexpand_core::CompatibilityMode;
+
+    #[test]
+    fn first_run_outcome_requires_a_ready_route_and_a_real_app_confirmation() {
+        assert_eq!(
+            first_run_outcome(false, false, false, false),
+            FirstRunOutcome::SetupIncomplete
+        );
+        assert_eq!(
+            first_run_outcome(false, true, true, true),
+            FirstRunOutcome::SetupIncomplete,
+            "a stale success cannot hide an unavailable route"
+        );
+        assert_eq!(
+            first_run_outcome(true, true, true, false),
+            FirstRunOutcome::SafeFallback
+        );
+        assert_eq!(
+            first_run_outcome(true, true, true, true),
+            FirstRunOutcome::WorkingInTestedApplication
+        );
+        assert_eq!(
+            first_run_outcome(true, false, true, true),
+            FirstRunOutcome::SafeFallback,
+            "a consent change invalidates the previous ready state"
+        );
+        assert_eq!(
+            first_run_outcome(true, true, false, true),
+            FirstRunOutcome::SafeFallback,
+            "removing the test snippet invalidates the previous ready state"
+        );
+    }
+
+    #[test]
+    fn first_run_success_is_scoped_to_the_application_that_was_tested() {
+        let outcome = FirstRunOutcome::WorkingInTestedApplication;
+        assert_eq!(
+            first_run_outcome_label(outcome),
+            "Working in tested application"
+        );
+        assert_eq!(
+            verification_scope_label(outcome, Some("GTK 4 Text Editor")),
+            "Verified in tested application: GTK 4 Text Editor"
+        );
+        assert_eq!(
+            verification_scope_label(FirstRunOutcome::SafeFallback, Some("GTK 4 Text Editor")),
+            "Verified in tested application: not tested",
+            "a test in another app cannot be shown as a current verification after the route is blocked"
+        );
+    }
+
+    #[test]
+    fn real_app_test_requires_atomic_admission_or_explicit_compatibility_consent() {
+        assert!(replacement_test_is_admitted(
+            true,
+            Some(true),
+            Some(ReplacementAssurance::Verified),
+            Some(CompatibilityMode::Off)
+        ));
+        assert!(!replacement_test_is_admitted(
+            true,
+            Some(false),
+            Some(ReplacementAssurance::Blocked),
+            Some(CompatibilityMode::Off)
+        ));
+        assert!(replacement_test_is_admitted(
+            true,
+            Some(false),
+            Some(ReplacementAssurance::FocusTrackedBestEffort),
+            Some(CompatibilityMode::TrackedFocus)
+        ));
+        assert!(!replacement_test_is_admitted(
+            false,
+            Some(true),
+            Some(ReplacementAssurance::Verified),
+            Some(CompatibilityMode::UntrackedFocus)
+        ));
+    }
 
     #[test]
     fn a_live_engine_selects_the_gnome_route_without_a_recommendation() {

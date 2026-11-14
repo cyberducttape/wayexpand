@@ -45,6 +45,16 @@ pub struct Strings {
     lang: Language,
 }
 
+pub(crate) struct RouteTrustDetails<'a> {
+    pub route: &'a str,
+    pub maturity: &'a str,
+    pub sensitive_fields: Option<bool>,
+    pub trigger_precondition: &'a str,
+    pub output_transaction: &'a str,
+    pub application_result: &'a str,
+    pub certified: bool,
+}
+
 impl Strings {
     pub fn new(lang: Language) -> Self {
         Self { lang }

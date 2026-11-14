@@ -29,6 +29,14 @@ const COMMAND_OUTPUT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_COMMAND_OUTPUT: u64 = 64 * 1024;
 const MAX_COMPONENT_BYTES: u64 = 64 * 1024;
 const MAX_SHARED_ENGINE_BYTES: u64 = 512 * 1024 * 1024;
+const IBUS_HANDOFF_TIMEOUT: Duration = Duration::from_secs(10);
+const IBUS_NON_ATOMIC_CONSENT_DETAILS: &[&str] = &[
+    "IBus checks that the text before the cursor is your trigger, but deletion and insertion",
+    "are separate operations. Typing, focus changes, or backend failure during output can",
+    "leave interleaved or partial text. Already-sent text cannot be rolled back, and WayExpand",
+    "will not retry an uncertain result. compatibility_mode = \"off\" refuses replacement.",
+    "Headless tests do not certify physical-session target integrity; there is no accepted physical-session certification for this route.",
+];
 const TERMINAL_DROP_IN: &str = "30-terminal-apps-only.conf";
 const LEGACY_PLASMA_IBUS_ENVIRONMENT_HEADER: &str =
     "# Written by `wayexpand setup --backend ibus`.";
@@ -264,10 +272,20 @@ fn package_engine_path() -> PathBuf {
 fn package_engine_is_trusted() -> bool {
     use std::os::unix::fs::MetadataExt;
     fs::symlink_metadata(package_engine_path()).is_ok_and(|metadata| {
-        metadata.file_type().is_file()
-            && metadata.uid() == 0
-            && metadata.permissions().mode() & 0o111 != 0
+        trusted_system_executable(
+            metadata.file_type().is_file(),
+            metadata.uid(),
+            metadata.permissions().mode(),
+        )
     })
+}
+
+/// A shared IBus manifest may launch this binary for every desktop user. Its
+/// path and file must therefore be controlled by root, executable, and not
+/// writable by group/other. Setup installs mode 0755, but readiness must also
+/// reject a file whose permissions were weakened afterward.
+fn trusted_system_executable(is_regular_file: bool, uid: u32, mode: u32) -> bool {
+    is_regular_file && uid == 0 && mode & 0o111 != 0 && mode & 0o022 == 0
 }
 
 fn manifest_exec(contents: &[u8]) -> Option<&str> {
@@ -323,10 +341,11 @@ fn shared_engine_is_trusted() -> bool {
                     && metadata.permissions().mode() & 0o022 == 0
             })
         });
-    metadata.file_type().is_file()
-        && metadata.uid() == 0
-        && metadata.permissions().mode() & 0o111 != 0
-        && ancestors_are_trusted
+    trusted_system_executable(
+        metadata.file_type().is_file(),
+        metadata.uid(),
+        metadata.permissions().mode(),
+    ) && ancestors_are_trusted
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1481,17 +1500,14 @@ impl ConfigMutationJournal {
 }
 
 /// Make sure `settings.terminal_apps` lists terminals; returns the list.
-fn ensure_terminal_apps(journal: &mut ConfigMutationJournal) -> Result<Vec<String>> {
+fn ensure_terminal_apps(journal: &mut ConfigMutationJournal) -> Result<(Vec<String>, bool)> {
     let path = default_config_path();
     let loaded = Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
-    if !loaded.config.settings.terminal_apps.is_empty() {
-        return Ok(loaded.config.settings.terminal_apps);
-    }
     let mut config = loaded.config;
-    config.settings.terminal_apps = DEFAULT_TERMINAL_APPS
-        .iter()
-        .map(|app| (*app).to_owned())
-        .collect();
+    let changed = enable_terminal_evdev_handoff(&mut config);
+    if !changed {
+        return Ok((config.settings.terminal_apps, false));
+    }
     config.validate().map_err(|error| {
         config_error(format!(
             "configuration invalid after edit: {}",
@@ -1509,11 +1525,29 @@ fn ensure_terminal_apps(journal: &mut ConfigMutationJournal) -> Result<Vec<Strin
         })?;
     journal.note_write(revision);
     step(&format!(
-        "Listed common terminals in settings.terminal_apps ({}); edit that list in {} to add yours",
-        DEFAULT_TERMINAL_APPS.len(),
-        path.display()
+        "Configured app-scoped evdev ownership for {} terminal app IDs",
+        config.settings.terminal_apps.len()
     ));
-    Ok(config.settings.terminal_apps)
+    Ok((config.settings.terminal_apps, true))
+}
+
+fn enable_terminal_evdev_handoff(config: &mut Config) -> bool {
+    let mut changed = false;
+    if config.settings.terminal_apps.is_empty() {
+        config.settings.terminal_apps = DEFAULT_TERMINAL_APPS
+            .iter()
+            .map(|app| (*app).to_owned())
+            .collect();
+        changed = true;
+    }
+    // The IBus process and the evdev companion are separate input owners.
+    // Publish the handoff in the shared config so IBus yields in these apps
+    // even when a terminal advertises surrounding-text support.
+    if !config.settings.raw_capture_fallback_enabled {
+        config.settings.raw_capture_fallback_enabled = true;
+        changed = true;
+    }
+    changed
 }
 
 /// IBus replacement is verified but not atomic, which the default
@@ -1532,14 +1566,15 @@ fn ensure_replacement_consent(
     if !replacement_authorization_required(loaded.config.settings.compatibility_mode) {
         return Ok(false);
     }
-    println!("  IBus checks that the text before the cursor is your trigger, then deletes it and inserts");
-    println!("  the snippet as two separate steps. compatibility_mode = \"off\" refuses that, so nothing would expand.");
+    for line in IBUS_NON_ATOMIC_CONSENT_DETAILS {
+        println!("  {line}");
+    }
     if !options.accept_non_atomic_replacement && options.assume_yes {
         println!("  Not changed by --yes. Enable it with compatibility_mode = \"tracked-focus\" under [settings] in {}", path.display());
         return Ok(true);
     }
     if !options.accept_non_atomic_replacement && !prompt_yes_no(
-        "  Allow verified two-step replacement (compatibility_mode = \"tracked-focus\")? [Y/n] ",
+        "  Allow non-atomic replacement after checking the trigger text (compatibility_mode = \"tracked-focus\")? [Y/n] ",
         true,
     )? {
         println!(
@@ -1626,6 +1661,87 @@ struct SetupTransaction {
     gnome_input_sources_original: Option<crate::gnome_input_sources::Snapshot>,
     session: Option<SessionSnapshot>,
     gnome_extension: Option<crate::gnome_extension::GnomeExtensionTransaction>,
+    ibus_generation_before: Option<IbusGenerationMarker>,
+    evdev_handoff_config_changed: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IbusGenerationMarker {
+    pid: u32,
+    generation: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IbusHandoffObservation {
+    pid: u32,
+    live: bool,
+    diagnostics_available: bool,
+    generation: u64,
+    requested_generation: u64,
+    mismatches: u64,
+    reload_failed: bool,
+}
+
+fn current_ibus_generation_marker() -> Option<IbusGenerationMarker> {
+    let reading = wayexpand_backend_ibus::telemetry::read_status()?;
+    reading.live.then_some(IbusGenerationMarker {
+        pid: reading.status.pid,
+        generation: reading.status.config_generation,
+    })
+}
+
+fn ibus_handoff_generation_is_ready(
+    before: Option<IbusGenerationMarker>,
+    require_advance: bool,
+    observed: IbusHandoffObservation,
+) -> bool {
+    let advanced = !require_advance
+        || before.is_none_or(|before| {
+            observed.pid != before.pid || observed.generation > before.generation
+        });
+    observed.live
+        && advanced
+        && observed.diagnostics_available
+        && observed.generation == observed.requested_generation
+        && observed.mismatches == 0
+        && !observed.reload_failed
+}
+
+/// Wait until the active IBus process has published the configuration that
+/// assigns matching ownership to the evdev companion. The IBus status
+/// publisher only marks a generation current after all live input contexts
+/// have adopted it, so starting evdev before this acknowledgment could create
+/// two simultaneous matchers in a terminal or browser.
+fn wait_for_ibus_evdev_handoff(
+    before: Option<IbusGenerationMarker>,
+    require_advance: bool,
+) -> Result<()> {
+    let deadline = Instant::now() + IBUS_HANDOFF_TIMEOUT;
+    loop {
+        if let Some(reading) = wayexpand_backend_ibus::telemetry::read_status() {
+            let status = reading.status;
+            if ibus_handoff_generation_is_ready(
+                before,
+                require_advance,
+                IbusHandoffObservation {
+                    pid: status.pid,
+                    live: reading.live,
+                    diagnostics_available: status.config_generation_diagnostics_available,
+                    generation: status.config_generation,
+                    requested_generation: status.config_generation_requested,
+                    mismatches: status.config_generation_mismatches,
+                    reload_failed: status.config_reload_error.is_some(),
+                },
+            ) {
+                step("IBus acknowledged the evdev app-ownership configuration");
+                return Ok(());
+            }
+        }
+        if Instant::now() >= deadline {
+            bail!("WX-IBUS-HANDOFF-001: IBus did not acknowledge the evdev ownership configuration within {} seconds; the evdev companion was not started. Check `wayexpand ibus status --json`, then retry setup.", IBUS_HANDOFF_TIMEOUT.as_secs());
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 impl SetupTransaction {
@@ -1654,6 +1770,8 @@ impl SetupTransaction {
             gnome_input_sources_original: None,
             session: None,
             gnome_extension: None,
+            ibus_generation_before: current_ibus_generation_marker(),
+            evdev_handoff_config_changed: false,
         })
     }
 
@@ -2323,8 +2441,8 @@ fn preflight(options: IbusSetupOptions, inventory: &ServiceInventory) -> Result<
 fn prepare_terminals(
     journal: &mut ConfigMutationJournal,
     file_journal: &mut PreparedFileJournal,
-) -> Result<()> {
-    let apps = ensure_terminal_apps(journal)?;
+) -> Result<bool> {
+    let (apps, config_changed) = ensure_terminal_apps(journal)?;
     file_journal.write(
         b"# Written by `wayexpand setup --backend ibus --terminals`.\n\
          # IBus expands in apps; this evdev daemon expands only in settings.terminal_apps.\n\
@@ -2334,7 +2452,7 @@ fn prepare_terminals(
         "Prepared wayexpand-evdev.service to expand only in terminal_apps ({} app IDs)",
         apps.len()
     ));
-    Ok(())
+    Ok(config_changed)
 }
 
 /// Prepare the explicit evdev-owned application list. The IBus engine uses
@@ -2343,7 +2461,7 @@ fn prepare_terminals(
 fn prepare_evdev_apps(
     config_journal: &mut ConfigMutationJournal,
     file_journal: &mut PreparedFileJournal,
-) -> Result<()> {
+) -> Result<bool> {
     let path = default_config_path();
     let loaded = Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
     let mut config = loaded.config;
@@ -2381,7 +2499,7 @@ fn prepare_evdev_apps(
         "Prepared app-scoped evdev fallback for {} configured application IDs",
         raw_capture_app_count + terminal_app_count
     ));
-    Ok(())
+    Ok(config_changed)
 }
 
 /// Configure browser-scoped evdev independently of IBus. This supports
@@ -2404,12 +2522,20 @@ pub(crate) fn configure_evdev_apps_only() -> Result<()> {
     }
 
     let original_service = inventory.state(UserService::Evdev);
+    let ibus_selected_before = wayexpand_backend_ibus::global_engine_selected();
+    let ibus_generation_before = current_ibus_generation_marker();
     let mut config = ConfigMutationJournal::capture()?;
     let mut drop_in = PreparedFileJournal::capture(
         terminal_drop_in().context("cannot locate the systemd user directory")?,
     )?;
     let preparation = prepare_evdev_apps(&mut config, &mut drop_in);
-    let applied = preparation.and_then(|()| {
+    let applied = preparation.and_then(|config_changed| {
+        if ibus_selected_before {
+            if ibus_generation_before.is_none() {
+                bail!("WX-IBUS-HANDOFF-001: IBus is selected, but its live configuration generation is unavailable; the evdev companion was not started. Check `wayexpand ibus status --json` and retry.");
+            }
+            wait_for_ibus_evdev_handoff(ibus_generation_before, config_changed)?;
+        }
         enable_user_service(UserService::Evdev.unit())?;
         start_companion(UserService::Evdev)
     });
@@ -2566,6 +2692,8 @@ fn stop_global_capture(options: IbusSetupOptions, companion: CompanionService) -
 fn activate_and_verify(
     options: IbusSetupOptions,
     companion: CompanionService,
+    ibus_generation_before: Option<IbusGenerationMarker>,
+    evdev_handoff_config_changed: bool,
     snapshot: &mut SessionSnapshot,
 ) -> Result<()> {
     let desktop = IbusDesktop::detect();
@@ -2598,6 +2726,7 @@ fn activate_and_verify(
     stop_global_capture(options, companion)?;
     match companion {
         CompanionService::Terminals => {
+            wait_for_ibus_evdev_handoff(ibus_generation_before, evdev_handoff_config_changed)?;
             step(if options.evdev_apps {
                 "Starting the app-scoped evdev daemon"
             } else {
@@ -2733,10 +2862,12 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
                 .as_mut()
                 .expect("evdev drop-in journal captured");
             if options.terminals {
-                prepare_terminals(&mut transaction.config, prepared)?;
+                transaction.evdev_handoff_config_changed |=
+                    prepare_terminals(&mut transaction.config, prepared)?;
             }
             if options.evdev_apps {
-                prepare_evdev_apps(&mut transaction.config, prepared)?;
+                transaction.evdev_handoff_config_changed |=
+                    prepare_evdev_apps(&mut transaction.config, prepared)?;
             }
         }
         Ok(authorization_required)
@@ -2822,6 +2953,8 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     if let Err(error) = activate_and_verify(
         options,
         companion,
+        transaction.ibus_generation_before,
+        transaction.evdev_handoff_config_changed,
         transaction
             .session
             .as_mut()
@@ -3000,6 +3133,25 @@ mod tests {
         assert!(!replacement_authorization_required(
             wayexpand_core::CompatibilityMode::TrackedFocus
         ));
+    }
+
+    #[test]
+    fn ibus_setup_consent_names_interleaving_and_irreversible_partial_output() {
+        let details = IBUS_NON_ATOMIC_CONSENT_DETAILS.join(" ");
+        for required_warning in [
+            "Typing, focus changes, or backend failure",
+            "interleaved or partial text",
+            "cannot be rolled back",
+            "will not retry an uncertain result",
+            "compatibility_mode = \"off\" refuses replacement",
+            "Headless tests do not certify physical-session target integrity",
+            "no accepted physical-session certification for this route",
+        ] {
+            assert!(
+                details.contains(required_warning),
+                "missing IBus setup consent warning: {required_warning}"
+            );
+        }
     }
 
     #[test]
@@ -3200,6 +3352,17 @@ mod tests {
     }
 
     #[test]
+    fn shared_ibus_executable_must_be_root_owned_executable_and_not_group_or_world_writable() {
+        assert!(trusted_system_executable(true, 0, 0o755));
+        assert!(trusted_system_executable(true, 0, 0o750));
+        assert!(!trusted_system_executable(true, 1000, 0o755));
+        assert!(!trusted_system_executable(false, 0, 0o755));
+        assert!(!trusted_system_executable(true, 0, 0o644));
+        assert!(!trusted_system_executable(true, 0, 0o775));
+        assert!(!trusted_system_executable(true, 0, 0o777));
+    }
+
+    #[test]
     fn package_owned_ibus_exec_is_recognized_and_never_migrated_as_a_user_manifest() {
         let contract: toml::Value =
             toml::from_str(include_str!("../../../installer-components.toml")).unwrap();
@@ -3317,6 +3480,84 @@ mod tests {
             .map(|app| (*app).to_owned())
             .collect();
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn terminal_setup_enables_handoff_and_preserves_custom_terminal_scope() {
+        let mut config = Config::parse(
+            r#"[settings]
+terminal_apps = ["app_id_exact:com.example.Terminal"]
+"#,
+        )
+        .unwrap();
+        assert!(enable_terminal_evdev_handoff(&mut config));
+        assert_eq!(
+            config.settings.terminal_apps,
+            ["app_id_exact:com.example.Terminal"]
+        );
+        assert!(config.settings.raw_capture_fallback_enabled);
+        config.validate().unwrap();
+
+        assert!(!enable_terminal_evdev_handoff(&mut config));
+    }
+
+    #[test]
+    fn evdev_start_requires_a_current_published_ibus_generation() {
+        let observed = |pid, live, generation, requested_generation, mismatches, reload_failed| {
+            IbusHandoffObservation {
+                pid,
+                live,
+                diagnostics_available: true,
+                generation,
+                requested_generation,
+                mismatches,
+                reload_failed,
+            }
+        };
+        let before = Some(IbusGenerationMarker {
+            pid: 40,
+            generation: 7,
+        });
+        assert!(!ibus_handoff_generation_is_ready(
+            before,
+            true,
+            observed(40, true, 7, 7, 0, false)
+        ));
+        assert!(ibus_handoff_generation_is_ready(
+            before,
+            true,
+            observed(40, true, 8, 8, 0, false)
+        ));
+        assert!(ibus_handoff_generation_is_ready(
+            before,
+            true,
+            observed(41, true, 1, 1, 0, false)
+        ));
+        assert!(!ibus_handoff_generation_is_ready(
+            before,
+            true,
+            observed(40, true, 8, 8, 1, false)
+        ));
+        assert!(!ibus_handoff_generation_is_ready(
+            before,
+            true,
+            observed(40, true, 8, 8, 0, true)
+        ));
+        assert!(!ibus_handoff_generation_is_ready(
+            before,
+            true,
+            observed(40, false, 8, 8, 0, false)
+        ));
+        assert!(ibus_handoff_generation_is_ready(
+            before,
+            false,
+            observed(40, true, 7, 7, 0, false)
+        ));
+        assert!(!ibus_handoff_generation_is_ready(
+            before,
+            false,
+            observed(40, true, 7, 8, 0, false)
+        ));
     }
 
     #[test]

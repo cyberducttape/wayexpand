@@ -164,8 +164,9 @@ pub struct IbusReadiness {
     /// This is the precondition for verified trigger replacement, not proof
     /// that an expansion was displayed by the application.
     pub replacement_context_received: bool,
-    /// At least one expansion was committed since the engine started.
-    pub expanded: bool,
+    /// At least one replacement's output was emitted by IBus. This is not
+    /// confirmation that the client applied it to its document.
+    pub output_emitted_unverified: bool,
 }
 
 impl IbusReadiness {
@@ -179,7 +180,7 @@ impl IbusReadiness {
             ("engine_running", self.engine_running),
             ("text_received", self.text_received),
             ("replacement_context", self.replacement_context_received),
-            ("expanded", self.expanded),
+            ("output_emitted_unverified", self.output_emitted_unverified),
         ]
     }
 }
@@ -203,7 +204,8 @@ impl IbusChainReport {
             engine_running: live.is_some(),
             text_received: passed("field-input"),
             replacement_context_received: passed("surrounding-text"),
-            expanded: live.is_some_and(|reading| reading.status.totals.expansions > 0),
+            output_emitted_unverified: live
+                .is_some_and(|reading| reading.status.totals.expansions > 0),
         }
     }
 
@@ -503,6 +505,56 @@ fn shared_manifest_uses_user_home(
     // per-user manifest path; it is not a shared registration.
     !homes.iter().any(|home| manifest_path.starts_with(home))
         && homes.iter().any(|home| resolved_exec.starts_with(home))
+}
+
+fn trusted_shared_file_metadata(is_file: bool, uid: u32, mode: u32, executable: bool) -> bool {
+    is_file && uid == 0 && (!executable || mode & 0o111 != 0) && mode & 0o022 == 0
+}
+
+fn shared_file_is_trusted(path: &Path, executable: bool) -> bool {
+    let Ok(entry) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    let entry_is_regular = entry.file_type().is_file();
+    let entry_is_symlink = entry.file_type().is_symlink();
+    if entry.uid() != 0
+        || (!entry_is_regular && !entry_is_symlink)
+        || (entry_is_regular && entry.permissions().mode() & 0o022 != 0)
+    {
+        return false;
+    }
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    if !trusted_root_directory_chain(parent) {
+        return false;
+    }
+    let Ok(path) = fs::canonicalize(path) else {
+        return false;
+    };
+    let Ok(metadata) = fs::metadata(&path) else {
+        return false;
+    };
+    if !trusted_shared_file_metadata(
+        metadata.is_file(),
+        metadata.uid(),
+        metadata.permissions().mode(),
+        executable,
+    ) {
+        return false;
+    }
+    path.parent().is_some_and(trusted_root_directory_chain)
+}
+
+fn trusted_root_directory_chain(path: &Path) -> bool {
+    let Ok(path) = fs::canonicalize(path) else {
+        return false;
+    };
+    std::iter::successors(Some(path.as_path()), |directory| directory.parent()).all(|directory| {
+        fs::metadata(directory).is_ok_and(|metadata| {
+            metadata.is_dir() && metadata.uid() == 0 && metadata.permissions().mode() & 0o022 == 0
+        })
+    })
 }
 
 fn known_user_homes() -> Vec<PathBuf> {
@@ -853,26 +905,52 @@ pub fn diagnose() -> IbusChainReport {
                 .as_deref()
                 .map(|path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
             match resolved_real.as_deref() {
-                Some(program) if shared_manifest_uses_user_home(&found.path, program, &homes) => {
-                    check(
-                        "manifest-scope",
-                        "Shared IBus registration is multi-user safe",
-                        IbusCheckState::Warn,
-                        format!(
-                            "{} is a shared component, but its executable resolves into one user's home directory",
-                            found.path.display()
-                        ),
-                        Some("run `wayexpand setup --backend ibus --install-system-integration` to install the shared engine, or install WayExpand using the distribution package".into()),
-                    )
+                Some(program) => {
+                    let user_scoped_manifest =
+                        homes.iter().any(|home| found.path.starts_with(home));
+                    let manifest_points_to_user_home =
+                        shared_manifest_uses_user_home(&found.path, program, &homes);
+                    let mut violations = Vec::new();
+                    if manifest_points_to_user_home {
+                        violations.push("its executable resolves into a user's home directory");
+                    }
+                    if !user_scoped_manifest && !shared_file_is_trusted(&found.path, false) {
+                        violations.push(
+                            "the shared manifest or one of its parent directories is not root-owned and protected from group/world writes",
+                        );
+                    }
+                    if !user_scoped_manifest && !shared_file_is_trusted(program, true) {
+                        violations.push(
+                            "the shared executable or one of its parent directories is not root-owned and protected from group/world writes",
+                        );
+                    }
+                    if !violations.is_empty() {
+                        check(
+                            "manifest-scope",
+                            "Shared IBus registration is multi-user safe",
+                            IbusCheckState::Fail,
+                            format!("{} is a shared component, but {}", found.path.display(), violations.join("; ")),
+                            Some("run `wayexpand setup --backend ibus --install-system-integration` to install the shared engine and manifest, or install WayExpand using the distribution package".into()),
+                        )
+                    } else if !homes.is_empty() {
+                        check(
+                            "manifest-scope",
+                            "Shared IBus registration is multi-user safe",
+                            IbusCheckState::Pass,
+                            "the shared component manifest and executable are root-owned, protected from group/world writes, and do not resolve into a user's home directory",
+                            None,
+                        )
+                    } else {
+                        check(
+                            "manifest-scope",
+                            "Shared IBus registration is multi-user safe",
+                            IbusCheckState::Unknown,
+                            "the current user-home inventory could not be established",
+                            Some("run `wayexpand doctor --gnome` with a readable /etc/passwd and valid HOME environment".into()),
+                        )
+                    }
                 }
-                Some(_) if !homes.is_empty() => check(
-                    "manifest-scope",
-                    "Shared IBus registration is multi-user safe",
-                    IbusCheckState::Pass,
-                    "the shared component does not resolve its engine into the current user's home directory",
-                    None,
-                ),
-                _ => check(
+                None => check(
                     "manifest-scope",
                     "Shared IBus registration is multi-user safe",
                     IbusCheckState::Unknown,
@@ -974,7 +1052,7 @@ pub fn diagnose() -> IbusChainReport {
             "The engine is running",
             IbusCheckState::Pass,
             format!(
-                "pid {}, {} engine object(s), {} expansion(s) since start",
+                "pid {}, {} engine object(s), {} replacement signal emission(s), target result unverified",
                 reading.status.pid, reading.status.engines, reading.status.totals.expansions
             ),
             None,
@@ -1950,7 +2028,7 @@ fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
     let Some(reading) = activity.filter(|reading| reading.live) else {
         return check(
             "target-insertion",
-            "Target application insertion verified",
+            "Target application result",
             IbusCheckState::Unknown,
             "no live IBus engine outcome is available",
             Some(
@@ -1966,7 +2044,7 @@ fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
     {
         return check(
             "target-insertion",
-            "Target application insertion verified",
+            "Target application result",
             IbusCheckState::Fail,
             "the IBus engine recorded an output failure; target text may be partial",
             Some("inspect the target field and do not retry blindly; run `wayexpand debug --test ';;hello'` after recovery".into()),
@@ -1975,7 +2053,7 @@ fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
     if reading.status.totals.expansions > 0 {
         check(
             "target-insertion",
-            "Target application insertion verified",
+            "Target application result",
             IbusCheckState::Warn,
             "IBus emitted replacement actions, but the client does not acknowledge the resulting target text",
             Some("visually confirm the text or run `wayexpand debug --test ';;hello'` in this application".into()),
@@ -1983,7 +2061,7 @@ fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
     } else {
         check(
             "target-insertion",
-            "Target application insertion verified",
+            "Target application result",
             IbusCheckState::Unknown,
             "no replacement has been emitted in the current engine session",
             Some(
@@ -2066,7 +2144,7 @@ mod tests {
         ] {
             let insertion = check(
                 "target-insertion",
-                "Target application insertion verified",
+                "Target application result",
                 state,
                 "target text was not independently verified",
                 None,
@@ -2145,15 +2223,47 @@ mod tests {
     }
 
     #[test]
-    fn shared_ibus_manifest_scope_warning_has_stable_problem_id() {
-        let warning = check(
+    fn shared_ibus_executable_must_have_trusted_owner_and_mode() {
+        assert!(trusted_shared_file_metadata(true, 0, 0o755, true));
+        assert!(trusted_shared_file_metadata(true, 0, 0o750, true));
+        assert!(!trusted_shared_file_metadata(true, 1000, 0o755, true));
+        assert!(!trusted_shared_file_metadata(false, 0, 0o755, true));
+        assert!(!trusted_shared_file_metadata(true, 0, 0o644, true));
+        assert!(!trusted_shared_file_metadata(true, 0, 0o775, true));
+        assert!(!trusted_shared_file_metadata(true, 0, 0o777, true));
+        assert!(trusted_shared_file_metadata(true, 0, 0o644, false));
+        assert!(!trusted_shared_file_metadata(true, 0, 0o666, false));
+        assert!(!trusted_shared_file_metadata(true, 1000, 0o644, false));
+    }
+
+    #[test]
+    fn shared_file_check_rejects_a_safe_target_reached_through_a_user_path() {
+        use std::os::unix::fs::symlink;
+
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-ibus-trust-link-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = fs::remove_file(&path);
+        symlink("/usr/bin/env", &path).expect("create test symlink");
+        assert!(
+            !shared_file_is_trusted(&path, true),
+            "a root-owned target must not make its user-controlled path trustworthy"
+        );
+        fs::remove_file(path).expect("remove test symlink");
+    }
+
+    #[test]
+    fn shared_ibus_manifest_scope_failure_has_stable_problem_id() {
+        let failure = check(
             "manifest-scope",
             "Shared IBus registration is multi-user safe",
-            IbusCheckState::Warn,
+            IbusCheckState::Fail,
             "shared manifest points to one user's executable",
             Some("repair the system integration".into()),
         );
-        assert_eq!(warning.problem_id, Some("WX-IBUS-MULTIUSER-001"));
+        assert_eq!(failure.problem_id, Some("WX-IBUS-MULTIUSER-001"));
     }
 
     #[test]
@@ -2191,7 +2301,11 @@ mod tests {
         // engine, received text, or expansion.
         assert!(readiness.component_installed && readiness.registered && readiness.ibus_running);
         assert!(!readiness.selected);
-        assert!(!readiness.engine_running && !readiness.text_received && !readiness.expanded);
+        assert!(
+            !readiness.engine_running
+                && !readiness.text_received
+                && !readiness.output_emitted_unverified
+        );
         assert!(!readiness.replacement_context_received);
         assert_eq!(readiness.stages().len(), 8);
     }
@@ -2749,6 +2863,10 @@ mod tests {
 
     #[test]
     fn emitted_ibus_action_is_not_mistaken_for_target_insertion_success() {
+        let no_activity = target_insertion_check(None);
+        assert_eq!(no_activity.state, IbusCheckState::Unknown);
+        assert_eq!(no_activity.title, "Target application result");
+
         let telemetry = crate::telemetry::IbusTelemetry::new();
         let field = telemetry.focus_in(None);
         telemetry.expansion(Some(field));
@@ -2760,6 +2878,10 @@ mod tests {
             target_insertion_check(Some(&reading)).state,
             IbusCheckState::Warn
         );
+        assert_eq!(
+            target_insertion_check(Some(&reading)).title,
+            "Target application result"
+        );
 
         telemetry.output_failure(Some(field));
         let failed = IbusStatusReading {
@@ -2769,6 +2891,10 @@ mod tests {
         assert_eq!(
             target_insertion_check(Some(&failed)).state,
             IbusCheckState::Fail
+        );
+        assert_eq!(
+            target_insertion_check(Some(&failed)).title,
+            "Target application result"
         );
     }
 

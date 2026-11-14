@@ -21,7 +21,13 @@ impl ExpansionEngine {
 
     pub(super) fn set_window_context(&mut self, window: Option<WindowContext>) {
         self.normalized_window = window.as_ref().map(|window| NormalizedWindowContext {
-            app_id: window.app_id.as_ref().map(|value| value.to_lowercase()),
+            app_id: window.app_id.as_ref().map(|value| {
+                if value.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX) {
+                    value.clone()
+                } else {
+                    value.to_lowercase()
+                }
+            }),
             title: window.title.as_ref().map(|value| value.to_lowercase()),
             instance_id: window.instance_id.clone(),
         });
@@ -95,6 +101,7 @@ impl ExpansionEngine {
     /// Asynchronous workers are not carried; hosts restart them.
     pub fn inherit_runtime_state(&mut self, previous: &ExpansionEngine) {
         self.set_user_paused(previous.is_user_paused());
+        self.set_backend_policy_blocked(previous.backend_policy_blocked());
         self.set_sensitive_focus(previous.is_sensitive_focus());
         self.set_composition_active(previous.is_composition_active());
         self.set_current_window(previous.current_window().cloned());
@@ -157,10 +164,65 @@ impl ExpansionEngine {
         self.raw_capture_app_scope
             .iter()
             .any(|(filter, glob)| match filter {
-                crate::AppFilter::AppIdExact(expected) => app_id == expected,
-                crate::AppFilter::AppIdGlob(_) => {
+                crate::AppFilter::AppIdExact(expected)
+                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
+                {
+                    app_id == expected
+                }
+                crate::AppFilter::AppIdGlob(_)
+                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
+                {
                     glob.as_ref().is_some_and(|glob| glob.matches(app_id))
                 }
+                crate::AppFilter::ProcessExecutableExact(expected) => app_id
+                    .strip_prefix(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                    .is_some_and(|path| path == expected),
+                crate::AppFilter::ProcessNameExact(expected) => app_id
+                    .strip_prefix(crate::PROCESS_NAME_APP_ID_PREFIX)
+                    .is_some_and(|name| name == expected),
+                _ => false,
+            })
+    }
+
+    /// Whether an explicitly configured app-scoped evdev companion owns the
+    /// focused application. This includes terminal apps and the additional
+    /// raw-capture app list. IBus uses the same predicate to yield matching
+    /// ownership, even when a terminal happens to advertise surrounding text.
+    /// Unknown focus never counts as owned.
+    pub fn evdev_fallback_owns_focus(&self) -> bool {
+        if !self.raw_capture_fallback_enabled {
+            return false;
+        }
+        let Some(app_id) = self
+            .normalized_window
+            .as_ref()
+            .and_then(|window| window.app_id.as_deref())
+        else {
+            return false;
+        };
+        self.terminal_app_scope
+            .iter()
+            .any(|(filter, glob)| match filter {
+                crate::AppFilter::AppIdExact(expected)
+                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
+                {
+                    app_id == expected
+                }
+                crate::AppFilter::AppIdGlob(_)
+                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
+                {
+                    glob.as_ref().is_some_and(|glob| glob.matches(app_id))
+                }
+                crate::AppFilter::ProcessExecutableExact(expected) => app_id
+                    .strip_prefix(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                    .is_some_and(|path| path == expected),
+                crate::AppFilter::ProcessNameExact(expected) => app_id
+                    .strip_prefix(crate::PROCESS_NAME_APP_ID_PREFIX)
+                    .is_some_and(|name| name == expected),
                 _ => false,
             })
     }
@@ -179,6 +241,10 @@ impl ExpansionEngine {
     /// the undo chord itself arrives as a Key event, and clearing it would make
     /// undo impossible to trigger. Undo validity is checked separately.
     pub fn note_key_event(&mut self) {
+        let _start_gate = self
+            .command_start_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.input_generation = self.input_generation.wrapping_add(1);
         self.shared_input_generation
             .store(self.input_generation, Ordering::Release);

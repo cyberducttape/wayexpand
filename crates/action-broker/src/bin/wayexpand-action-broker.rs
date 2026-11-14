@@ -11,8 +11,8 @@
 use action_broker::{
     config::{is_root_owner, is_user_or_root_owner},
     ipc::ConnectionCanceller,
-    policy_hash, ActionError, ActionExecutor, AuditEvent, AuditHealth, AuditLogger, BrokerConfig,
-    BrokerServer,
+    policy_hash, ActionError, ActionExecutor, ActionShutdown, AuditEvent, AuditHealth, AuditLogger,
+    BrokerConfig, BrokerServer,
 };
 use anyhow::{anyhow, Result};
 use std::{
@@ -20,7 +20,7 @@ use std::{
     io::{Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::atomic::{AtomicU64, Ordering},
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -612,7 +612,7 @@ async fn run() -> Result<()> {
     // Main service loop - accept connections and handle requests
     let mut connection_tasks = tokio::task::JoinSet::new();
     let client_io: ClientIoRegistry = Arc::default();
-    let shutdown_requested = Arc::new(AtomicBool::new(false));
+    let shutdown_requested = Arc::new(ActionShutdown::default());
     let mut shutdown = Box::pin(shutdown_signals.wait());
     loop {
         // Finished tasks still hold their captured Arcs until their join
@@ -627,7 +627,7 @@ async fn run() -> Result<()> {
         let accepted = tokio::select! {
             _ = &mut shutdown => {
                 info!("shutdown signal received; flushing audit events");
-                shutdown_requested.store(true, Ordering::Release);
+                shutdown_requested.request();
                 begin_client_io_shutdown(&client_io);
                 let wake_path = server.socket_path().to_owned();
                 let _ = tokio::task::spawn_blocking(move || {
@@ -966,6 +966,83 @@ mod tests {
         assert!(slots.try_acquire().is_err());
         drop(permits);
         assert!(slots.try_acquire().is_ok());
+    }
+
+    #[test]
+    fn shutdown_cancels_blocking_reads_registered_on_either_side_of_shutdown() {
+        use std::{
+            os::unix::fs::PermissionsExt,
+            sync::{mpsc, Barrier},
+        };
+
+        for iteration in 0..24 {
+            let root = std::env::temp_dir().join(format!(
+                "wayexpand-broker-io-shutdown-{}-{iteration}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir(&root).unwrap();
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+            let socket = root.join("broker.sock");
+            let server = BrokerServer::bind(&socket).expect("bind private test socket");
+            let client =
+                std::os::unix::net::UnixStream::connect(&socket).expect("connect test client");
+            let mut connection = server.accept().expect("accept test client");
+            let canceller = connection.canceller().expect("duplicate client socket");
+            let (reader_started_tx, reader_started_rx) = mpsc::sync_channel(1);
+            let (read_finished_tx, read_finished_rx) = mpsc::sync_channel(1);
+            let reader = std::thread::spawn(move || {
+                reader_started_tx.send(()).unwrap();
+                read_finished_tx
+                    .send(connection.read_request().is_err())
+                    .unwrap();
+            });
+            reader_started_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("blocking request reader did not start");
+
+            let registry: ClientIoRegistry = Arc::default();
+            let start = Arc::new(Barrier::new(3));
+            let (registered_tx, registered_rx) = mpsc::sync_channel(1);
+            let (release_tx, release_rx) = mpsc::sync_channel(1);
+
+            let tracking_registry = Arc::clone(&registry);
+            let tracking_start = Arc::clone(&start);
+            let tracker = std::thread::spawn(move || {
+                tracking_start.wait();
+                let guard = track_client_io(&tracking_registry, IoPhase::ReadingRequest, canceller);
+                registered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                drop(guard);
+            });
+
+            let shutdown_registry = Arc::clone(&registry);
+            let shutdown_start = Arc::clone(&start);
+            let shutdown = std::thread::spawn(move || {
+                shutdown_start.wait();
+                begin_client_io_shutdown(&shutdown_registry);
+            });
+
+            start.wait();
+            registered_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("I/O registration did not finish");
+            shutdown.join().unwrap();
+            release_tx.send(()).unwrap();
+            tracker.join().unwrap();
+
+            assert!(
+                read_finished_rx
+                    .recv_timeout(Duration::from_secs(1))
+                    .expect("shutdown left the blocking request read stuck"),
+                "shutdown cancellation must terminate the blocking request read"
+            );
+            reader.join().unwrap();
+
+            drop(server);
+            drop(client);
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

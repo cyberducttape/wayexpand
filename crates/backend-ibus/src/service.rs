@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         mpsc, Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tracing::{info, warn};
 use wayexpand_backend_gnome_window::GnomeWindowTracker;
@@ -242,13 +242,30 @@ fn refresh_context_diagnostics(
     instances: &Mutex<HashMap<OwnedObjectPath, EngineInstance>>,
     telemetry: &IbusTelemetry,
 ) {
-    let generation = telemetry.snapshot().config_generation_requested;
-    if let Ok(instances) = instances.lock() {
-        telemetry.set_context_diagnostics(
+    let status = telemetry.snapshot();
+    let generation = status.config_generation_requested;
+    match instances.lock() {
+        Ok(instances) => telemetry.set_context_diagnostics(
             generation,
             instances.len(),
             config_generation_mismatch_count(&instances, generation),
-        );
+        ),
+        Err(_) => {
+            // A poisoned registry means the service can no longer establish
+            // that every live context uses the published generation. Keep
+            // the last successful generation, but make readiness fail
+            // visibly instead of leaving stale diagnostics that look healthy.
+            telemetry.config_generation_failed(
+                generation,
+                "WX-IBUS-RELOAD-001",
+                status.engines as usize,
+            );
+            warn!(
+                problem_id = "WX-IBUS-RELOAD-001",
+                config_generation = generation,
+                "IBus engine-instance registry lock poisoned while refreshing generation diagnostics"
+            );
+        }
     }
 }
 
@@ -486,18 +503,21 @@ impl EngineObject {
             }
             Err(_) => return false,
         };
-        if self.emit_actions(&result.actions).await.is_err() {
+        let output_started = Instant::now();
+        let emitted = self.emit_actions(&result.actions).await;
+        let duration_us = output_started.elapsed().as_micros().min(u64::MAX as u128) as u64;
+        if emitted.is_err() {
             // IBus emits delete and commit as separate signals. An error may
             // therefore leave a partial edit; retire this engine until a new
             // focus lifecycle instead of allowing more expansions in an
             // uncertain document state.
             if let Ok(mut adapter) = self.adapter.lock() {
-                adapter.output_failed();
+                adapter.output_failed_after(Some(duration_us));
             }
             return false;
         }
         if let Ok(mut adapter) = self.adapter.lock() {
-            adapter.output_succeeded();
+            adapter.output_succeeded_after(Some(duration_us));
         }
         result.handled
     }
@@ -897,6 +917,30 @@ mod tests {
         assert_eq!(first.as_str(), "/org/freedesktop/IBus/Engine/WayExpand/1");
         assert_eq!(second.as_str(), "/org/freedesktop/IBus/Engine/WayExpand/2");
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn poisoned_context_registry_invalidates_generation_readiness() {
+        let instances = Arc::new(Mutex::new(HashMap::new()));
+        let poison_target = Arc::clone(&instances);
+        let _ = std::thread::spawn(move || {
+            let _guard = poison_target.lock().unwrap();
+            panic!("inject registry lock poison");
+        })
+        .join();
+
+        let telemetry = IbusTelemetry::new();
+        telemetry.config_generation_published(7, 0);
+        refresh_context_diagnostics(instances.as_ref(), &telemetry);
+
+        let status = telemetry.snapshot();
+        assert_eq!(status.config_generation, 7);
+        assert_eq!(status.config_generation_requested, 7);
+        assert_eq!(
+            status.config_reload_error.as_deref(),
+            Some("WX-IBUS-RELOAD-001")
+        );
+        assert_eq!(status.config_reload_failures, 1);
     }
 
     #[test]
@@ -1761,7 +1805,7 @@ replacement = "signature"
         assert_eq!(editor.content_type, telemetry::IbusContentTypeState::Normal);
         assert_eq!(
             crate::IbusFieldVerdict::of(&editor),
-            crate::IbusFieldVerdict::Expanded
+            crate::IbusFieldVerdict::OutputEmittedUnverified
         );
 
         // A terminal: same content type (IBus does not set it again), one

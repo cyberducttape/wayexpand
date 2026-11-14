@@ -134,6 +134,11 @@ fn field_json(field: &IbusFieldActivity) -> serde_json::Value {
     if let Some(object) = value.as_object_mut() {
         object.insert("verdict".into(), verdict.label().into());
         object.insert("explanation".into(), verdict.explanation().into());
+        object.insert("target_application_verified".into(), false.into());
+        object.insert(
+            "output_emitted_unverified".into(),
+            (verdict == IbusFieldVerdict::OutputEmittedUnverified).into(),
+        );
     }
     value
 }
@@ -169,12 +174,13 @@ pub(crate) fn report_json(report: &IbusChainReport, overlap: &RouteOverlap) -> s
             "config_reload_error": reading.status.config_reload_error,
             "totals": reading.status.totals,
             "last_transaction_id": reading.status.last_transaction_id,
+            "recent_outputs": reading.status.recent_outputs,
             "recent_fields": reading.status.recent_fields.iter().map(field_json).collect::<Vec<_>>(),
         })
     });
     let finding = overlap.finding(ibus_active(report), control_installed());
     serde_json::json!({
-        "schema": 2,
+        "schema": 4,
         "ready": report.ready() && !matches!(finding, Some((IbusCheckState::Fail, _, _))),
         "configuration_readiness": report.configuration_readiness().label(),
         "operational_readiness": report.operational_readiness().label(),
@@ -204,7 +210,7 @@ fn print_check(state: IbusCheckState, title: &str, detail: &str, fix: Option<&st
 fn describe_field(field: &IbusFieldActivity) -> String {
     let verdict = IbusFieldVerdict::of(field);
     format!(
-        "field #{}{}: {} keys, {} expansion(s) — {}: {}",
+        "field #{}{}: {} keys, {} output emission(s), unverified — {}: {}",
         field.sequence,
         if field.focused { " (focused)" } else { "" },
         field.keys,
@@ -261,6 +267,30 @@ pub(crate) fn print_report(report: &IbusChainReport, overlap: &RouteOverlap) -> 
             }
         }
         _ => {}
+    }
+    if let Some(output) = report
+        .activity
+        .as_ref()
+        .and_then(|reading| reading.status.recent_outputs.last())
+    {
+        println!(
+            "Latest output: {} · {} expected characters · {} · target identity {} · tx {}",
+            output.outcome,
+            output.expected_characters,
+            output.duration_us.map_or_else(
+                || "duration unavailable".to_owned(),
+                |duration| format!("{duration} µs")
+            ),
+            output.target_identity_state,
+            output.transaction_id,
+        );
+        if output.outcome == "emitted-unverified" {
+            println!(
+                "  IBus signal emission is not confirmation that the application changed its text."
+            );
+        } else if output.outcome == "partial-uncertain" {
+            println!("  The target may be partially modified. Inspect it; WayExpand will not retry automatically.");
+        }
     }
     ready
 }
@@ -457,7 +487,7 @@ mod tests {
         };
         let value = report_json(&report, &RouteOverlap::None);
         assert_eq!(value["ready"], false);
-        assert_eq!(value["schema"], 2);
+        assert_eq!(value["schema"], 4);
         assert_eq!(value["first_failure"], "component");
         assert_eq!(value["checks"][0]["fix"], "run setup");
         assert_eq!(value["checks"][1]["problem_id"], "WX-GNOME-IM-001");

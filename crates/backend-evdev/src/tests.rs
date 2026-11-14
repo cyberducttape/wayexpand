@@ -638,6 +638,50 @@ fn topology_notification_interrupts_before_a_buffered_raw_event_slice() {
 }
 
 #[test]
+fn buffered_key_activity_interrupts_before_raw_backlog_translation() {
+    let (reader, _writer) = UnixStream::pair().unwrap();
+    reader.set_nonblocking(true).unwrap();
+    let mut raw_events = (0..MAX_RAW_EVENTS_PER_SLICE * 4)
+        .map(|_| evdev::InputEvent::new(evdev::EventType::SYNCHRONIZATION.0, 0, 0))
+        .collect::<Vec<_>>();
+    raw_events.push(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
+    let mut source = EvdevSource {
+        devices: vec![Box::new(TestKeyboard {
+            path: PathBuf::from("/dev/input/test-keyboard"),
+            reader,
+            events: Arc::new(Mutex::new(Vec::new())),
+        })],
+        state: test_state(),
+        layout_provider: Box::new(TestLayoutProvider),
+        layout_generation: Some(1),
+        layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
+        pending: VecDeque::new(),
+        raw_events,
+        raw_event_cursor: 0,
+        raw_event_device: Some(0),
+        pending_lost_devices: Vec::new(),
+        pressed: vec![HashSet::new()],
+        last_device_refresh: Instant::now(),
+        wake: None,
+        topology_watch: None,
+        topology_refresh_pending: false,
+    };
+
+    assert!(source.next_event_during_output(Duration::ZERO).unwrap());
+    assert_eq!(
+        source.raw_event_cursor, 0,
+        "interrupt detection must not translate the backlog"
+    );
+    assert_eq!(
+        source.raw_key_events_total, 0,
+        "interrupted key data is not matcher input"
+    );
+    assert!(source.pending.is_empty());
+}
+
+#[test]
 fn output_monitor_detects_modifier_activity_without_matcher_input() {
     let path = PathBuf::from("/dev/input/test-keyboard");
     let (reader, mut writer) = UnixStream::pair().unwrap();

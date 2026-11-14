@@ -59,6 +59,24 @@ pub(crate) fn publish_focus_snapshot(control: &ControlServer, state: &FocusState
 /// App IDs are exposed only through an explicit, local diagnostic command.
 /// Keep the response single-line and bounded, and reject non-identifier data.
 fn sanitize_diagnostic_app_id(app_id: &str) -> Option<String> {
+    if let Some(path) = app_id.strip_prefix(wayexpand_core::PROCESS_EXECUTABLE_APP_ID_PREFIX) {
+        let executable = std::path::Path::new(path);
+        if path.is_empty()
+            || path.chars().count() > wayexpand_core::limits::MAX_PROCESS_EXECUTABLE_PATH_CHARS
+            || !executable.is_absolute()
+            || path.chars().any(char::is_control)
+            || executable.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir | std::path::Component::CurDir
+                )
+            })
+            || path.split('/').skip(1).any(str::is_empty)
+        {
+            return None;
+        }
+        return Some(app_id.to_owned());
+    }
     if app_id.is_empty()
         || app_id.len() > 128
         || !app_id
@@ -133,15 +151,22 @@ pub(crate) fn drain_pending_window_events(
     let receiver = window_tracker.as_ref().map(|tracker| &tracker.receiver);
     if let Some((window_opt, stamp)) = backend_lifecycle::drain_pending_window_events(receiver) {
         crate::status::record_window_tracker_update(window_opt.as_ref());
-        // The engine now reflects this snapshot; keystroke output compares
-        // the live focus identity against it before typing.
-        crate::assurance::GuardState::global().set_stamp(stamp);
-        process_event(
-            engine,
-            InputEvent::WindowChanged(window_opt),
-            None,
-            policy,
-            active_backend,
+        // Process the new identity before moving the output guard's baseline.
+        // While this event is being applied, any in-flight output still
+        // compares its immutable transaction stamp with the tracker's live
+        // identity and therefore stops on a focus change.
+        apply_focus_change_before_advancing_guard(
+            &crate::assurance::GuardState::global(),
+            stamp,
+            || {
+                process_event(
+                    engine,
+                    InputEvent::WindowChanged(window_opt),
+                    None,
+                    policy,
+                    active_backend,
+                )
+            },
         )?;
     }
     // Runs on every loop iteration: compare by reference and publish only on
@@ -163,6 +188,19 @@ pub(crate) fn drain_pending_window_events(
         focus_known,
         !engine.terminal_apps_only() || engine.focused_app_is_terminal(),
     );
+    Ok(())
+}
+
+/// Keep output checkpoints invalidated until the input engine has applied the
+/// same focus snapshot. Advancing the shared guard first can make an in-flight
+/// transaction compare against its new target and continue into that window.
+fn apply_focus_change_before_advancing_guard(
+    guard: &crate::assurance::GuardState,
+    stamp: wayexpand_core::FocusStamp,
+    apply: impl FnOnce() -> std::result::Result<(), Box<EventError>>,
+) -> std::result::Result<(), Box<EventError>> {
+    apply()?;
+    guard.set_stamp(stamp);
     Ok(())
 }
 
@@ -205,9 +243,46 @@ fn is_profile_path(
 
 #[cfg(test)]
 mod tests {
-    use super::{focus_token, is_profile_path, profile_path, sanitize_diagnostic_app_id};
+    use super::{
+        apply_focus_change_before_advancing_guard, focus_token, is_profile_path, profile_path,
+        sanitize_diagnostic_app_id,
+    };
     use std::path::Path;
-    use wayexpand_core::WindowContext;
+    use wayexpand_core::{window_update_channel, FocusCheck, WindowContext};
+
+    #[test]
+    fn focus_guard_remains_invalidated_until_engine_applies_the_new_window() {
+        let guard = crate::assurance::GuardState::default();
+        let (sender, receiver) = window_update_channel();
+        guard.set_witness(Some(receiver.focus_witness()));
+        sender.send(window("window-a")).unwrap();
+        let (_, original_stamp) = receiver.try_recv_stamped().unwrap();
+        guard.set_stamp(original_stamp);
+
+        sender.send(window("window-b")).unwrap();
+        let (_, new_stamp) = receiver.try_recv_stamped().unwrap();
+        assert_eq!(guard.focus(), FocusCheck::Changed);
+
+        apply_focus_change_before_advancing_guard(&guard, new_stamp, || {
+            assert_eq!(
+                guard.focus(),
+                FocusCheck::Changed,
+                "an output in flight must remain tied to the prior target during engine update"
+            );
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(guard.focus(), FocusCheck::Unchanged);
+    }
+
+    fn window(instance: &str) -> Option<WindowContext> {
+        Some(WindowContext {
+            app_id: Some("org.example.Editor".into()),
+            title: Some("document".into()),
+            instance_id: Some(instance.into()),
+        })
+    }
 
     #[test]
     fn diagnostic_app_id_is_bounded_and_single_line() {
@@ -217,6 +292,31 @@ mod tests {
         );
         assert_eq!(sanitize_diagnostic_app_id("bad\nid"), None);
         assert_eq!(sanitize_diagnostic_app_id(&"x".repeat(129)), None);
+    }
+
+    #[test]
+    fn explicit_focus_diagnostic_accepts_only_sanitized_process_executable_identity() {
+        let prefix = wayexpand_core::PROCESS_EXECUTABLE_APP_ID_PREFIX;
+        assert_eq!(
+            sanitize_diagnostic_app_id(&format!("{prefix}/usr/bin/konsole")).as_deref(),
+            Some("process-executable:/usr/bin/konsole")
+        );
+        assert_eq!(
+            sanitize_diagnostic_app_id(&format!("{prefix}relative/konsole")),
+            None
+        );
+        assert_eq!(
+            sanitize_diagnostic_app_id(&format!("{prefix}//usr/bin/konsole")),
+            None
+        );
+        assert_eq!(
+            sanitize_diagnostic_app_id(&format!("{prefix}/usr/bin/../bin/konsole")),
+            None
+        );
+        assert_eq!(
+            sanitize_diagnostic_app_id(&format!("{prefix}/usr/bin/konsole\ninjected")),
+            None
+        );
     }
 
     #[test]

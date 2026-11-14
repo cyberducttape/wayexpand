@@ -105,6 +105,9 @@ impl OutputCheckpoint {
         };
         Self {
             check,
+            // The receiver owns progress for the composed checkpoint. A
+            // wrapper adding a guard should therefore compose the caller's
+            // checkpoint on the left.
             erased_units: self.erased_units,
             inserted_units: self.inserted_units,
             progress_tracked: self.progress_tracked,
@@ -340,6 +343,17 @@ pub enum KeyEventState {
 /// treat every one of them as best-effort.
 pub trait WindowTracker {
     fn name(&self) -> &'static str;
+    /// Content-free category describing where the latest application identity
+    /// came from. Implementations must never return the identity itself.
+    fn identity_source(&self) -> WindowIdentitySource {
+        WindowIdentitySource::Unavailable
+    }
+    /// Content-free state explaining whether optional same-user process
+    /// identity lookup succeeded. Implementations must return only a closed
+    /// category, never a PID, executable path, or process name.
+    fn process_identity_state(&self) -> ProcessIdentityState {
+        ProcessIdentityState::NotApplicable
+    }
     /// Waits up to `timeout` for the focused window to change. Returns
     /// `Ok(None)` if nothing changed before the deadline -- the underlying
     /// notification mechanism (a compositor script/D-Bus callback, for the
@@ -352,6 +366,119 @@ pub trait WindowTracker {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<Option<WindowContext>>, WindowTrackerError>;
+}
+
+/// Sanitized result of a compositor process-identity lookup. This is separate
+/// from [`WindowIdentitySource`]: a compositor may report only a mutable
+/// process name after an executable lookup fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ProcessIdentityState {
+    #[default]
+    NotApplicable = 0,
+    NotRequested = 1,
+    CompositorApplicationId = 2,
+    ProcessExecutable = 3,
+    ProcessIdUnavailable = 4,
+    ProcessMetadataUnavailable = 5,
+    DifferentUser = 6,
+    ExecutablePermissionDenied = 7,
+    ExecutableInvalid = 8,
+    ProcessChanged = 9,
+    ProcessNameUnavailable = 10,
+    ExecutableLinkUnavailable = 11,
+    CompositorProcessId = 12,
+}
+
+impl ProcessIdentityState {
+    pub const fn code(self) -> u8 {
+        self as u8
+    }
+
+    pub const fn from_code(code: u8) -> Self {
+        match code {
+            1 => Self::NotRequested,
+            2 => Self::CompositorApplicationId,
+            3 => Self::ProcessExecutable,
+            4 => Self::ProcessIdUnavailable,
+            5 => Self::ProcessMetadataUnavailable,
+            6 => Self::DifferentUser,
+            7 => Self::ExecutablePermissionDenied,
+            8 => Self::ExecutableInvalid,
+            9 => Self::ProcessChanged,
+            10 => Self::ProcessNameUnavailable,
+            11 => Self::ExecutableLinkUnavailable,
+            12 => Self::CompositorProcessId,
+            _ => Self::NotApplicable,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotApplicable => "not-applicable",
+            Self::NotRequested => "not-requested",
+            Self::CompositorApplicationId => "compositor-application-id",
+            Self::ProcessExecutable => "process-executable",
+            Self::ProcessIdUnavailable => "process-id-unavailable",
+            Self::ProcessMetadataUnavailable => "process-metadata-unavailable",
+            Self::DifferentUser => "different-user",
+            Self::ExecutablePermissionDenied => "executable-permission-denied",
+            Self::ExecutableInvalid => "executable-invalid",
+            Self::ProcessChanged => "process-changed-during-lookup",
+            Self::ProcessNameUnavailable => "process-name-unavailable",
+            Self::ExecutableLinkUnavailable => "executable-link-unavailable",
+            Self::CompositorProcessId => "compositor-process-id",
+        }
+    }
+}
+
+/// Sanitized provenance for a compositor-provided application identity.
+/// Values are deliberately a closed set so diagnostics cannot accidentally
+/// publish application IDs, window titles, paths, or other caller content.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum WindowIdentitySource {
+    #[default]
+    Unavailable = 0,
+    ResourceClass = 1,
+    DesktopFileName = 2,
+    ResourceName = 3,
+    CompositorIdentityOnly = 4,
+    ProcessExecutable = 5,
+    ProcessExecutableUnavailable = 6,
+    ProcessName = 7,
+}
+
+impl WindowIdentitySource {
+    pub const fn code(self) -> u8 {
+        self as u8
+    }
+
+    pub const fn from_code(code: u8) -> Self {
+        match code {
+            1 => Self::ResourceClass,
+            2 => Self::DesktopFileName,
+            3 => Self::ResourceName,
+            4 => Self::CompositorIdentityOnly,
+            5 => Self::ProcessExecutable,
+            6 => Self::ProcessExecutableUnavailable,
+            7 => Self::ProcessName,
+            _ => Self::Unavailable,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unavailable => "unavailable",
+            Self::ResourceClass => "resource-class",
+            Self::DesktopFileName => "desktop-file-name",
+            Self::ResourceName => "resource-name",
+            Self::CompositorIdentityOnly => "compositor-identity-only",
+            Self::ProcessExecutable => "process-executable",
+            Self::ProcessExecutableUnavailable => "process-executable-unavailable",
+            Self::ProcessName => "process-name",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -473,8 +600,10 @@ pub enum ReplacementGuarantee {
     /// trigger at the cursor; erase and insert are separate steps.
     #[serde(rename = "verified")]
     VerifiedSurroundingText,
-    /// Verified like `VerifiedSurroundingText`, and erase plus insert are one
-    /// protocol transaction with no visible intermediate state.
+    /// Verified like `VerifiedSurroundingText`, and erase plus insert are
+    /// staged and applied by one backend protocol transaction. This says
+    /// nothing about whether the application ultimately rendered the expected
+    /// text; that result needs a separate application-level observation.
     Atomic,
 }
 
@@ -513,8 +642,9 @@ pub struct InjectorCapabilities {
     pub max_text_chars: usize,
     /// Approximate sustained output rate when the mode is paced.
     pub expected_throughput_chars_per_sec: Option<u32>,
-    /// The backend can replace the trigger and replacement as one protocol
-    /// transaction, without an externally visible erase-then-insert gap.
+    /// The backend can submit trigger deletion and replacement as one
+    /// protocol transaction. This does not confirm that the target application
+    /// applied or rendered the expected text.
     pub atomic_replace: bool,
     /// How safely the trigger erase is tied to this expansion's trigger.
     pub replacement_guarantee: ReplacementGuarantee,
@@ -528,13 +658,20 @@ pub struct InjectorCapabilities {
 }
 
 impl InjectorCapabilities {
+    /// Whether the negotiated output route provides the complete atomic
+    /// replacement contract. Both declarations must agree; the boolean alone
+    /// is not sufficient evidence for policy or runtime admission.
+    pub fn has_atomic_replacement_contract(self) -> bool {
+        self.atomic_replace && self.replacement_guarantee == ReplacementGuarantee::Atomic
+    }
+
     /// Admit replacement only when the route is atomic or the user explicitly
     /// enabled a compatibility mode for non-atomic output.
     pub fn replacement_admission(
         self,
         compatibility: crate::CompatibilityMode,
     ) -> ReplacementAdmission {
-        if self.atomic_replace && self.replacement_guarantee == ReplacementGuarantee::Atomic {
+        if self.has_atomic_replacement_contract() {
             ReplacementAdmission::Atomic
         } else if compatibility != crate::CompatibilityMode::Off
             && self.replacement_guarantee != ReplacementGuarantee::Unsupported
@@ -565,6 +702,12 @@ pub trait TextInjector: Send {
     /// cannot accidentally satisfy a security requirement by omission.
     fn capabilities(&self) -> InjectorCapabilities {
         InjectorCapabilities::default()
+    }
+    /// Whether this route emits replacement text as sequential synthetic key
+    /// events. Such routes need a known throughput bound for automatic output;
+    /// otherwise long transactions are refused before erasing the trigger.
+    fn uses_paced_synthetic_output(&self) -> bool {
+        false
     }
     /// Whether a `replace` error can be reported after the target may already
     /// have received the transaction. Atomic backends that can lose
@@ -698,6 +841,14 @@ impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
         (**self).capabilities()
     }
 
+    fn uses_paced_synthetic_output(&self) -> bool {
+        (**self).uses_paced_synthetic_output()
+    }
+
+    fn replace_error_may_have_applied(&self) -> bool {
+        (**self).replace_error_may_have_applied()
+    }
+
     // Every provided method must be forwarded: a default here would silently
     // replace the boxed backend's own behavior.
     fn admit(&self, erases: bool) -> Result<(), InjectorError> {
@@ -780,6 +931,12 @@ pub enum InjectorErrorKind {
 impl InjectorError {
     const INPUT_INTERRUPTED_MESSAGE: &'static str =
         "non-atomic output interrupted by new input; target text may be partial";
+    pub const REFUSAL_COMPATIBILITY_MODE_OFF: &'static str =
+        "refused: this route cannot verify the trigger at the target; compatibility_mode is off";
+    pub const REFUSAL_FOCUS_CHANGED: &'static str =
+        "refused: the focused window changed after the trigger was typed";
+    pub const REFUSAL_FOCUS_UNCONFIRMED: &'static str =
+        "refused: no window tracker confirmed the focused window and compatibility_mode is tracked-focus";
 
     /// Build the content-free failure used when user input overlaps a
     /// non-atomic replacement. This is an uncertain output result, not a
@@ -793,16 +950,49 @@ impl InjectorError {
         }
     }
 
+    /// Content-free message for output checkpoints that stop because new
+    /// input arrived while a non-atomic transaction was in progress.
+    pub fn input_interrupted_message() -> &'static str {
+        Self::INPUT_INTERRUPTED_MESSAGE
+    }
+
     pub fn kind(&self) -> InjectorErrorKind {
         if self.retryable {
             InjectorErrorKind::TransportFailure
-        } else if self.message == Self::INPUT_INTERRUPTED_MESSAGE {
+        } else if self.message.contains(Self::INPUT_INTERRUPTED_MESSAGE) {
             InjectorErrorKind::InputInterrupted
         } else if self.message.starts_with("backend cannot synthesize") {
             InjectorErrorKind::FatalBackendFailure
         } else {
             InjectorErrorKind::ExpansionRejected
         }
+    }
+
+    /// These exact admission errors are emitted by the daemon's output
+    /// assurance gate before any output is submitted. Match the complete
+    /// messages rather than a broad prefix: backend or compositor error text
+    /// must never be mistaken for a proven no-effect refusal. The error itself
+    /// carries this classification across serialized worker boundaries.
+    pub fn is_pre_output_refusal(&self) -> bool {
+        !self.retryable
+            && matches!(
+                self.message.as_str(),
+                Self::REFUSAL_COMPATIBILITY_MODE_OFF
+                    | Self::REFUSAL_FOCUS_CHANGED
+                    | Self::REFUSAL_FOCUS_UNCONFIRMED
+            )
+    }
+
+    /// Whether a known pre-output refusal proves that the trigger's original
+    /// target context is no longer trustworthy. Unlike a compatibility-mode
+    /// refusal, focus refusals must not restore the reserved trigger into the
+    /// matcher's current context for a later retry.
+    pub fn invalidates_target_context(&self) -> bool {
+        !self.retryable
+            && matches!(
+                self.message.as_str(),
+                Self::REFUSAL_FOCUS_CHANGED | Self::REFUSAL_FOCUS_UNCONFIRMED
+            )
     }
 }
 
@@ -982,6 +1172,10 @@ fn discover_window_tracker(wayland: bool) -> (BackendState, String) {
         );
     }
     let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    discover_window_tracker_for_desktop(&desktop)
+}
+
+fn discover_window_tracker_for_desktop(desktop: &str) -> (BackendState, String) {
     let gnome = desktop
         .to_lowercase()
         .split(':')
@@ -989,7 +1183,7 @@ fn discover_window_tracker(wayland: bool) -> (BackendState, String) {
     if gnome {
         (
             BackendState::Implemented,
-            "GNOME detected; uses the WayExpand GNOME Shell extension (GNOME 45+), because \
+            "GNOME detected; uses the WayExpand GNOME Shell extension (runtime-gated on GNOME Shell 46, 50, and 51), because \
              Mutter exposes no window-listing Wayland protocol and limits \
              org.gnome.Shell.Introspect to allowlisted callers; `wayexpand setup` installs and \
              enables it"
@@ -1093,6 +1287,114 @@ fn discover_uinput() -> (BackendState, String) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn window_identity_source_codes_are_closed_and_content_free() {
+        for (source, code, label) in [
+            (WindowIdentitySource::Unavailable, 0, "unavailable"),
+            (WindowIdentitySource::ResourceClass, 1, "resource-class"),
+            (
+                WindowIdentitySource::DesktopFileName,
+                2,
+                "desktop-file-name",
+            ),
+            (WindowIdentitySource::ResourceName, 3, "resource-name"),
+            (
+                WindowIdentitySource::CompositorIdentityOnly,
+                4,
+                "compositor-identity-only",
+            ),
+            (
+                WindowIdentitySource::ProcessExecutable,
+                5,
+                "process-executable",
+            ),
+            (
+                WindowIdentitySource::ProcessExecutableUnavailable,
+                6,
+                "process-executable-unavailable",
+            ),
+        ] {
+            assert_eq!(source.code(), code);
+            assert_eq!(WindowIdentitySource::from_code(code), source);
+            assert_eq!(source.as_str(), label);
+        }
+        assert_eq!(
+            WindowIdentitySource::from_code(u8::MAX),
+            WindowIdentitySource::Unavailable
+        );
+    }
+
+    #[test]
+    fn gnome_window_tracking_diagnostic_only_names_runtime_gated_shell_majors() {
+        let (state, detail) = discover_window_tracker_for_desktop("GNOME");
+        assert_eq!(state, BackendState::Implemented);
+        assert!(detail.contains("GNOME Shell 46, 50, and 51"));
+        assert!(!detail.contains("GNOME 45+"));
+    }
+
+    #[test]
+    fn only_known_assurance_refusals_prove_that_output_never_started() {
+        let refusal = InjectorError {
+            backend: "libei",
+            message:
+                "refused: this route cannot verify the trigger at the target; compatibility_mode is off"
+                    .into(),
+            retryable: false,
+        };
+        assert!(refusal.is_pre_output_refusal());
+
+        for message in [
+            "refused: compositor declined the request",
+            "permission denied",
+        ] {
+            let backend_error = InjectorError {
+                backend: "libei",
+                message: message.into(),
+                retryable: false,
+            };
+            assert!(!backend_error.is_pre_output_refusal(), "{message}");
+        }
+
+        let retryable_refusal = InjectorError {
+            backend: "libei",
+            message: refusal.message,
+            retryable: true,
+        };
+        assert!(!retryable_refusal.is_pre_output_refusal());
+    }
+
+    #[test]
+    fn only_focus_assurance_refusals_invalidate_the_target_context() {
+        for message in [
+            "refused: the focused window changed after the trigger was typed",
+            "refused: no window tracker confirmed the focused window and compatibility_mode is tracked-focus",
+        ] {
+            let refusal = InjectorError {
+                backend: "libei",
+                message: message.into(),
+                retryable: false,
+            };
+            assert!(refusal.invalidates_target_context(), "{message}");
+            assert!(refusal.is_pre_output_refusal(), "{message}");
+        }
+
+        let compatibility_refusal = InjectorError {
+            backend: "libei",
+            message:
+                "refused: this route cannot verify the trigger at the target; compatibility_mode is off"
+                    .into(),
+            retryable: false,
+        };
+        assert!(!compatibility_refusal.invalidates_target_context());
+
+        let retryable_focus_error = InjectorError {
+            backend: "libei",
+            message: "refused: the focused window changed after the trigger was typed".into(),
+            retryable: true,
+        };
+        assert!(!retryable_focus_error.invalidates_target_context());
+    }
+
     fn focused(app: &str, instance: Option<&str>, title: &str) -> Option<WindowContext> {
         Some(WindowContext {
             app_id: Some(app.into()),
@@ -1155,6 +1457,39 @@ mod tests {
                 .check(),
             Err("focus".into())
         );
+    }
+
+    #[test]
+    fn composed_checkpoints_preserve_the_callers_output_progress() {
+        let transaction_progress = OutputCheckpoint::default();
+        let target_guard = OutputCheckpoint::new(|| Ok(()));
+        let combined = transaction_progress.clone().and(target_guard);
+
+        combined.record_erasure(3);
+        combined.record_insertion(7);
+
+        assert_eq!(
+            transaction_progress.progress(),
+            OutputProgress {
+                tracked: true,
+                erased_units: 3,
+                inserted_units: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn interruption_kind_survives_backend_error_context() {
+        let message = format!(
+            "typing stopped before the end of the text: {}",
+            InjectorError::input_interrupted_message()
+        );
+        let error = InjectorError {
+            backend: "test",
+            message,
+            retryable: false,
+        };
+        assert_eq!(error.kind(), InjectorErrorKind::InputInterrupted);
     }
 
     #[test]
@@ -1437,6 +1772,17 @@ mod tests {
         assert_eq!(
             InjectorCapabilities::default()
                 .replacement_admission(crate::CompatibilityMode::UntrackedFocus),
+            ReplacementAdmission::Refused
+        );
+
+        let inconsistent = InjectorCapabilities {
+            atomic_replace: true,
+            replacement_guarantee: ReplacementGuarantee::VerifiedSurroundingText,
+            ..InjectorCapabilities::default()
+        };
+        assert!(!inconsistent.has_atomic_replacement_contract());
+        assert_eq!(
+            inconsistent.replacement_admission(crate::CompatibilityMode::Off),
             ReplacementAdmission::Refused
         );
     }

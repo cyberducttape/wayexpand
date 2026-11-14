@@ -1,5 +1,6 @@
 //! Toolbar: brand, route status, pause/run controls, and library search.
 
+use crate::lang::RouteTrustDetails;
 use crate::*;
 
 impl GuiApp {
@@ -194,14 +195,15 @@ impl GuiApp {
                 Some(false)
             };
             (
-                self.strings.route_trust_status(
-                    &contract.label,
-                    &contract.status,
-                    sensitive_field_protection,
-                    contract.atomic_replace,
-                    &contract.replacement_assurance,
-                    contract.is_certified(),
-                ),
+                self.strings.route_trust_status(RouteTrustDetails {
+                    route: &contract.label,
+                    maturity: &contract.status,
+                    sensitive_fields: sensitive_field_protection,
+                    trigger_precondition: &contract.trigger_precondition,
+                    output_transaction: &contract.output_transaction,
+                    application_result: &contract.application_result,
+                    certified: contract.is_certified(),
+                }),
                 if sensitive_field_protection == Some(false) {
                     palette.danger
                 } else if contract.is_certified() && sensitive_field_protection == Some(true) {
@@ -568,7 +570,8 @@ impl GuiApp {
         if let Some(capabilities) = self.daemon_capabilities.as_ref() {
             if let Some(assurance) = capabilities.replacement_assurance {
                 let color = match assurance {
-                    runtime::ReplacementAssurance::Verified => palette.success,
+                    // The atomic route contract does not verify application output.
+                    runtime::ReplacementAssurance::Verified => palette.muted,
                     runtime::ReplacementAssurance::FocusTrackedBestEffort => palette.warning,
                     runtime::ReplacementAssurance::Unverified
                     | runtime::ReplacementAssurance::Blocked => palette.danger,

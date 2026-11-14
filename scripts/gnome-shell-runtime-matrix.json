@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "purpose": "Exact GNOME Shell majors with a version-pinned runtime acceptance gate. This is headless runtime compatibility evidence, not physical-desktop certification.",
+  "required_runtime_contract": [
+    "source-registration",
+    "engine-selection",
+    "active-layout-tracking",
+    "focus-tracking",
+    "extension-reload",
+    "session-persistence"
+  ],
+  "shell_versions": [
+    {
+      "major": "46",
+      "runner": "ubuntu-24.04",
+      "job": "gnome-e2e",
+      "runtime_test": "scripts/test-gnome-e2e.sh"
+    },
+    {
+      "major": "50",
+      "runner": "ubuntu-26.04",
+      "job": "gnome-e2e",
+      "runtime_test": "scripts/test-gnome-e2e.sh"
+    },
+    {
+      "major": "51",
+      "runner": "fedora:45",
+      "job": "gnome51-ibus-e2e",
+      "runtime_test": "scripts/test-gnome-e2e.sh"
+    }
+  ],
+  "evidence_scope": "headless-runtime-only"
+}

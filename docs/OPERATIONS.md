@@ -7,7 +7,7 @@
 `wayexpand health` reports whether the local configuration and live daemon can
 currently match expansions and whether the output worker is healthy. Its
 versioned JSON contract is available with `wayexpand health --json`
-(`schema_version: 4`). Its `application_coverage.focused_app_scope_state`
+(`schema_version: 8`). Its `application_coverage.focused_app_scope_state`
 reports `allowed`, `outside_allowlist`, `unknown`, or `unrestricted` without
 exposing the focused application's identity. Exit codes are stable for monitoring: 0 operationally
 ready, 1 degraded, 2 daemon unavailable, 3 invalid configuration, 4
@@ -41,10 +41,25 @@ ready while its safety state is limited or uncertified.
 The JSON report also includes `route_safety`, a concise summary of the active
 route's sensitive-field signal, target-identity evidence, atomic-replacement
 capability, compatibility override, and certification status. Atomicity alone
-does not establish target identity. These limitations do not change the
+does not establish target identity. For app-scoped capture, `target_identity`
+is unavailable unless both exact window identity and application identity are
+available; `window_identity` and `application_identity` expose those evidence
+sources separately. Schema 7 adds these separate identity fields so an exact
+compositor window token cannot be mistaken for an identified application.
+Schema 8 adds `output_integrity`, separating partial or uncertain transaction
+history from worker liveness and application-level verification.
+These limitations do not change the
 operational health exit code; automation that requires the independent
 execution-sandbox, input-privacy, configuration-integrity, or broker gates
 must inspect `wayexpand doctor --security --json` as well.
+The separate `output_integrity` object reports daemon-lifetime counts of
+uncertain and partial output transactions. `review_required: true` means at
+least one such outcome was recorded and its application result is unknown;
+inspect the affected target before assuming its text is intact. Zero counters
+mean no such outcome was observed since this daemon started, not that emitted
+text has been verified. Missing counters produce `state: "unknown"`. This
+signal does not change operational liveness or certify application-level text
+integrity.
 
 The GUI Diagnostics window provides quick actions for opening setup, editing
 configuration, running the local matcher preview, reviewing desktop-test
@@ -467,7 +482,7 @@ bash scripts/test-doctor.sh
 bash scripts/test-install-user.sh
 ```
 
-`wayexpand compatibility-report --json` uses `schema_version: 3`. Its
+`wayexpand compatibility-report --json` uses `schema_version: 4`. Its
 `active_route` object describes the daemon capture route's source/backend,
 capture scope, expansion scope, matching availability, sensitive-field signal,
 and insertion atomicity. An evdev daemon route can restrict where the matcher
@@ -480,7 +495,10 @@ displayed text. IBus registration and engine activity are reported separately
 from the active capture route because an installed or selected IBus engine can
 coexist with another daemon route. The report never calls an engine activity
 counter a verified insertion: `overall` remains
-`not_yet_verified_end_to_end`. A separate, reviewed test of the target
+`not_yet_verified_end_to_end`. The field
+`ibus_output_emitted_unverified_since_start` means the IBus engine submitted
+replacement signals; it is not evidence that the target application applied
+them. A separate, reviewed test of the target
 application is required before claiming a working insertion scenario. The
 IBus activation check can be `not_active_route` when IBus is running but another
 capture source is selected; `not_tested` means route identity or engine state
@@ -601,10 +619,19 @@ wayexpand upgrade --check --json
 wayexpand upgrade --apply
 ```
 
+The check reports whether the running CLI resolves to the active payload. If a
+developer build or another installation is shadowing it, run the `wayexpand`
+binary from the active payload before applying an upgrade; `--apply` refuses
+when that identity cannot be verified. `--rollback` remains available from a
+different CLI as a recovery path and restores only the validated saved payload.
+
 Apply validates the active configuration, restarts the active managed daemon,
 and verifies daemon build identity and status-protocol compatibility. It also
-restarts an already-active Action Broker. A failed health check restores the
-saved payload where available. `wayexpand upgrade --rollback` explicitly
+restarts an already-active Action Broker. The read-only check identifies the
+process path, PID, and owning unit for each restart it can safely map; it does
+not guess an unrelated active unit when the daemon's reported route has no
+matching service. A failed health check restores the saved payload where
+available. `wayexpand upgrade --rollback` explicitly
 restores that payload. Package-manager installations should first be upgraded
 or rolled back with their package manager; `upgrade --rollback` applies only
 when a content-addressed per-user previous payload was saved. An IBus engine
@@ -802,10 +829,12 @@ generate the allowlisted report:
 wayexpand support-bundle --output wayexpand-support.json
 ```
 
-The version 2 JSON file is created with mode `0600` and is never overwritten.
+The version 4 JSON file is created with mode `0600` and is never overwritten.
 It includes allowlisted route and protocol summaries, bounded IBus and daemon
 event counters, and systemd service state, restart count, exit status, and
-stable error IDs. It deliberately excludes configuration paths, snippet
+stable error IDs. Output acknowledgements are reported as unverified; the
+report does not claim that the target application changed its text. It
+deliberately excludes configuration paths, snippet
 triggers and replacements, policy contents, credentials, and raw journal or
 error strings. The GUI's Diagnostics panel offers **Export Support Report**,
 shows the exact JSON for review, then saves it with owner-only permissions.
