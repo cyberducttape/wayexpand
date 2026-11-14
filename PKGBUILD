@@ -40,7 +40,9 @@ build() {
 
 check() {
     cd "${pkgname}-${pkgver}"
-    cargo test --release --frozen --workspace
+    # Package builds do not run inside a delegated systemd cgroup, so command
+    # tests use process-group containment, as debian/rules does.
+    WAYEXPAND_PROCESS_CGROUP=disabled cargo test --release --frozen --workspace
 }
 
 package() {
