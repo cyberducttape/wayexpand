@@ -61,8 +61,9 @@ workflow pin deliberately when changing the release compiler.
 
 4. Review the support boundary in
    [`docs/SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md).
-5. Move completed `Unreleased` entries in `CHANGELOG.md` into a versioned
-   section.
+5. Review the `Unreleased` entries in `CHANGELOG.md`; add a short
+   `### Highlights` list at the top for larger releases. The next step turns
+   them into the version's section and refuses to run when there are none.
 6. Run `./scripts/prepare-release.sh <version>`. It updates the workspace,
    changelogs, distro metadata, AppStream, and the IBus component, computes the
    source archive checksum from the staged release tree, and creates the
