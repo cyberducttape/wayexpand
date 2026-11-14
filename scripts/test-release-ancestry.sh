@@ -55,4 +55,18 @@ expect_fail v1.1.0
 git_ tag -d v1.0.2 >/dev/null
 expect_pass v1.1.0
 
+# Tags without the v prefix order together with v-prefixed ones.
+git_ commit -q --allow-empty -m four
+git_ tag 1.1.1
+expect_pass 1.1.1
+git_ checkout -q --orphan unprefixed
+git_ commit -q --allow-empty -m unprefixed
+git_ tag 1.2.0
+expect_fail 1.2.0
+git_ tag -d 1.2.0 >/dev/null
+git_ checkout -q main
+git_ commit -q --allow-empty -m five
+git_ tag v1.2.0
+expect_pass v1.2.0
+
 printf '%s\n' 'release ancestry check compares against the previous release tag'

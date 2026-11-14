@@ -778,7 +778,10 @@ daemon source/backend arguments in service configuration.
 
 The `.github/workflows/certification.yml` workflow has two modes. Release
 calls set `require_production: true` and fail closed unless each
-production-required target yields reviewed production evidence. Manual and
+production-required target yields reviewed production evidence. A failed
+certification does not stop the release from publishing binaries; it decides
+whether the release notes describe the release as certified or as not
+compositor-certified. Manual and
 scheduled runs default to compatibility evidence, which cannot satisfy the
 release gate. Set the manual `require_production` input to true to exercise the
 release gate directly.
