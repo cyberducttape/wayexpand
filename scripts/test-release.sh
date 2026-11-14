@@ -171,7 +171,7 @@ grep -F 'error: kwin_wayland is required' "$test_root/harness-probe.out" >/dev/n
 test "$(stat -c '%a' "$extracted_archive/wayexpand-test-linux-$release_arch/expansions.toml")" = 600
 packaged_cli="$extracted_archive/wayexpand-test-linux-$release_arch/bin/wayexpand"
 "$packaged_cli" --version | grep -F 'wayexpand ' >/dev/null
-"$packaged_cli" --help | grep -F 'doctor --certify' >/dev/null
+"$packaged_cli" help doctor | grep -F 'doctor --certify' >/dev/null
 if grep -E '(^|/)\.git(/|$)|(^|/)docs/archive(/|$)' "$archive_listing" >/dev/null; then
     printf '%s\n' 'release archive contains excluded repository content' >&2
     exit 1

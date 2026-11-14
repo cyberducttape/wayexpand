@@ -4,6 +4,23 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Rework the CLI help. `wayexpand help` fits one 80-column screen and groups
+  commands by task, with examples; `wayexpand help --all` lists every command.
+  Every command has its own help with usage, explanation, and examples through
+  `wayexpand help <command>`, `<command> --help`, or `<command> -h`, which
+  previously printed the whole overview (and `doctor -h` diagnosed a
+  configuration file named `-h`). Mistyped commands suggest the closest one,
+  usage errors say what was wrong and point at the command's help, and
+  `support` is listed as an alias of `support-bundle`.
+- Reject unknown options as usage errors (exit 2). Commands that take an
+  optional `[config]` argument used to read an unknown option such as
+  `--bogus` as a configuration path and fail with a configuration error.
+  A configuration file whose name starts with `-` is still reachable as
+  `./-name`.
+- Add `wayexpand completions bash|zsh|fish`, generated from the same command
+  registry as the help, and document the commands missing from the manual
+  page; a test now fails when a command is not in the manual.
+
 - Add `settings.terminal_paste` (`off` by default). On the libei route,
   replacements in `terminal_apps` are delivered with the clipboard and
   Ctrl+Shift+V instead of typed: `multiline` pastes text with a line break,
