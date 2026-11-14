@@ -17,7 +17,9 @@ if [ "$build_sha" != "$source_commit" ]; then
     printf '%s\n' 'error: WAYEXPAND_BUILD_SHA does not match the checked-out source revision' >&2
     exit 1
 fi
-release_tag=$(git describe --tags --exact-match --match "v${version}" HEAD 2>/dev/null || true)
+release_tag=$(git describe --tags --exact-match --match "v${version}" --match "${version}" HEAD 2>/dev/null || true)
+# Releases are tagged vX.Y.Z or, from GitHub's release page, X.Y.Z.
+case "$release_tag" in "v${version}"|"${version}") release_tag="v${version}" ;; esac
 release_inputs_status=$(git status --porcelain=v1 --untracked-files=all -- \
     Cargo.toml Cargo.lock crates debian scripts wayexpand.spec .gitignore .gitattributes)
 build_release_version=${WAYEXPAND_BUILD_RELEASE_VERSION:-}

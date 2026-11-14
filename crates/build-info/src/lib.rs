@@ -209,32 +209,30 @@ fn is_exact_release(
             return true;
         };
         return head.starts_with(sha)
-            && git_output(
-                root,
-                &[
-                    "describe",
-                    "--tags",
-                    "--exact-match",
-                    "--match",
-                    &format!("v{package_version}"),
-                ],
-            )
-            .is_some()
+            && has_release_tag(root, package_version)
             && build_inputs_are_clean(root);
     }
     release_version_override.is_none()
-        && git_output(
-            root,
-            &[
-                "describe",
-                "--tags",
-                "--exact-match",
-                "--match",
-                &format!("v{package_version}"),
-            ],
-        )
-        .is_some()
+        && has_release_tag(root, package_version)
         && build_inputs_are_clean(root)
+}
+
+/// Whether HEAD carries this version's release tag. Releases are tagged
+/// `vX.Y.Z` or, when created from GitHub's release page, `X.Y.Z`.
+fn has_release_tag(root: &Path, package_version: &str) -> bool {
+    git_output(
+        root,
+        &[
+            "describe",
+            "--tags",
+            "--exact-match",
+            "--match",
+            &format!("v{package_version}"),
+            "--match",
+            package_version,
+        ],
+    )
+    .is_some()
 }
 
 /// Emit `WAYEXPAND_BUILD_VERSION` and `WAYEXPAND_COMMIT` for the calling
@@ -528,6 +526,35 @@ mod tests {
         fs::write(repository.0.join("untracked-secret.txt"), "untracked\n")
             .expect("write untracked file");
         assert!(!git_worktree_is_clean(&repository.0));
+    }
+
+    #[test]
+    fn unprefixed_release_tags_identify_an_exact_release() {
+        let repository = TestRepository::new();
+        git_ok(&repository.0, &["tag", "-d", "v1.3.3"]);
+        assert!(!is_exact_release(
+            &repository.0,
+            "1.3.3",
+            Some("native-commit"),
+            false,
+            None,
+        ));
+        git_ok(&repository.0, &["tag", "1.3.3"]);
+        assert!(is_exact_release(
+            &repository.0,
+            "1.3.3",
+            Some("native-commit"),
+            false,
+            None,
+        ));
+        // Another version's tag is not this release.
+        assert!(!is_exact_release(
+            &repository.0,
+            "1.3.4",
+            Some("native-commit"),
+            false,
+            None,
+        ));
     }
 
     #[test]
