@@ -2,23 +2,6 @@
 
 use super::{Language, Strings};
 
-/// One `&'static str` method per entry: English, German, Indonesian.
-macro_rules! texts {
-    ($($name:ident => $en:expr, $de:expr, $id:expr;)*) => {
-        impl Strings {
-            $(
-                pub fn $name(&self) -> &'static str {
-                    match self.lang {
-                        Language::English => $en,
-                        Language::German => $de,
-                        Language::Indonesian => $id,
-                    }
-                }
-            )*
-        }
-    };
-}
-
 texts! {
     outcome_working =>
         "Working in tested application",
