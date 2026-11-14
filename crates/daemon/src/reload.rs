@@ -260,6 +260,20 @@ fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildR
     unreachable!("fleet consistency loop returns or fails on every attempt")
 }
 
+/// Disable automatic expansion on `engine` while the active route cannot
+/// satisfy its effective organization policy.
+fn apply_backend_policy_gate(
+    engine: &mut ExpansionEngine,
+    route_injector: InjectorCapabilities,
+    route_source: InputSourceCapabilities,
+) {
+    let violation = engine.capability_violation_for_source(route_injector, route_source);
+    engine.set_backend_policy_blocked(violation.is_some());
+    if let Some(violation) = violation {
+        warn!(reason = %violation, "active backend cannot satisfy effective policy; automatic expansion is disabled");
+    }
+}
+
 /// No current daemon output route can verify that the application applied
 /// an expansion, so the daemon never records undo state. Say so rather than
 /// leaving a configured `undo_chord` silently inert.
@@ -381,13 +395,7 @@ impl ReloadableConfig {
     }
 
     fn refresh_backend_policy_gate(&mut self) {
-        let violation = self
-            .engine
-            .capability_violation_for_source(self.route_injector, self.route_source);
-        self.engine.set_backend_policy_blocked(violation.is_some());
-        if let Some(violation) = violation {
-            warn!(reason = %violation, "active backend cannot satisfy effective policy; automatic expansion is disabled");
-        }
+        apply_backend_policy_gate(&mut self.engine, self.route_injector, self.route_source);
     }
 
     /// Run command snippets and hotkey actions on worker threads, now and
@@ -671,12 +679,9 @@ impl ReloadableConfig {
                 // now rather than when the build started; losing any of them
                 // would, for example, resume matching inside a password field.
                 engine.inherit_runtime_state(&self.engine);
-                let capability_violation =
-                    engine.capability_violation_for_source(self.route_injector, self.route_source);
-                engine.set_backend_policy_blocked(capability_violation.is_some());
-                if let Some(violation) = capability_violation {
-                    warn!(reason = %violation, "reloaded policy requires capabilities unavailable on the active backend; automatic expansion is disabled");
-                }
+                // Gate the new engine before it replaces the old one, so no
+                // turn ever runs it ungated.
+                apply_backend_policy_gate(&mut engine, self.route_injector, self.route_source);
                 // A host that enabled workers on the engine directly wants
                 // them after the reload too.
                 self.async_workers |= self.engine.async_commands_enabled();
