@@ -498,7 +498,8 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         let config_path = positional
             .into_iter()
             .next()
-            .map(PathBuf::from)
+            .map(crate::args::config_path_arg)
+            .transpose()?
             .unwrap_or_else(default_config_path);
         return crate::doctor::security::run(&config_path, requested_json, profile);
     }
@@ -514,7 +515,8 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
     let config_path = rest
         .into_iter()
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     if requested_json {
         let healthy = print_json_diagnostics(&config_path)?;

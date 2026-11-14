@@ -1698,33 +1698,71 @@ fn exit_codes_follow_typed_categories_not_error_wording() {
 }
 
 #[test]
-fn help_rows_share_one_summary_column() {
-    let help = help_text();
-    let columns: Vec<usize> = help
-        .lines()
-        .filter(|line| line.starts_with("  "))
-        .map(|line| {
-            let usage_end = line[2..].find("  ").expect("summary separator") + 2;
-            usage_end + line[usage_end..].len() - line[usage_end..].trim_start().len()
-        })
-        .collect();
-    assert!(columns.len() > 20, "{help}");
-    assert!(columns.windows(2).all(|pair| pair[0] == pair[1]), "{help}");
+fn help_registry_covers_every_dispatched_command() {
+    // Every command `run` dispatches must have help, a typo suggestion
+    // target, and a completion entry.
+    let source = include_str!("main.rs");
+    let start = source.find("fn run()").expect("run function");
+    let end = source[start..]
+        .find("\nfn help_command")
+        .expect("end of run")
+        + start;
+    let mut missing = Vec::new();
+    for piece in source[start..end].split("Some(\"").skip(1) {
+        let name = &piece[..piece.find('"').expect("closing quote")];
+        if name.starts_with('-') {
+            continue;
+        }
+        if help::find(name).is_none() {
+            missing.push(name.to_owned());
+        }
+    }
+    assert!(missing.is_empty(), "commands without help: {missing:?}");
 }
 
 #[test]
-fn help_lists_current_pack_and_profile_management_commands() {
-    let help = help_text();
-    for command in [
-        "pack lint|test|diff|search|inspect",
-        "rollback|import|verify|sign",
-        "profile list|create|switch|remove|assign-app|unassign-app",
+fn man_page_documents_every_command() {
+    let manual = include_str!("../../../docs/wayexpand.1");
+    let missing: Vec<&str> = help::COMMANDS
+        .iter()
+        .map(|command| command.name)
+        .filter(|name| {
+            !manual.lines().any(|line| {
+                line.starts_with(".B ")
+                    && line[3..]
+                        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                        .any(|word| word == *name)
+            })
+        })
+        .collect();
+    assert!(missing.is_empty(), "docs/wayexpand.1 lacks: {missing:?}");
+}
+
+#[test]
+fn pack_and_profile_help_list_their_management_actions() {
+    let pack = help::plain_command_help(help::find("pack").unwrap(), "x");
+    assert!(pack.contains("lint|test|diff|search|inspect"), "{pack}");
+    assert!(pack.contains("rollback|import|verify|sign"), "{pack}");
+    let profile = help::plain_command_help(help::find("profile").unwrap(), "x");
+    for action in [
+        "profile list",
+        "create|switch|remove",
+        "assign-app",
+        "unassign-app",
     ] {
-        assert!(
-            help.contains(command),
-            "help does not list {command:?}:\n{help}"
-        );
+        assert!(profile.contains(action), "{profile}");
     }
+}
+
+#[test]
+fn leftover_options_are_unknown_options_not_config_paths() {
+    let error = args::config_path_arg("--bogus").unwrap_err();
+    assert_eq!(exit_code_for(&error), EXIT_USAGE);
+    assert!(error.to_string().contains("unknown option"));
+    assert_eq!(
+        args::config_path_arg("./-odd.toml").unwrap(),
+        Path::new("./-odd.toml")
+    );
 }
 
 #[test]
