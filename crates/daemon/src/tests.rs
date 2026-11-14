@@ -22,12 +22,6 @@ fn libei_refusal_diagnostics_are_content_free_and_actionable() {
         backend_refusal_category("multiple keyboard layouts detected (2)"),
         Some("active-layout-unavailable")
     );
-    assert_eq!(
-        backend_refusal_category(
-            "paced transaction exceeds interactive budget: estimated 109 ms, limit 100 ms"
-        ),
-        Some("paced-interactive-limit")
-    );
     assert_eq!(backend_refusal_category("unrelated backend error"), None);
 }
 

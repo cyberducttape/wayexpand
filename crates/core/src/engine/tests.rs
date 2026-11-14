@@ -1959,71 +1959,45 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
 }
 
 #[test]
-fn paced_output_budget_covers_the_complete_replacement_before_erasing() {
-    let result = |replacement: usize| ExpansionResult {
+fn paced_output_within_the_configured_limit_is_not_capped_by_duration() {
+    // Regression: a fixed 100 ms paced-output budget refused every keysym
+    // replacement longer than about eight keys, overriding the user's
+    // explicit `keystroke_max_chars`.
+    let result = ExpansionResult {
         snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
-        insert: "r".repeat(replacement).into(),
+        insert: "r".repeat(250).into(),
         cursor_offset: None,
-        reinsert_after: None,
+        reinsert_after: Some(' '),
         command_backed: false,
         undoable: true,
         folded_suffix_chars: 0,
     };
-    let capabilities = crate::InjectorCapabilities {
-        insertion_mode: "libei keysym fallback",
-        max_text_chars: 250,
-        expected_throughput_chars_per_sec: Some(83),
-        cursor_reposition: true,
-        ..crate::InjectorCapabilities::default()
-    };
-
-    // Two erased trigger characters plus six inserted characters fit under
-    // the conservative 100 ms budget at 83 events per second.
-    let mut short = CapabilityInjector {
+    let mut injector = CapabilityInjector {
         calls: Vec::new(),
-        capabilities,
+        capabilities: crate::InjectorCapabilities {
+            insertion_mode: "libei keysym fallback",
+            max_text_chars: 250,
+            expected_throughput_chars_per_sec: Some(83),
+            cursor_reposition: true,
+            ..crate::InjectorCapabilities::default()
+        },
     };
-    assert!(ExpansionEngine::apply(&mut short, &result(6)).is_output_acknowledged());
-    assert_eq!(short.calls, ["erase::x", "insert:rrrrrr"]);
-
-    // The replacement payload alone is below the configured 250-character
-    // ceiling, but the complete paced transaction exceeds the interactive
-    // budget. It must be refused before deleting any part of the trigger.
-    let mut long = CapabilityInjector {
-        calls: Vec::new(),
-        capabilities,
-    };
-    let outcome = ExpansionEngine::apply(&mut long, &result(7));
+    let mut over_route_limit = result.clone();
+    over_route_limit.insert = "r".repeat(251).into();
     assert!(matches!(
-        outcome,
+        ExpansionEngine::apply(&mut injector, &over_route_limit),
         crate::TransactionOutcome::NotApplied { ref source }
-            if source.message.starts_with("paced transaction exceeds interactive budget:")
-                && source.message.contains("estimated 109 ms, limit 100 ms")
+            if source.message.contains("raise keystroke_max_chars")
     ));
-    assert!(
-        long.calls.is_empty(),
-        "preflight must precede trigger erasure"
-    );
-
-    let mut delimiter_and_cursor = CapabilityInjector {
-        calls: Vec::new(),
-        capabilities,
-    };
-    let mut cursor_result = result(3);
-    cursor_result.reinsert_after = Some(' ');
-    cursor_result.cursor_offset = Some(1);
-    let outcome = ExpansionEngine::apply(&mut delimiter_and_cursor, &cursor_result);
-    assert!(matches!(
-        outcome,
-        crate::TransactionOutcome::NotApplied { ref source }
-            if source.message.contains("estimated 109 ms, limit 100 ms")
-    ));
-    assert!(
-        delimiter_and_cursor.calls.is_empty(),
-        "delimiter and cursor work must be included before trigger erasure"
-    );
+    assert!(injector.calls.is_empty());
+    // 250 characters plus a reinserted delimiter exceed the 250-character
+    // route limit, so trim the replacement to fit exactly.
+    let mut fits = result;
+    fits.insert = "r".repeat(249).into();
+    assert!(ExpansionEngine::apply(&mut injector, &fits).is_output_acknowledged());
+    assert_eq!(injector.calls.len(), 2);
 }
 
 struct UnknownRatePacedInjector {
@@ -2059,7 +2033,9 @@ impl crate::TextInjector for UnknownRatePacedInjector {
 }
 
 #[test]
-fn unknown_paced_throughput_is_refused_before_erasing() {
+fn paced_output_without_a_declared_rate_is_still_typed() {
+    // Routes such as the wlroots virtual keyboard type key by key but do not
+    // declare a throughput. They must not be refused for lacking one.
     let result = ExpansionResult {
         snippet_id: Arc::from(""),
         trigger: ":sig".into(),
@@ -2075,15 +2051,8 @@ fn unknown_paced_throughput_is_refused_before_erasing() {
 
     let outcome = ExpansionEngine::apply(&mut injector, &result);
 
-    assert!(matches!(
-        outcome,
-        TransactionOutcome::NotApplied { ref source }
-            if source.message.contains("no positive throughput bound")
-    ));
-    assert!(
-        injector.calls.is_empty(),
-        "refusal must precede trigger erasure"
-    );
+    assert!(outcome.is_output_acknowledged(), "{outcome}");
+    assert_eq!(injector.calls, ["erase::sig", "insert:replacement"]);
 }
 
 #[test]

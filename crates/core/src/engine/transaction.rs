@@ -6,22 +6,6 @@
 use super::{ExpansionEngine, ExpansionResult};
 use crate::{InjectorCapabilities, InjectorError, OutputProgress, SensitiveText, TextInjector};
 
-fn paced_transaction_duration_ms(
-    capabilities: &InjectorCapabilities,
-    result: &ExpansionResult,
-) -> Option<u64> {
-    // Scalar counts conservatively bound erased decomposed graphemes. Include
-    // every paced stage, not just replacement characters, so a long trigger
-    // or cursor move cannot evade the budget.
-    let events = crate::paced_replacement_event_count(
-        result.matched_text.chars().count(),
-        result.insert.chars().count(),
-        result.reinsert_after.is_some(),
-        result.cursor_offset,
-    );
-    crate::paced_output_duration_ms(events, capabilities.expected_throughput_chars_per_sec)
-}
-
 /// Result of the multi-stage output transaction.
 ///
 /// Failures are separated by what can safely be inferred about their effect.
@@ -239,8 +223,16 @@ impl RouteLimit {
     pub fn message(self, insertion_mode: &str) -> String {
         match self {
             Self::TooLong { chars, max } => {
+                // Keystroke typing is limited by the user's
+                // `keystroke_max_chars` setting rather than by the protocol,
+                // so say how to raise it.
+                let hint = if insertion_mode.contains("keysym") {
+                    " (raise keystroke_max_chars to allow longer keystroke typing)"
+                } else {
+                    ""
+                };
                 format!(
-                    "replacement requires {chars} characters but {insertion_mode} supports at most {max}"
+                    "replacement requires {chars} characters but {insertion_mode} supports at most {max}{hint}"
                 )
             }
             Self::Unicode { .. } => {
@@ -327,25 +319,6 @@ impl ExpansionEngine {
                     retryable: false,
                 })
             }
-        }
-        let paced_duration = paced_transaction_duration_ms(&capabilities, result);
-        if injector.uses_paced_synthetic_output() && paced_duration.is_none() {
-            return Err(InjectorError {
-                backend: injector.name(),
-                message: "paced synthetic output has no positive throughput bound; automatic replacement is refused, use clipboard/manual paste or generate a file".to_owned(),
-                retryable: false,
-            });
-        }
-        if let Some(estimated_ms) = paced_duration.filter(|duration| {
-            *duration > crate::insertion_plan::MAX_RECOMMENDED_PACED_INSERTION_MS
-        }) {
-            return Err(InjectorError {
-                backend: injector.name(),
-                message: format!(
-                    "paced transaction exceeds interactive budget: estimated {estimated_ms} ms, limit 100 ms; use clipboard/manual paste or generate a file"
-                ),
-                retryable: false,
-            });
         }
         Ok(())
     }

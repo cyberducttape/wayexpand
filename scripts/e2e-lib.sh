@@ -135,10 +135,10 @@ output_interruption_reported() {
     esac
 }
 
-output_budget_refusal_reported() {
+output_limit_refusal_reported() {
     status=$(daemon_status) || return 1
     case "$status" in
-        *"output_last_unsupported=paced-interactive-limit"*) return 0 ;;
+        *"output_last_unsupported=too-long"*) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -321,13 +321,37 @@ EOF
         "$(sink_field e2e-a cursor)"
 }
 
-scenario_paced_output_budget_refuses_before_erasing() {
+scenario_paced_output_within_raised_limit_is_typed() {
+    # Raising keystroke_max_chars is explicit consent to long paced output;
+    # no fixed duration budget may refuse it.
+    saved_keystroke_max_chars=${e2e_keystroke_max_chars:-}
+    e2e_keystroke_max_chars=250
     replacement=$(head -c 128 /dev/zero | tr '\000' A)
     write_config <<EOF
 [[expansion]]
 trigger = ";long"
 replacement = "$replacement"
 EOF
+    e2e_keystroke_max_chars=$saved_keystroke_max_chars
+    start_sink e2e-a && start_daemon || return 2
+    expand_in e2e-a "" ";long" || return 2
+    wait_until 100 sink_text_is e2e-a "$replacement"
+    result=$?
+    describe e2e-a
+    return "$result"
+}
+
+scenario_paced_output_over_limit_refuses_before_erasing() {
+    replacement=$(head -c 128 /dev/zero | tr '\000' A)
+    # Use the production default limit of 8 characters.
+    saved_keystroke_max_chars=${e2e_keystroke_max_chars:-}
+    e2e_keystroke_max_chars=8
+    write_config <<EOF
+[[expansion]]
+trigger = ";long"
+replacement = "$replacement"
+EOF
+    e2e_keystroke_max_chars=$saved_keystroke_max_chars
     start_sink e2e-a && start_daemon || return 2
     status=$(daemon_status) || return 2
     case "$status" in
@@ -343,13 +367,13 @@ EOF
     while [ "$attempts" -lt 30 ]; do
         status=$(daemon_status) || return 2
         case "$status" in
-            *"output_last_unsupported=paced-interactive-limit"*) break ;;
+            *"output_last_unsupported=too-long"*) break ;;
         esac
         sleep 0.1
         attempts=$((attempts + 1))
     done
     if [ "$attempts" -ge 30 ]; then
-        printf 'long paced output was not refused with the stable interactive-limit diagnostic'
+        printf 'paced output over keystroke_max_chars was not refused with the too-long diagnostic'
         return 1
     fi
     printf '%s\n' "$status" >"$case_dir/status-after-refusal.txt"
@@ -368,12 +392,14 @@ EOF
 }
 
 scenario_paced_refusal_preserves_follow_up_input() {
-    # The 100 ms interactive budget must refuse this long paced replacement
-    # before deleting the trigger. That prevents the overlap window entirely
-    # on this route. Physical-keyboard overlap remains a separate certification
-    # requirement; this headless test proves only the preflight refusal and
-    # preservation of subsequent client input.
+    # The default keystroke_max_chars (8) must refuse this long paced
+    # replacement before deleting the trigger. Physical-keyboard overlap
+    # remains a separate certification requirement; this headless test proves
+    # only the preflight refusal and preservation of subsequent client input.
     replacement=$(head -c 128 /dev/zero | tr '\000' A)
+    # Use the production default limit of 8 characters.
+    saved_keystroke_max_chars=${e2e_keystroke_max_chars:-}
+    e2e_keystroke_max_chars=8
     write_config <<EOF
 [[expansion]]
 trigger = ";long"
@@ -382,6 +408,7 @@ replacement = "$replacement"
 trigger = ";next"
 replacement = "SECOND-EXPANSION-MUST-NOT-RUN"
 EOF
+    e2e_keystroke_max_chars=$saved_keystroke_max_chars
     start_sink e2e-a && start_daemon || return 2
     status=$(daemon_status) || return 2
     case "$status" in
@@ -393,17 +420,17 @@ EOF
     esac
 
     expand_in e2e-a "" ";long" || return 2
-    wait_until 30 output_budget_refusal_reported || {
+    wait_until 30 output_limit_refusal_reported || {
         printf 'long paced output was not refused before erasing; '
         describe e2e-a
         return 1
     }
     status=$(daemon_status) || return 2
-    printf '%s\n' "$status" >"$case_dir/status-after-budget-refusal.txt"
+    printf '%s\n' "$status" >"$case_dir/status-after-limit-refusal.txt"
     uncertain_total=$(printf '%s\n' "$status" | sed -n 's/^output_uncertain_total=//p')
     partial_total=$(printf '%s\n' "$status" | sed -n 's/^output_partial_total=//p')
     unsupported=$(printf '%s\n' "$status" | sed -n 's/^output_last_unsupported=//p')
-    if [ "$unsupported" != paced-interactive-limit ] ||
+    if [ "$unsupported" != too-long ] ||
         [ "${uncertain_total:-0}" -ne 0 ] || [ "${partial_total:-0}" -ne 0 ]; then
         printf 'preflight refusal did not preserve a certain, unmodified outcome; '
         printf 'reason=%s uncertain=%s partial=%s ' "$unsupported" \
@@ -411,7 +438,7 @@ EOF
         return 1
     fi
     if ! sink_text_is e2e-a ";long"; then
-        printf 'budget refusal changed the target before output; '
+        printf 'limit refusal changed the target before output; '
         describe e2e-a
         return 1
     fi

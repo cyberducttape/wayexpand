@@ -195,14 +195,6 @@ Twenty injector samples per size measured p95 12.865 ms (small), 779.381 ms
 (medium), and 3.130 s (large). This remains partial compatibility evidence,
 not route certification.
 
-A later validation on the dirty working tree at commit `9da90fb36d45` ran all
-16 private KWin output/focus scenarios successfully. The structured record is
-[`kwin-e2e-current-dirty-9da90fb3.json`](evidence/kwin-e2e-current-dirty-9da90fb3.json).
-It includes a passing paced-output refusal and a clean refusal after
-compatibility consent was absent. Capture remained stdin-simulated; this run
-does not establish physical-input overlap integrity or production
-certification.
-
 The latest focused private KWin real-client run is preserved in
 [`kwin-certification-8f6ab7cb0745.txt`](evidence/kwin-certification-8f6ab7cb0745.txt).
 It tested clean commit `8f6ab7cb0745` on private headless KWin 6.6.6 with the

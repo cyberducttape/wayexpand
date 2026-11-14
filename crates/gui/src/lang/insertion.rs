@@ -197,13 +197,13 @@ impl Strings {
     pub fn keystroke_limit_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Characters (1–5000). When text must be typed key by key (the libei keysym fallback, about 83 characters a second), replacements above this limit are refused. The default limit is 8 characters (about 100 ms). Raising it explicitly allows slower compatibility output, but the route planner recommends copy and paste above 100 ms. Use file generation for bulk text."
+                "Characters (1–5000). When text must be typed key by key (the libei keysym fallback, about 83 characters a second), longer replacements are refused. The default limit is 8 characters (about 100 ms). Longer output is refused unless you raise the limit explicitly; copy and paste or generate a file for bulk text."
             }
             Language::German => {
-                "Zeichen (1–5000). Muss Text Taste für Taste getippt werden (libei-Keysym-Fallback, etwa 83 Zeichen pro Sekunde), werden Ersetzungen über diesem Limit abgelehnt. Der Standardwert beträgt 8 Zeichen (etwa 100 ms). Eine Erhöhung erlaubt ausdrücklich langsamere Kompatibilitätsausgabe; der Routenplaner empfiehlt über 100 ms jedoch Kopieren und Einfügen. Für große Texte sollten Sie eine Datei erzeugen."
+                "Zeichen (1–5000). Muss Text Taste für Taste getippt werden (libei-Keysym-Fallback, etwa 83 Zeichen pro Sekunde), werden längere Ersetzungen abgelehnt. Der Standardwert beträgt 8 Zeichen (etwa 100 ms). Längere Ausgabe wird abgelehnt, sofern Sie das Limit nicht ausdrücklich erhöhen; kopieren und einfügen oder erzeugen Sie eine Datei für größere Texte."
             }
             Language::Indonesian => {
-                "Karakter (1–5000). Jika teks harus diketik tombol demi tombol (fallback keysym libei, sekitar 83 karakter per detik), penggantian di atas batas ini ditolak. Batas bawaan adalah 8 karakter (sekitar 100 ms). Menaikkan batas secara eksplisit mengizinkan keluaran kompatibilitas yang lebih lambat, tetapi perencana rute menyarankan salin dan tempel jika lebih dari 100 ms. Buat berkas untuk teks besar."
+                "Karakter (1–5000). Jika teks harus diketik tombol demi tombol (fallback keysym libei, sekitar 83 karakter per detik), penggantian yang lebih panjang ditolak. Batas bawaan adalah 8 karakter (sekitar 100 ms). Keluaran lebih panjang ditolak kecuali batas dinaikkan secara eksplisit; salin dan tempel atau buat berkas untuk teks besar."
             }
         }
     }

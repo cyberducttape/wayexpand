@@ -40,8 +40,6 @@ All notable changes to WayExpand are documented here.
   visible-text latency in recent diagnostics. The measure does not prove when
   the compositor or application stopped rendering output. Record one sample
   per transaction and keep per-transaction history enrichment nonblocking.
-- Share paced-output duration estimation between the GUI route planner and
-  runtime admission so their interactive-budget decisions cannot drift.
 - Include the daemon's effective configuration state and generation in the
   security configuration-integrity gate, so a rejected fleet-layer reload
   cannot appear healthy because the base config file remains valid.
@@ -159,15 +157,10 @@ All notable changes to WayExpand are documented here.
   another context still completes work while the first context's result channel
   is full. Add regression tests and before/after resource and latency
   measurements, including a 1/4/16-context concurrent command-load profile.
-- Enforce the 100 ms interactive budget for paced replacement transactions
-  before erasing the trigger. The estimate includes erase, insertion,
-  delimiter reinsertion, and cursor movement, so increasing
-  `keystroke_max_chars` cannot enable a long paced write that the insertion
-  planner would direct to clipboard/manual paste or file generation.
-- Keep the GUI's insertion recommendation on clipboard/manual paste when paced
-  synthetic typing is estimated to exceed 100 ms, even if the configured
-  keystroke limit permits a longer explicit compatibility override. Clarify
-  this distinction in the engine settings help.
+- Count trigger erasure, delimiter reinsertion, and cursor movement in the
+  GUI's paced-output duration estimate. Paced typing remains bounded only by
+  the explicit `keystroke_max_chars` setting; an interim fixed 100 ms budget
+  that refused nearly every keysym expansion was removed before release.
 - Report GNOME Shell extension runtime coverage as the exact tested majors
   (46, 50, and 51) instead of the ambiguous "45+" label; these are headless
   compatibility gates and do not imply physical desktop certification.

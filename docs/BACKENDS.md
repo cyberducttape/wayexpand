@@ -140,9 +140,8 @@ layout-dependent keysym fallback, the bridge is tried before requiring an
 active EIS layout group. Thus a verified Fcitx5 Unicode commit can still work
 when KWin omits that group. If the bridge reports that no Fcitx input context
 is focused, the ordinary fallback's layout, representability and pacing
-checks are applied before any raw erase; a paced fallback over 100 ms is
-refused even when `keystroke_max_chars` was raised. A missing group never
-selects the first configured layout.
+checks are applied before any raw erase. A missing group never selects the
+first configured layout.
 
 **Character insertion latency (ei_keyboard fallback):**
 When the EIS server provides only `ei_keyboard` (no `ei_text`), the backend
@@ -175,18 +174,19 @@ The insertion planner previews a route-native, manual-paste, or short paced-key
 strategy from active daemon capabilities and compatibility consent. The GUI
 estimates the whole transaction, including trigger erasure, replacement text,
 delimiter handling, and a conservative cursor-travel bound. Runtime preflight
-uses the actual matched text and cursor offset, and refuses the replacement
-before erasing the trigger if its estimate exceeds 100 ms. Raising
-`keystroke_max_chars` cannot bypass that interactive budget. These estimates
-use advertised throughput; they are not certified latency guarantees. For
+refuses a replacement longer than `keystroke_max_chars` before erasing the
+trigger. These estimates use advertised throughput; they are not certified
+latency guarantees. For
 long configuration files and runbooks, use the preview's Copy action or
 `wayexpand new` to write a file instead of typing the content through the
 virtual keyboard. This does not make an unverified or non-atomic route safe for
 automatic replacement.
 
-The setting remains an upper bound for backends that support longer payloads;
-it does not authorize a paced transaction that exceeds the runtime budget. A
-changed limit applies to the running daemon on the next configuration reload.
+Raising it trades speed for reach: anything you type while a long
+replacement is being typed stops it partway (the evdev route cancels the rest
+when physical input arrives), and a focus change or the insertion timeout
+stops it too. A changed limit applies to the running daemon on the next
+configuration reload.
 
 This is intentional: the delay prioritizes correctness and reliability over speed
 when the fast path isn't available.
@@ -404,10 +404,9 @@ cargo run -p wayexpand-backend-wlroots --bin wlroots-type -- 'Hello 🙂'
 ```
 
 This is an output diagnostic, not the daemon's automatic expansion path.
-The daemon treats this route as paced synthetic keyboard output. Since the
-backend does not yet advertise a measured positive throughput bound, automatic
-replacement is refused before trigger erasure; use a manual paste route or a
-native text-output backend until that bound is established.
+The daemon treats this route as paced synthetic keyboard output. The backend
+does not advertise a measured throughput, so output deadlines use only the
+base completion allowance.
 
 UTF-8/Unicode-aware matching describes committed text only. WayExpand does not
 support IME preedit/composition state; CJK, dead-key, Compose, Fcitx, and IBus

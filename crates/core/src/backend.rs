@@ -704,8 +704,8 @@ pub trait TextInjector: Send {
         InjectorCapabilities::default()
     }
     /// Whether this route emits replacement text as sequential synthetic key
-    /// events. Such routes need a known throughput bound for automatic output;
-    /// otherwise long transactions are refused before erasing the trigger.
+    /// events. Diagnostics use it to label non-atomic paced output; length is
+    /// bounded by the route's `max_text_chars`, not by a duration budget.
     fn uses_paced_synthetic_output(&self) -> bool {
         false
     }

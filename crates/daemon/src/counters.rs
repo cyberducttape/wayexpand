@@ -201,7 +201,6 @@ pub(crate) fn note_output_unsupported_reason(reason: &'static str) {
         "layout-mismatch" => 6,
         "active-layout-unavailable" => 7,
         "keyboard-state-busy" => 8,
-        "paced-interactive-limit" => 9,
         _ => return,
     };
     LAST_UNSUPPORTED.store(code, Ordering::Relaxed);
@@ -217,7 +216,6 @@ fn last_unsupported_name(code: u8) -> &'static str {
         6 => "layout-mismatch",
         7 => "active-layout-unavailable",
         8 => "keyboard-state-busy",
-        9 => "paced-interactive-limit",
         _ => "none",
     }
 }

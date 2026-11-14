@@ -6,12 +6,6 @@
 
 use crate::CompatibilityMode;
 
-/// Do not recommend paced synthetic typing when its estimated duration is
-/// longer than a short interactive replacement. The configured keystroke
-/// character ceiling cannot authorize paced output beyond this transaction
-/// budget; longer output must use copy/paste or file generation.
-pub(crate) const MAX_RECOMMENDED_PACED_INSERTION_MS: u64 = 100;
-
 /// Estimate paced synthetic output with conservative ceiling arithmetic.
 /// A missing or zero rate is unknown and therefore cannot be approved.
 pub fn paced_output_duration_ms(
@@ -64,8 +58,9 @@ pub enum InsertionStrategy {
 /// should use [`plan_replacement`] so trigger erasure and cursor movement are
 /// included in the paced-work estimate. Unknown or unsupported routes fail to
 /// the manual clipboard path. Paced synthesis is recommended only when it fits
-/// both the configured route limit and the 100 ms interactive-output budget.
-/// Raising `keystroke_max_chars` does not bypass this safety limit.
+/// the explicitly configured route limit. The default limit is intentionally
+/// short; users who raise it have explicitly accepted slower compatibility
+/// output.
 pub fn plan_insertion(
     characters: usize,
     route: Option<InsertionRouteCapabilities>,
@@ -80,8 +75,8 @@ pub fn plan_insertion(
 /// a reinserted delimiter, if any). `paced_events` is a conservative count of
 /// all paced work: trigger erasure, replacement insertion, delimiter handling,
 /// and cursor repositioning. Keeping these separate prevents a long trigger
-/// or cursor move from passing the latency budget while still enforcing the
-/// route's maximum against replacement text only.
+/// or cursor move from understating the predicted duration while still
+/// enforcing the route's maximum against replacement text only.
 pub fn plan_replacement(
     output_characters: usize,
     paced_events: usize,
@@ -111,9 +106,6 @@ pub fn plan_replacement(
     };
     let predicted_ms = paced_output_duration_ms(paced_events, Some(rate))
         .expect("rate was checked as positive above");
-    if predicted_ms > MAX_RECOMMENDED_PACED_INSERTION_MS {
-        return InsertionStrategy::ClipboardAssistedPaste;
-    }
     InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms }
 }
 
@@ -169,28 +161,20 @@ mod tests {
     }
 
     #[test]
-    fn paced_compatibility_output_is_recommended_only_within_the_interactive_budget() {
+    fn paced_compatibility_output_is_recommended_within_the_configured_limit() {
         assert_eq!(
             plan_insertion(8, Some(route()), CompatibilityMode::TrackedFocus),
             InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms: 97 }
         );
         assert_eq!(
-            plan_insertion(9, Some(route()), CompatibilityMode::TrackedFocus),
-            InsertionStrategy::ClipboardAssistedPaste
-        );
-        assert_eq!(
-            plan_insertion(
-                9,
-                Some(InsertionRouteCapabilities {
-                    paced_throughput_chars_per_sec: Some(90),
-                    ..route()
-                }),
-                CompatibilityMode::TrackedFocus,
-            ),
-            InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms: 100 }
-        );
-        assert_eq!(
             plan_insertion(250, Some(route()), CompatibilityMode::TrackedFocus),
+            InsertionStrategy::PacedSyntheticKeystrokes {
+                predicted_ms: 3_013
+            },
+            "a raised keystroke limit is explicit consent to slower output"
+        );
+        assert_eq!(
+            plan_insertion(251, Some(route()), CompatibilityMode::TrackedFocus),
             InsertionStrategy::ClipboardAssistedPaste,
         );
     }
@@ -199,55 +183,14 @@ mod tests {
     fn replacement_plan_accounts_for_erasure_delimiters_and_cursor_work() {
         assert_eq!(
             plan_replacement(8, 11, Some(route()), CompatibilityMode::TrackedFocus),
-            InsertionStrategy::ClipboardAssistedPaste,
-            "the output payload fits, but trigger deletion pushes the transaction over budget"
+            InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms: 133 },
+            "trigger deletion counts toward the predicted duration"
         );
         assert_eq!(
-            plan_replacement(8, 8, Some(route()), CompatibilityMode::TrackedFocus),
-            InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms: 97 }
-        );
-        assert_eq!(
-            plan_replacement(8, 300, Some(route()), CompatibilityMode::TrackedFocus),
+            plan_replacement(300, 300, Some(route()), CompatibilityMode::TrackedFocus),
             InsertionStrategy::ClipboardAssistedPaste,
-            "cursor reposition work must count toward paced latency"
+            "the route limit applies to replacement text"
         );
-    }
-
-    #[test]
-    fn planner_uses_the_shared_runtime_duration_boundary() {
-        let route_for_rate = |rate| InsertionRouteCapabilities {
-            atomic_verified_replace: false,
-            native_text_commit: false,
-            paced_throughput_chars_per_sec: Some(rate),
-            max_text_chars: 0,
-        };
-
-        for rate in 1..=500 {
-            for events in 0..=600 {
-                let predicted = paced_output_duration_ms(events, Some(rate)).unwrap();
-                let plan = plan_replacement(
-                    0,
-                    events,
-                    Some(route_for_rate(rate)),
-                    CompatibilityMode::TrackedFocus,
-                );
-                if predicted <= MAX_RECOMMENDED_PACED_INSERTION_MS {
-                    assert_eq!(
-                        plan,
-                        InsertionStrategy::PacedSyntheticKeystrokes {
-                            predicted_ms: predicted
-                        },
-                        "events={events}, rate={rate}"
-                    );
-                } else {
-                    assert_eq!(
-                        plan,
-                        InsertionStrategy::ClipboardAssistedPaste,
-                        "events={events}, rate={rate}"
-                    );
-                }
-            }
-        }
     }
 
     #[test]

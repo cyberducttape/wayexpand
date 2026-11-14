@@ -1145,6 +1145,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "route_safety",
             "configuration",
             "daemon",
+            "output_integrity",
         ]
         .into_iter()
         .collect()

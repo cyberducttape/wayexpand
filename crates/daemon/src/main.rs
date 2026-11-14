@@ -194,8 +194,6 @@ fn backend_refusal_category(message: &str) -> Option<&'static str> {
         Some("active-layout-unavailable")
     } else if message.starts_with("the EIS server is still sending device updates") {
         Some("keyboard-state-busy")
-    } else if message.starts_with("paced transaction exceeds interactive budget:") {
-        Some("paced-interactive-limit")
     } else {
         None
     }

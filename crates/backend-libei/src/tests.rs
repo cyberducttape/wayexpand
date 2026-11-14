@@ -178,18 +178,6 @@ fn a_signal_does_not_cut_the_handshake_deadline_short() {
     );
 }
 
-#[test]
-fn paced_fallback_budget_fails_closed_without_a_positive_margin() {
-    assert!(super::ensure_paced_key_event_budget(8).is_ok());
-    assert!(matches!(
-        super::ensure_paced_key_event_budget(9),
-        Err(super::LibeiError::FallbackTooSlow {
-            characters: 9,
-            estimated_ms: 109
-        })
-    ));
-}
-
 /// A minimal EIS server: completes the handshake, announces `seats`
 /// seats in one burst, and keeps the connection open until `release`.
 fn flooding_eis_server(

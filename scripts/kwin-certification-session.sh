@@ -617,7 +617,7 @@ for app do
         case "$code" in
             0) outcome=pass ;;
             1) outcome=fail ;;
-            3) outcome=unsupported-by-design ;;
+            3) outcome='unsupported-by-design' ;;
             *) outcome=unverified ;;
         esac
         record "$outcome" "$name" "$app" "$detail"

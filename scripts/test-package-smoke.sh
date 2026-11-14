@@ -86,9 +86,6 @@ binaries='wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-gui wayex
 
 check_installed() {
     check_version=$expected_version
-    if [ "$#" -gt 0 ]; then
-        check_version=$1
-    fi
     stage='checking installed executables and shared libraries'
     printf '%s\n' 'Checking installed executables and shared libraries'
     for binary in $binaries; do
