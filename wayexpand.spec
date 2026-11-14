@@ -29,7 +29,9 @@ cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p action-broker
 
 %check
 . scripts/load-build-identity.sh
-cargo test --frozen --workspace
+# Package builds do not run inside a delegated systemd cgroup, so command
+# tests use process-group containment, as debian/rules does.
+WAYEXPAND_PROCESS_CGROUP=disabled cargo test --frozen --workspace
 
 %install
 install -Dm755 target/release/wayexpand %{buildroot}%{_bindir}/wayexpand
