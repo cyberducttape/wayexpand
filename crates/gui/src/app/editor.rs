@@ -871,8 +871,8 @@ impl GuiApp {
                                     self.playground.invalidate();
                                 }
                             }
-                            Err(message) => {
-                                self.status = Status::error(message);
+                            Err(error) => {
+                                self.status = Status::error(self.strings.form_field_error(error));
                             }
                         }
                     }
@@ -1265,20 +1265,30 @@ enum FormBuilderKind {
     Date,
 }
 
+/// Why a form field marker could not be built; shown in the interface
+/// language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FormFieldError {
+    InvalidName,
+    UnsafeDefault,
+    InvalidChoices,
+    DefaultNotAChoice,
+}
+
 fn build_form_field_marker(
     name: &str,
     default: &str,
     choice_source: &str,
     required: bool,
     kind: FormBuilderKind,
-) -> Result<String, String> {
+) -> Result<String, FormFieldError> {
     let name = name.trim();
     let mut bytes = name.bytes();
     if !bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
         || !bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
         || name.len() > 64
     {
-        return Err("Use a field name beginning with a lowercase letter, followed by lowercase letters, digits, or underscores (up to 64 characters).".into());
+        return Err(FormFieldError::InvalidName);
     }
     let safe_component = |value: &str| {
         !value.chars().any(char::is_control)
@@ -1287,10 +1297,7 @@ fn build_form_field_marker(
             && value.chars().count() <= 4096
     };
     if !safe_component(default) {
-        return Err(
-            "The default contains characters that cannot be represented safely in a form marker."
-                .into(),
-        );
+        return Err(FormFieldError::UnsafeDefault);
     }
     let required_suffix = if required { "|required" } else { "" };
     let marker = match kind {
@@ -1316,7 +1323,7 @@ fn build_form_field_marker(
                         || option.chars().count() > 256
                 })
             {
-                return Err("Enter 2–32 safe dropdown choices separated by commas.".into());
+                return Err(FormFieldError::InvalidChoices);
             }
             let selected_default = if default.trim().is_empty() {
                 options[0]
@@ -1324,7 +1331,7 @@ fn build_form_field_marker(
                 default.trim()
             };
             if !options.contains(&selected_default) {
-                return Err("The dropdown default must exactly match one of its choices.".into());
+                return Err(FormFieldError::DefaultNotAChoice);
             }
             format!(
                 "{{{{choice:{name}={};default={selected_default}{}}}}}",

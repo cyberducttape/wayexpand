@@ -73,6 +73,7 @@ mod editor;
 mod editor_chrome;
 mod import;
 mod insertion;
+mod onboarding;
 mod sidebar;
 mod status_messages;
 mod toolbar;
