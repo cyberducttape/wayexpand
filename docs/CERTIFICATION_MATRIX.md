@@ -284,7 +284,7 @@ current support claim and must not be used to infer password-field protection.
 **Test Date:** 2026-09-26  
 **Configuration:**
 - Desktop: KDE Plasma 6.6.x
-- WayExpand: 1.3.3
+- WayExpand: 1.3.5
 - Capture: evdev (active-seat logind/uaccess ACL)
 - Injection: libei
 - Window Tracking: KWin D-Bus

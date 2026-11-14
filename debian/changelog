@@ -1,3 +1,9 @@
+wayexpand (1.3.5-1) focal; urgency=medium
+
+  * Release v1.3.5
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Sat, 14 Nov 2026 11:01:07 -0700
+
 wayexpand (1.3.3-1) focal; urgency=medium
 
   * Release v1.3.3
