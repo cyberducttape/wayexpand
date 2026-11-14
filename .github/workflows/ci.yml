@@ -1074,7 +1074,7 @@ jobs:
           retention-days: 7
 
   package-smoke:
-    name: Package Upgrade Smoke (${{ matrix.image }})
+    name: Package Install Smoke (${{ matrix.image }})
     needs: [change-scope, packaging]
     if: needs.change-scope.outputs.integration == 'true'
     runs-on: ubuntu-latest
