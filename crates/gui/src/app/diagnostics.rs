@@ -5,12 +5,7 @@ use crate::*;
 fn desktop_test_options(expansions: &[ExpansionConfig]) -> Vec<(String, String)> {
     expansions
         .iter()
-        .filter(|expansion| {
-            expansion.is_keyboard_matchable()
-                && expansion.app_filter.is_empty()
-                && expansion.command.is_none()
-                && !expansion.replacement.contains("{{")
-        })
+        .filter(|expansion| super::first_run::desktop_testable(expansion))
         .map(|expansion| (expansion.trigger.clone(), expansion.replacement.clone()))
         .collect()
 }
@@ -1340,13 +1335,15 @@ impl GuiApp {
         let mut open = self.test_expansion_dialog_open;
         let mut close = false;
         let first_run_verification = self.desktop_test_dialog_required;
-        let desktop_tests = if first_run_verification {
-            super::first_run::onboarding_test_snippet(&self.config)
-                .map(|expansion| vec![(expansion.trigger.clone(), expansion.replacement.clone())])
-                .unwrap_or_default()
-        } else {
-            desktop_test_options(&self.config.expansion)
-        };
+        // First-run offers every testable snippet, with the tutorial snippet
+        // first when it exists; it is a default, not a requirement.
+        let mut desktop_tests = desktop_test_options(&self.config.expansion);
+        if first_run_verification {
+            if let Some(default) = super::first_run::onboarding_test_snippet(&self.config) {
+                desktop_tests.retain(|(trigger, _)| trigger != &default.trigger);
+                desktop_tests.insert(0, (default.trigger.clone(), default.replacement.clone()));
+            }
+        }
         if !desktop_tests
             .iter()
             .any(|(trigger, _)| trigger == &self.desktop_test_trigger)
