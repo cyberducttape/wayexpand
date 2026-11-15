@@ -270,18 +270,22 @@ jobs:
         run: bash scripts/generate-release-tarballs.sh "${RELEASE_REF_NAME#v}"
       - name: Build Debian and RPM packages
         run: scripts/build-release-packages.sh "${RELEASE_REF_NAME#v}"
-      - name: Verify source archive checksum and vendored Debian inputs
+      # The PKGBUILD published with the release carries the checksum of the
+      # archive built here. A checksum committed by prepare-release.sh came
+      # from the maintainer's machine, and gzip versions compress the same tar
+      # differently, so it could never be trusted to match this archive.
+      - name: Write the release PKGBUILD and verify vendored Debian inputs
         shell: bash
         run: |
           set -euo pipefail
           version="${RELEASE_REF_NAME#v}"
-          expected_checksum=$(awk -F"'" '/^sha256sums=/ { print $2; exit }' PKGBUILD)
-          actual_checksum=$(sha256sum "wayexpand-${version}.tar.gz" | awk '{print $1}')
-          test -n "$expected_checksum"
-          test "$expected_checksum" = "$actual_checksum" || {
-            echo "PKGBUILD checksum does not match the clean source archive" >&2
-            exit 1
-          }
+          checksum=$(sha256sum "wayexpand-${version}.tar.gz" | awk '{print $1}')
+          sed -e "s|^sha256sums=.*|sha256sums=('${checksum}')|" \
+            -e "s|/releases/download/[^/]*/|/releases/download/${RELEASE_REF_NAME}/|" \
+            PKGBUILD >"wayexpand-${version}.PKGBUILD"
+          grep -F "sha256sums=('${checksum}')" "wayexpand-${version}.PKGBUILD" >/dev/null
+          grep -F "/releases/download/${RELEASE_REF_NAME}/wayexpand-${version}.tar.gz" \
+            "wayexpand-${version}.PKGBUILD" >/dev/null
           tar -tzf "wayexpand-${version}-vendored.tar.gz" \
             | grep -F "wayexpand-${version}/debian/rules" >/dev/null
           tar -tzf "wayexpand-${version}-vendored.tar.gz" \
@@ -362,6 +366,7 @@ jobs:
             wayexpand_*_source.changes
             wayexpand_*_source.buildinfo
             wayexpand-*.cargo-metadata.json
+            wayexpand-*.PKGBUILD
             wayexpand-*.sbom.spdx.json
             wayexpand-*.sbom.cyclonedx.json
             wayexpand_*.deb
