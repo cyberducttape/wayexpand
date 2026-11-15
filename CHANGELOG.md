@@ -4,6 +4,18 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The recovery screen validates backups until it finds the five newest valid
+  ones. Previously it took the five newest files and validated only those, so
+  five damaged recent backups hid an older good one. A broken configuration
+  set aside during recovery is named `<name>.broken-<seconds>-<nanoseconds>`
+  and claimed without overwriting, so two recoveries in the same second no
+  longer fail.
+- After the library file changes on disk and is reloaded, the sidebar's
+  visible-snippet list and the reusable-snippet choices are rebuilt. The
+  reload kept their old revision, so they could show stale rows.
+- The real-application test dialog keeps a cached list of eligible snippets,
+  updated when the library changes, instead of copying every eligible
+  trigger and replacement on each repaint.
 - Quick Picker fixes:
   - Pressing Escape, Cancel or closing the window while an insert waits for
     focus now cancels it. Previously the waiting worker kept running, and

@@ -475,6 +475,7 @@ impl GuiApp {
         self.config_document = snapshot.document;
         self.config_revision = snapshot.revision;
         self.search_index = snapshot.search_index;
+        self.library_replaced();
         self.undo.clear();
         self.undo_bytes = 0;
         self.invalidate_preview();
@@ -518,6 +519,7 @@ impl GuiApp {
         self.new_draft = false;
         self.new_draft_origin = None;
         self.search_index = snapshot.search_index;
+        self.library_replaced();
         self.playground.invalidate();
         self.config_document = snapshot.document;
         self.config_revision = snapshot.revision;

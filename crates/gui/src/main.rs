@@ -208,6 +208,9 @@ struct GuiApp {
     search_fields: library::SearchFields,
     search_index: library::SearchIndex,
     library_revision: u64,
+    /// Snippet indices the desktop test may use, keyed by library revision
+    /// and first-run ordering.
+    desktop_test_cache: Option<((u64, bool), Vec<usize>)>,
     visible_indices_cache: Option<library::VisibleIndicesCache>,
     category_filter: Option<String>,
     preview_input: String,
@@ -622,6 +625,7 @@ impl GuiApp {
             search_fields: library::SearchFields::default(),
             search_index,
             library_revision: 0,
+            desktop_test_cache: None,
             visible_indices_cache: None,
             category_filter: None,
             preview_input,
