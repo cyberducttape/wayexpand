@@ -12,7 +12,10 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::mpsc::{self, Receiver, TryRecvError},
+    sync::{
+        mpsc::{self, Receiver, TryRecvError},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -154,7 +157,10 @@ enum InsertState {
     Waiting {
         trigger: String,
         text: String,
-        receiver: Receiver<Result<(), String>>,
+        receiver: Receiver<InsertOutcome>,
+        handoff: InsertHandoff,
+        /// The user asked to cancel after the daemon already had the insert.
+        cancel_refused: bool,
     },
     Failed {
         trigger: String,
@@ -167,6 +173,7 @@ enum InsertState {
 enum ShownInsertState {
     Waiting {
         trigger: String,
+        cancel_refused: bool,
     },
     Failed {
         trigger: String,
@@ -261,11 +268,19 @@ impl PickerApp {
             let (sender, receiver) = mpsc::channel();
             let trigger = expansion.trigger.clone();
             let worker_trigger = trigger.clone();
+            let handoff = InsertHandoff::new();
+            let worker_handoff = handoff.clone();
             let spawned = thread::Builder::new()
                 .name("wayexpand-picker-insert".into())
                 .spawn(move || {
-                    let result = wait_for_focus_and_insert(target_focus, &worker_trigger);
-                    let _ = sender.send(result);
+                    let outcome = wait_for_focus_and_insert(
+                        &mut ControlSocket,
+                        &target_focus,
+                        &worker_trigger,
+                        &worker_handoff,
+                        INSERT_TIMING,
+                    );
+                    let _ = sender.send(outcome);
                 });
             if let Err(error) = spawned {
                 self.insert_state = InsertState::Failed {
@@ -282,7 +297,13 @@ impl PickerApp {
                 // second, incomplete copy in the picker before delegating.
                 text: String::new(),
                 receiver,
+                handoff,
+                cancel_refused: false,
             };
+            // Step aside so the compositor returns focus to the window the
+            // picker was opened from; the worker inserts only once that
+            // exact window has focus again.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             return;
         }
         // Preview context is intentionally separate from execution context.
@@ -313,6 +334,44 @@ impl PickerApp {
         render_template_with_cursor(&expansion.replacement, &context)
             .map(|(text, _)| text)
             .map_err(|error| format!("Could not render this snippet: {error}"))
+    }
+
+    /// Why "Copy instead" is not offered for `trigger` after a failed
+    /// insert, if it is not: organization policy, or a snippet copy-only mode
+    /// would hide (app-restricted, or reading the clipboard or a secret).
+    /// A failed insert must never widen what can reach the clipboard.
+    fn fallback_copy_blocked(&self, trigger: &str) -> Option<&'static str> {
+        if !self.clipboard_fallback_allowed {
+            return Some("Organization policy does not allow copying snippets for manual paste.");
+        }
+        let expansion = self
+            .config
+            .expansion
+            .iter()
+            .find(|expansion| expansion.trigger == trigger)?;
+        (!picker_expansion_is_eligible(expansion, false)).then_some(
+            "This snippet cannot be copied: it is limited to specific applications or reads \
+             the clipboard or a secret, and a manual paste cannot check where it goes.",
+        )
+    }
+
+    /// The text "Copy instead" puts on the clipboard, after the same checks
+    /// as [`Self::fallback_copy_blocked`].
+    fn fallback_copy_text(&self, trigger: &str, text: &str) -> Result<String, String> {
+        if let Some(reason) = self.fallback_copy_blocked(trigger) {
+            return Err(reason.to_owned());
+        }
+        let expansion = self
+            .config
+            .expansion
+            .iter()
+            .find(|expansion| expansion.trigger == trigger)
+            .ok_or_else(|| "This snippet is no longer in the library.".to_owned())?;
+        if text.is_empty() {
+            self.clipboard_text(expansion)
+        } else {
+            Ok(text.to_owned())
+        }
     }
 
     /// The cached one-line preview of the snippet at `index`. Takes an index
@@ -351,38 +410,73 @@ impl PickerApp {
             trigger,
             text,
             receiver,
+            handoff,
+            cancel_refused,
         } = state
         else {
             self.insert_state = state;
             return;
         };
+        let failed = |error: String| InsertState::Failed {
+            trigger: trigger.clone(),
+            text: text.clone(),
+            error,
+        };
         match receiver.try_recv() {
-            Ok(Ok(())) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-            Ok(Err(error)) => {
-                self.insert_state = InsertState::Failed {
-                    trigger,
-                    text,
-                    error,
-                };
+            Ok(InsertOutcome::Delivered | InsertOutcome::Cancelled) => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close)
+            }
+            Ok(InsertOutcome::Failed(error)) => {
+                self.insert_state = failed(error);
+                bring_back(ctx);
             }
             Err(TryRecvError::Empty) => {
                 self.insert_state = InsertState::Waiting {
                     trigger,
                     text,
                     receiver,
+                    handoff,
+                    cancel_refused,
                 };
                 ctx.request_repaint_after(FOCUS_POLL_INTERVAL);
             }
             Err(TryRecvError::Disconnected) => {
-                self.insert_state = InsertState::Failed {
-                    trigger,
-                    text,
-                    error: "The insertion worker stopped before the insert was confirmed."
-                        .to_owned(),
-                };
+                self.insert_state = failed(
+                    "The insertion worker stopped before the insert was confirmed.".to_owned(),
+                );
+                bring_back(ctx);
             }
         }
     }
+
+    /// Escape, Cancel, or closing the window. A pending insert is cancelled
+    /// if the daemon does not have it yet; otherwise the picker stays open
+    /// and reports what really happened.
+    fn cancel(&mut self, ctx: &egui::Context) {
+        if let InsertState::Waiting {
+            handoff,
+            cancel_refused,
+            ..
+        } = &mut self.insert_state
+        {
+            if !handoff.cancel() {
+                *cancel_refused = true;
+                return;
+            }
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+}
+
+/// Show a minimized picker again after a failed insert, so its explanation
+/// and Copy instead are not lost. Wayland may not let a client restore
+/// itself, so it also asks for the user's attention.
+fn bring_back(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+        egui::UserAttentionType::Critical,
+    ));
 }
 
 impl eframe::App for PickerApp {
@@ -410,7 +504,13 @@ impl eframe::App for PickerApp {
             )
         });
         if escape {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            self.cancel(&ctx);
+        }
+        // The window's close button must not leave a pending insert behind.
+        if ctx.input(|input| input.viewport().close_requested()) {
+            if let InsertState::Waiting { handoff, .. } = &self.insert_state {
+                handoff.cancel();
+            }
         }
         if down && count > 0 {
             self.selected = (self.selected + 1).min(count - 1);
@@ -463,8 +563,13 @@ impl eframe::App for PickerApp {
                 // Copy what the cards show out of the state, so the failure
                 // card's buttons can update the picker while it renders.
                 let shown_state = match &self.insert_state {
-                    InsertState::Waiting { trigger, .. } => ShownInsertState::Waiting {
+                    InsertState::Waiting {
+                        trigger,
+                        cancel_refused,
+                        ..
+                    } => ShownInsertState::Waiting {
                         trigger: trigger.clone(),
+                        cancel_refused: *cancel_refused,
                     },
                     InsertState::Failed {
                         trigger,
@@ -478,13 +583,27 @@ impl eframe::App for PickerApp {
                     InsertState::Ready => ShownInsertState::Ready,
                 };
                 match &shown_state {
-                    ShownInsertState::Waiting { trigger } => {
+                    ShownInsertState::Waiting {
+                        trigger,
+                        cancel_refused,
+                    } => {
                         theme::card(ui, &palette, |ui| {
                             ui.set_width(ui.available_width());
                             ui.label(
                                 RichText::new(self.strings.picker_inserting(trigger)).strong(),
                             );
-                            ui.label(self.strings.picker_waiting_for_focus());
+                            if *cancel_refused {
+                                ui.colored_label(
+                                    palette.warning,
+                                    "Too late to cancel: WayExpand already has this insert. \
+                                     The picker reports the result when it arrives.",
+                                );
+                            } else {
+                                ui.label(self.strings.picker_waiting_for_focus());
+                                if ui.button(self.strings.picker_cancel()).clicked() {
+                                    self.cancel(&ctx);
+                                }
+                            }
                         });
                         ui.add_space(10.0);
                     }
@@ -501,27 +620,19 @@ impl eframe::App for PickerApp {
                                     .color(palette.warning),
                             );
                             ui.label(error);
+                            let copy_blocked = self.fallback_copy_blocked(trigger);
+                            if let Some(reason) = copy_blocked {
+                                ui.label(RichText::new(reason).small().color(palette.muted));
+                            }
                             ui.horizontal(|ui| {
                                 // A failed direct insert keeps no rendered text
                                 // (the daemon renders for itself), so render
-                                // the clipboard copy now when policy allows it.
-                                if self.clipboard_fallback_allowed
+                                // the clipboard copy now, under the same rules
+                                // as copy-only mode.
+                                if copy_blocked.is_none()
                                     && ui.button(self.strings.picker_copy_instead()).clicked()
                                 {
-                                    let rendered = if text.is_empty() {
-                                        self.config
-                                            .expansion
-                                            .iter()
-                                            .find(|expansion| &expansion.trigger == trigger)
-                                            .ok_or_else(|| {
-                                                "This snippet is no longer in the library."
-                                                    .to_owned()
-                                            })
-                                            .and_then(|expansion| self.clipboard_text(expansion))
-                                    } else {
-                                        Ok(text.clone())
-                                    };
-                                    match rendered {
+                                    match self.fallback_copy_text(trigger, text) {
                                         Ok(rendered) => {
                                             self.copied =
                                                 Some(copy_snippet(&ctx, rendered, trigger));
@@ -708,72 +819,206 @@ fn format_app_scope(filters: &[String]) -> String {
         .join("; ")
 }
 
-fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result<(), String> {
-    let deadline = Instant::now() + FOCUS_RETURN_TIMEOUT;
-    loop {
-        let current = crate::runtime::control_command(wayexpand_core::DaemonOperation::Focus)
+/// Who decides a pending direct insert: the user cancelling it, or the
+/// worker handing it to the daemon. Both change the state under one lock, so
+/// exactly one of them wins. Once the daemon has the request it cannot be
+/// withdrawn, and the picker says so instead of claiming a cancel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HandoffState {
+    Waiting,
+    Cancelled,
+    Submitted,
+}
+
+#[derive(Clone)]
+struct InsertHandoff(Arc<Mutex<HandoffState>>);
+
+impl InsertHandoff {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(HandoffState::Waiting)))
+    }
+
+    fn state(&self) -> HandoffState {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The user cancels. True when nothing was or will be sent; false when
+    /// the worker had already handed the insert to the daemon.
+    fn cancel(&self) -> bool {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match *state {
+            HandoffState::Waiting | HandoffState::Cancelled => {
+                *state = HandoffState::Cancelled;
+                true
+            }
+            HandoffState::Submitted => false,
+        }
+    }
+
+    /// The worker is about to send the insert. False when it was cancelled,
+    /// in which case nothing may be sent.
+    fn begin_submit(&self) -> bool {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *state == HandoffState::Waiting {
+            *state = HandoffState::Submitted;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// What the insert worker reports back to the picker.
+#[derive(Debug, PartialEq, Eq)]
+enum InsertOutcome {
+    /// The daemon confirmed the text reached the window.
+    Delivered,
+    /// The user cancelled before anything was sent.
+    Cancelled,
+    /// Nothing, or possibly part, was inserted; the message says which.
+    Failed(String),
+}
+
+/// The daemon calls the insert worker makes, so tests can drive it.
+trait PickerDaemon {
+    fn focus(&mut self) -> Option<FocusTarget>;
+    fn insert_tracked(&mut self, target: &FocusTarget, trigger: &str) -> Result<String, String>;
+    fn insert_result(&mut self, id: u64) -> Result<String, String>;
+}
+
+struct ControlSocket;
+
+impl PickerDaemon for ControlSocket {
+    fn focus(&mut self) -> Option<FocusTarget> {
+        crate::runtime::control_command(wayexpand_core::DaemonOperation::Focus)
             .ok()
-            .and_then(|response| focus_target_from_response(&response));
-        if let Some(current) = current.and_then(|info| info.target) {
-            if focus_returned_to_target(&target_focus, &current) {
-                let response = crate::runtime::insert_target_tracked(
-                    current.generation,
-                    &current.token,
-                    trigger,
-                )
-                .map_err(|error| error.to_string())?;
+            .and_then(|response| focus_target_from_response(&response))
+            .and_then(|info| info.target)
+    }
+
+    fn insert_tracked(&mut self, target: &FocusTarget, trigger: &str) -> Result<String, String> {
+        crate::runtime::insert_target_tracked(target.generation, &target.token, trigger)
+            .map_err(|error| error.to_string())
+    }
+
+    fn insert_result(&mut self, id: u64) -> Result<String, String> {
+        crate::runtime::insert_result(id).map_err(|error| error.to_string())
+    }
+}
+
+/// Timing for the insert worker; tests shorten it.
+#[derive(Clone, Copy)]
+struct InsertTiming {
+    focus_timeout: Duration,
+    focus_poll: Duration,
+    delivery_timeout: Duration,
+    delivery_poll: Duration,
+}
+
+const INSERT_TIMING: InsertTiming = InsertTiming {
+    focus_timeout: FOCUS_RETURN_TIMEOUT,
+    focus_poll: FOCUS_POLL_INTERVAL,
+    delivery_timeout: DELIVERY_TIMEOUT,
+    delivery_poll: DELIVERY_POLL_INTERVAL,
+};
+
+/// Wait for focus to return to the window the picker was opened from, send
+/// the insert unless the user cancelled first, and wait for the daemon to
+/// confirm delivery.
+fn wait_for_focus_and_insert(
+    daemon: &mut dyn PickerDaemon,
+    target_focus: &FocusTarget,
+    trigger: &str,
+    handoff: &InsertHandoff,
+    timing: InsertTiming,
+) -> InsertOutcome {
+    let deadline = Instant::now() + timing.focus_timeout;
+    loop {
+        if handoff.state() == HandoffState::Cancelled {
+            return InsertOutcome::Cancelled;
+        }
+        if let Some(current) = daemon.focus() {
+            if focus_returned_to_target(target_focus, &current) {
+                if !handoff.begin_submit() {
+                    return InsertOutcome::Cancelled;
+                }
+                let response = match daemon.insert_tracked(&current, trigger) {
+                    Ok(response) => response,
+                    Err(error) => return InsertOutcome::Failed(error),
+                };
                 if let Some(id) = wayexpand_core::parse_insert_scheduled_id(&response) {
-                    return wait_for_delivery(id);
+                    return wait_for_delivery(daemon, id, timing);
                 }
-                if !response.starts_with("unknown command") {
-                    return Err(format!(
-                        "daemon refused the insert: {}",
-                        response.trim_end()
-                    ));
+                if response.starts_with("unknown command") {
+                    // An older daemon cannot report delivery. Closing on its
+                    // untracked "insert scheduled" would claim a success
+                    // nobody observed, so send nothing.
+                    return InsertOutcome::Failed(
+                        "The running WayExpand service is older than this picker and cannot \
+                         confirm inserts, so nothing was inserted. Restart it with \
+                         `wayexpand service restart --yes`, or copy the snippet instead."
+                            .to_owned(),
+                    );
                 }
-                // A daemon older than this picker cannot report delivery;
-                // use the untracked request, whose outcome is unknown.
-                let response =
-                    crate::runtime::insert_target(current.generation, &current.token, trigger)
-                        .map_err(|error| error.to_string())?;
-                if response.trim_end() != "insert scheduled" {
-                    return Err(format!(
-                        "daemon refused the insert: {}",
-                        response.trim_end()
-                    ));
-                }
-                return Ok(());
+                return InsertOutcome::Failed(format!(
+                    "WayExpand refused the insert: {}",
+                    response.trim_end()
+                ));
             }
         }
         if Instant::now() >= deadline {
-            return Err(
-                "Focus did not return to the original window; refusing to insert.".to_owned(),
+            return InsertOutcome::Failed(
+                "Focus did not return to the original window, so nothing was inserted.".to_owned(),
             );
         }
-        thread::sleep(FOCUS_POLL_INTERVAL);
+        thread::sleep(timing.focus_poll);
     }
 }
 
 /// Poll the daemon until it reports what became of insert `id`.
-fn wait_for_delivery(id: u64) -> Result<(), String> {
-    let deadline = Instant::now() + DELIVERY_TIMEOUT;
+fn wait_for_delivery(
+    daemon: &mut dyn PickerDaemon,
+    id: u64,
+    timing: InsertTiming,
+) -> InsertOutcome {
+    let deadline = Instant::now() + timing.delivery_timeout;
     loop {
-        let response = crate::runtime::insert_result(id).map_err(|error| {
-            format!("Lost contact with WayExpand before the insert was confirmed: {error}")
-        })?;
-        let state = wayexpand_core::InsertDelivery::parse_response(&response, id)
-            .map_err(|()| format!("Unexpected reply from WayExpand: {}", response.trim_end()))?;
-        if let Some(verdict) = delivery_verdict(state) {
-            return verdict;
+        let response = match daemon.insert_result(id) {
+            Ok(response) => response,
+            Err(error) => {
+                return InsertOutcome::Failed(format!(
+                    "Lost contact with WayExpand before the insert was confirmed: {error}"
+                ))
+            }
+        };
+        let Ok(state) = wayexpand_core::InsertDelivery::parse_response(&response, id) else {
+            return InsertOutcome::Failed(format!(
+                "Unexpected reply from WayExpand: {}",
+                response.trim_end()
+            ));
+        };
+        match delivery_verdict(state) {
+            Some(Ok(())) => return InsertOutcome::Delivered,
+            Some(Err(message)) => return InsertOutcome::Failed(message),
+            None => {}
         }
         if Instant::now() >= deadline {
-            return Err(format!(
+            return InsertOutcome::Failed(format!(
                 "WayExpand did not confirm the insert within {} seconds. Check the field \
                  before copying, in case part of the snippet was typed.",
-                DELIVERY_TIMEOUT.as_secs()
+                timing.delivery_timeout.as_secs()
             ));
         }
-        thread::sleep(DELIVERY_POLL_INTERVAL);
+        thread::sleep(timing.delivery_poll);
     }
 }
 
@@ -1395,6 +1640,179 @@ mod tests {
                 panic!("{failure:?} must be shown");
             };
             assert!(message.ends_with("Nothing was inserted."), "{message}");
+        }
+    }
+
+    mod insert_handoff {
+        use super::super::{
+            wait_for_focus_and_insert, FocusTarget, InsertHandoff, InsertOutcome, InsertTiming,
+            PickerApp, PickerDaemon,
+        };
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        const TIMING: InsertTiming = InsertTiming {
+            focus_timeout: Duration::from_secs(5),
+            focus_poll: Duration::from_millis(1),
+            delivery_timeout: Duration::from_secs(5),
+            delivery_poll: Duration::from_millis(1),
+        };
+
+        fn target(generation: u64) -> FocusTarget {
+            FocusTarget {
+                generation,
+                token: "abcd".into(),
+            }
+        }
+
+        /// Focus returns once `focus_returned` is set; records every insert.
+        struct FakeDaemon {
+            focus_returned: Arc<Mutex<bool>>,
+            inserts: Arc<Mutex<Vec<String>>>,
+            insert_reply: String,
+            result_reply: String,
+        }
+
+        impl FakeDaemon {
+            fn new(insert_reply: &str, result_reply: &str) -> Self {
+                Self {
+                    focus_returned: Arc::new(Mutex::new(false)),
+                    inserts: Arc::new(Mutex::new(Vec::new())),
+                    insert_reply: insert_reply.into(),
+                    result_reply: result_reply.into(),
+                }
+            }
+        }
+
+        impl PickerDaemon for FakeDaemon {
+            fn focus(&mut self) -> Option<FocusTarget> {
+                Some(target(if *self.focus_returned.lock().unwrap() {
+                    2
+                } else {
+                    1
+                }))
+            }
+            fn insert_tracked(
+                &mut self,
+                _target: &FocusTarget,
+                trigger: &str,
+            ) -> Result<String, String> {
+                self.inserts.lock().unwrap().push(trigger.into());
+                Ok(self.insert_reply.clone())
+            }
+            fn insert_result(&mut self, _id: u64) -> Result<String, String> {
+                Ok(self.result_reply.clone())
+            }
+        }
+
+        #[test]
+        fn cancelling_before_focus_returns_sends_nothing() {
+            let mut daemon = FakeDaemon::new("insert scheduled id=1\n", "");
+            let inserts = Arc::clone(&daemon.inserts);
+            let focus_returned = Arc::clone(&daemon.focus_returned);
+            let handoff = InsertHandoff::new();
+            let worker_handoff = handoff.clone();
+            let worker = std::thread::spawn(move || {
+                wait_for_focus_and_insert(&mut daemon, &target(1), ";sig", &worker_handoff, TIMING)
+            });
+            std::thread::sleep(Duration::from_millis(20));
+            assert!(handoff.cancel(), "nothing was sent yet");
+            // Closing the picker returns focus to the original window, which
+            // is exactly when the old worker would have inserted.
+            *focus_returned.lock().unwrap() = true;
+            assert_eq!(worker.join().unwrap(), InsertOutcome::Cancelled);
+            assert!(inserts.lock().unwrap().is_empty());
+        }
+
+        #[test]
+        fn a_cancel_after_the_daemon_has_the_insert_is_refused() {
+            let mut daemon = FakeDaemon::new(
+                "insert scheduled id=1\n",
+                &wayexpand_core::InsertDelivery::Delivered.response_line(1),
+            );
+            *daemon.focus_returned.lock().unwrap() = true;
+            let inserts = Arc::clone(&daemon.inserts);
+            let handoff = InsertHandoff::new();
+            let outcome =
+                wait_for_focus_and_insert(&mut daemon, &target(1), ";sig", &handoff, TIMING);
+            assert_eq!(outcome, InsertOutcome::Delivered);
+            assert_eq!(*inserts.lock().unwrap(), [";sig"]);
+            assert!(!handoff.cancel(), "the insert was already sent");
+        }
+
+        #[test]
+        fn exactly_one_side_wins_the_handoff() {
+            let handoff = InsertHandoff::new();
+            assert!(handoff.cancel());
+            assert!(!handoff.begin_submit(), "a cancelled insert is never sent");
+            let handoff = InsertHandoff::new();
+            assert!(handoff.begin_submit());
+            assert!(!handoff.cancel());
+        }
+
+        #[test]
+        fn an_older_daemon_is_never_reported_as_a_success() {
+            let mut daemon = FakeDaemon::new("unknown command; expected status\n", "");
+            *daemon.focus_returned.lock().unwrap() = true;
+            let inserts = Arc::clone(&daemon.inserts);
+            let outcome = wait_for_focus_and_insert(
+                &mut daemon,
+                &target(1),
+                ";sig",
+                &InsertHandoff::new(),
+                TIMING,
+            );
+            let InsertOutcome::Failed(message) = outcome else {
+                panic!("an unconfirmable insert must not close the picker: {outcome:?}");
+            };
+            assert!(
+                message.contains("wayexpand service restart --yes"),
+                "{message}"
+            );
+            assert!(message.contains("nothing was inserted"), "{message}");
+            // Only the tracked request was sent; no untracked fallback.
+            assert_eq!(inserts.lock().unwrap().len(), 1);
+        }
+
+        #[test]
+        fn copy_instead_applies_the_copy_only_rules() {
+            let path = std::env::temp_dir().join(format!(
+                "wayexpand-picker-copy-rules-{}.toml",
+                std::process::id()
+            ));
+            std::fs::write(
+                &path,
+                "[settings]\nallow_clipboard = true\n\n\
+                 [[expansion]]\ntrigger = ';plain'\nreplacement = 'plain text'\n\n\
+                 [[expansion]]\ntrigger = ';scoped'\nreplacement = 'scoped text'\n\
+                 app_filter = ['org.example.Editor']\n\n\
+                 [[expansion]]\ntrigger = ';clip'\nreplacement = 'from {{clipboard}}'\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+                .unwrap();
+            let loaded = wayexpand_core::Config::load_versioned(&path).unwrap();
+            let _ = std::fs::remove_file(&path);
+            let app = PickerApp::new(
+                loaded.config,
+                loaded.revision,
+                crate::lang::Language::English,
+                crate::colorpack::ColorPack::Default,
+                true,
+                true,
+                true,
+                Some(target(1)),
+            );
+            assert_eq!(app.fallback_copy_blocked(";plain"), None);
+            assert_eq!(app.fallback_copy_text(";plain", "").unwrap(), "plain text");
+            for trigger in [";scoped", ";clip"] {
+                assert!(app.fallback_copy_blocked(trigger).is_some(), "{trigger}");
+                assert!(app.fallback_copy_text(trigger, "").is_err(), "{trigger}");
+                assert!(
+                    app.fallback_copy_text(trigger, "pre-rendered").is_err(),
+                    "{trigger}: rendered text does not bypass the rules"
+                );
+            }
         }
     }
 }
