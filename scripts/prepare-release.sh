@@ -178,6 +178,19 @@ awk -v version="$new_version" -v date="$rpm_date" '
 ' wayexpand.spec > "$spec_tmp"
 mv "$spec_tmp" wayexpand.spec
 
+# The GNOME extension carries the release as version-name and as the integer
+# version GNOME requires (major * 10000 + minor * 100 + patch).
+gnome_metadata="gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json"
+IFS=. read -r gnome_major gnome_minor gnome_patch <<EOF_VERSION
+$new_version
+EOF_VERSION
+gnome_version=$((gnome_major * 10000 + gnome_minor * 100 + gnome_patch))
+sed -i.bak \
+    -e "s/\"version-name\": \"[^\"]*\"/\"version-name\": \"$new_version\"/" \
+    -e "s/\"version\": [0-9][0-9]*/\"version\": $gnome_version/" \
+    "$gnome_metadata"
+rm -f "$gnome_metadata.bak"
+
 # 4. Update debian/changelog.
 printf '%s\n' "Updating debian/changelog..."
 (
@@ -201,6 +214,7 @@ test "$(sed -n 's/.*<release version=\"\([^\"]*\)\".*/\1/p' \
 test "$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' \
     desktop/wayexpand-ibus.xml | head -n1)" = "$new_version"
 grep -q "^## \[$new_version\]" CHANGELOG.md
+grep -q "\"version-name\": \"$new_version\"" "$gnome_metadata"
 
 # 5. Compute the source archive checksum before committing or tagging.
 #
@@ -212,7 +226,7 @@ printf '%s\n' "Creating deterministic source archive and PKGBUILD checksum..."
 git add Cargo.toml Cargo.lock CHANGELOG.md debian/changelog PKGBUILD wayexpand.spec \
     io.github.cyberducttape.WayExpand.metainfo.xml desktop/wayexpand-ibus.xml \
     docs/ACTION_BROKER_ARCHITECTURE.md docs/CERTIFICATION_MATRIX.md docs/wayexpand.1 \
-    .gitattributes
+    "$gnome_metadata" .gitattributes
 release_tree=$(git write-tree)
 archive_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release.XXXXXX")
 cleanup() {
@@ -233,7 +247,7 @@ printf '%s\n' "Committing version updates..."
 git add Cargo.toml Cargo.lock CHANGELOG.md debian/changelog PKGBUILD wayexpand.spec \
     io.github.cyberducttape.WayExpand.metainfo.xml desktop/wayexpand-ibus.xml \
     docs/ACTION_BROKER_ARCHITECTURE.md docs/CERTIFICATION_MATRIX.md docs/wayexpand.1 \
-    .gitattributes
+    "$gnome_metadata" .gitattributes
 git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com' \
     commit -m "release: version $new_version"
 
