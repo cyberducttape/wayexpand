@@ -113,6 +113,7 @@ mod editor;
 mod editor_chrome;
 mod import;
 mod insertion;
+mod next_step;
 mod onboarding;
 mod recovery;
 mod sidebar;

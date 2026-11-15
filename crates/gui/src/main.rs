@@ -894,6 +894,7 @@ impl eframe::App for GuiApp {
         }
         self.sync_window_title(ctx);
         self.render_toolbar(root, &palette);
+        self.render_next_step_banner(root, &palette);
         self.render_diagnostics(ctx, &palette);
         self.render_import_dialog(ctx, &palette);
         self.render_pack_dialog(ctx, &palette);

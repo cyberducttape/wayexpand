@@ -557,6 +557,18 @@ impl GuiApp {
             ));
         }
         details.push(self.strings.header_status_details_hint().to_owned());
+        // Lead with what to do, the same answer the banner under the header
+        // gives, before the facts behind it.
+        if let Some((problem, action)) = self.current_next_step() {
+            details.insert(
+                0,
+                format!(
+                    "{} → {}",
+                    self.strings.problem_text(problem),
+                    self.strings.action_label(action)
+                ),
+            );
+        }
         if let Some(count) = self
             .daemon_capabilities
             .as_ref()
@@ -617,9 +629,6 @@ impl GuiApp {
         if open_diagnostics {
             self.diagnostics_open = true;
             self.refresh_diagnostics(true);
-        }
-        if self.daemon_reachable == Some(false) && !ibus_only && !self.config.expansion.is_empty() {
-            self.turn_on_button(ui, palette);
         }
     }
 
