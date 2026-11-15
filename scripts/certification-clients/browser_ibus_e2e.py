@@ -275,8 +275,23 @@ def main():
             fail("timed out waiting for browser DOM inspection")
 
         wait_for(lambda: evaluate("document.readyState") == "complete", "browser page load")
-        if evaluate("document.title") != TITLE:
-            fail("unexpected browser title; refusing to activate an unrelated window")
+        # readyState can already be "complete" for the target's initial blank
+        # document while the acceptance page is still loading, so a single
+        # title check failed intermittently. Wait for the expected title; a
+        # window whose title never matches is still never activated.
+        observed_title = {"value": None}
+
+        def acceptance_title_loaded():
+            observed_title["value"] = evaluate("document.title")
+            return observed_title["value"] == TITLE
+
+        try:
+            wait_for(acceptance_title_loaded, "the acceptance page title")
+        except SystemExit:
+            fail(
+                "unexpected browser title "
+                f"{observed_title['value']!r}; refusing to activate an unrelated window"
+            )
         evaluate("document.querySelector('#target').focus()")
         Path(args.ready_marker).touch(mode=0o600)
         wait_for(lambda: Path(args.focus_marker).exists(), "Mutter-confirmed browser focus")
