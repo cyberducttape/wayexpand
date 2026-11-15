@@ -1327,6 +1327,12 @@ impl GuiApp {
         self.backend_test_help_open = open;
     }
 
+    /// Whether unsaved editor changes block the desktop test, which runs the
+    /// saved configuration. A clean draft of a saved snippet does not.
+    pub(crate) fn desktop_test_blocked_by_draft(&self) -> bool {
+        self.new_draft || self.draft_is_dirty()
+    }
+
     fn render_test_expansion_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
         if !self.test_expansion_dialog_open {
             return;
@@ -1451,11 +1457,14 @@ impl GuiApp {
                     &mut self.desktop_test_target_acknowledged,
                     "I am focused on a disposable, non-sensitive text field and will type the trigger once.",
                 );
+                // The desktop test runs the saved configuration, so only
+                // unsaved edits block it. Showing a saved snippet always
+                // creates a clean draft; requiring no draft at all disabled
+                // the test whenever the editor showed a snippet.
                 let can_run_test = desktop_test.is_some()
                     && application_class_valid
                     && self.desktop_test_target_acknowledged
-                    && self.draft.is_none()
-                    && !self.new_draft
+                    && !self.desktop_test_blocked_by_draft()
                     && self.setup_task.is_none();
                 if ui
                     .add_enabled(can_run_test, egui::Button::new("Start Desktop Test"))
@@ -1471,7 +1480,7 @@ impl GuiApp {
                         close = true;
                     }
                 }
-                if self.draft.is_some() || self.new_draft {
+                if self.desktop_test_blocked_by_draft() {
                     ui.colored_label(
                         palette.warning,
                         "Save or discard the current snippet draft before testing; the desktop test runs the saved configuration.",

@@ -136,6 +136,12 @@ impl GuiApp {
         self.persist_onboarding(self.strings.onboarding_complete_note());
     }
 
+    /// Dismiss the guide for good at the user's explicit request. Unlike
+    /// finishing it, this records no real-application verification.
+    pub(crate) fn skip_onboarding(&mut self) {
+        self.persist_onboarding(self.strings.onboarding_skipped_note());
+    }
+
     pub(crate) fn defer_onboarding(&mut self) {
         // Let users continue working while preserving the incomplete state.
         // The guide returns on the next launch and cannot be recorded as
@@ -519,6 +525,14 @@ impl GuiApp {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.small_button(self.strings.onboarding_defer()).clicked() {
                                 self.defer_onboarding();
+                            }
+                            // Someone who already uses WayExpand (an imported
+                            // library, another machine) can dismiss the guide
+                            // for good; this never marks anything verified.
+                            if !self.config.expansion.is_empty()
+                                && ui.small_button(self.strings.onboarding_skip()).clicked()
+                            {
+                                self.skip_onboarding();
                             }
                         });
                     });

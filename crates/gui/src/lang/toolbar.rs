@@ -855,6 +855,22 @@ impl Strings {
         }
     }
 
+    pub fn onboarding_skip(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Skip the guide — I already use WayExpand",
+            Language::Indonesian => "Lewati panduan — saya sudah memakai WayExpand",
+            Language::German => "Assistent überspringen – ich nutze WayExpand bereits",
+        }
+    }
+
+    pub fn onboarding_skipped_note(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Setup guide skipped. Reopen it any time from the menu with Getting started; nothing was verified.",
+            Language::Indonesian => "Panduan penyiapan dilewati. Buka lagi kapan saja dari menu lewat Memulai; tidak ada yang diverifikasi.",
+            Language::German => "Einrichtungsassistent übersprungen. Sie öffnen ihn jederzeit über „Erste Schritte“ im Menü; es wurde nichts verifiziert.",
+        }
+    }
+
     pub fn onboarding_complete_note(&self) -> &'static str {
         match self.lang {
             Language::English => "Thanks for confirming. This records your manual test; WayExpand does not observe or certify insertion in another application.",
