@@ -212,6 +212,9 @@ struct GuiApp {
     picker_shortcut: Option<runtime::PickerShortcut>,
     /// Why the last attempt to set it failed (a conflict, usually).
     picker_shortcut_error: Option<String>,
+    /// Snippet indices the desktop test may use, keyed by library revision
+    /// and first-run ordering.
+    desktop_test_cache: Option<((u64, bool), Vec<usize>)>,
     visible_indices_cache: Option<library::VisibleIndicesCache>,
     category_filter: Option<String>,
     preview_input: String,
@@ -628,6 +631,7 @@ impl GuiApp {
             library_revision: 0,
             picker_shortcut: None,
             picker_shortcut_error: None,
+            desktop_test_cache: None,
             visible_indices_cache: None,
             category_filter: None,
             preview_input,

@@ -5,7 +5,7 @@
 //! screen shows the (content-free) error and offers the repairs that never
 //! lose the original file: edit it, restore a validated backup, or start a
 //! fresh library. Whatever replaces the file, the broken one is kept beside
-//! it as `<name>.broken-<unix time>`.
+//! it as `<name>.broken-<seconds>-<nanoseconds>`.
 
 use std::fs;
 use std::io::Write;
@@ -18,6 +18,9 @@ use eframe::egui::{self, RichText};
 use crate::lang::Strings;
 
 const MAX_BACKUPS_SHOWN: usize = 5;
+/// Validating a backup loads it, so a folder with thousands of them must
+/// not stall the recovery screen.
+const MAX_BACKUPS_EXAMINED: usize = 200;
 
 struct Backup {
     path: PathBuf,
@@ -157,7 +160,10 @@ impl eframe::App for RecoveryApp {
 }
 
 /// Backups beside the configuration (`<name>.bak`, `<name>.bak.N`), newest
-/// first, each checked by loading it the way the GUI would.
+/// first, each checked by loading it the way the GUI would. Candidates are
+/// validated until the five newest valid ones are found, so a run of damaged
+/// recent backups cannot hide an older good one. Damaged backups newer than
+/// those stay listed (at most five) so the user sees why they are skipped.
 fn find_backups(path: &Path) -> Vec<Backup> {
     let (Some(folder), Some(name)) = (path.parent(), path.file_name()) else {
         return Vec::new();
@@ -177,14 +183,21 @@ fn find_backups(path: &Path) -> Vec<Backup> {
         })
         .collect();
     found.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
-    found
-        .into_iter()
-        .take(MAX_BACKUPS_SHOWN)
-        .map(|(_, path)| Backup {
-            valid: wayexpand_core::Config::load(&path).is_ok(),
-            path,
-        })
-        .collect()
+    let mut shown = Vec::new();
+    let (mut valid, mut invalid) = (0, 0);
+    for (_, path) in found.into_iter().take(MAX_BACKUPS_EXAMINED) {
+        if valid == MAX_BACKUPS_SHOWN {
+            break;
+        }
+        if wayexpand_core::Config::load(&path).is_ok() {
+            valid += 1;
+            shown.push(Backup { path, valid: true });
+        } else if invalid < MAX_BACKUPS_SHOWN {
+            invalid += 1;
+            shown.push(Backup { path, valid: false });
+        }
+    }
+    shown
 }
 
 /// Replace the broken configuration with a backup. The backup is staged in
@@ -213,27 +226,45 @@ fn restore_backup(path: &Path, backup: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Rename the broken configuration to `<name>.broken-<unix time>`, never
-/// replacing an existing file. Returns where it was kept.
+/// Move the broken configuration to `<name>.broken-<seconds>-<nanoseconds>`
+/// beside it, never replacing an existing file. Returns where it was kept.
+///
+/// The name is claimed with a hard link, which fails instead of overwriting
+/// when the name exists; a taken name (two recoveries within the same
+/// instant, or a leftover file) moves on to a numbered variant. The original
+/// is removed only after the link succeeds, so it is never lost.
 fn keep_broken(path: &Path) -> std::io::Result<Option<PathBuf>> {
     if !path.exists() {
         return Ok(None);
     }
-    let seconds = SystemTime::now()
+    let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default();
-    let mut kept = path.as_os_str().to_owned();
-    kept.push(format!(".broken-{seconds}"));
-    let kept = PathBuf::from(kept);
-    if kept.exists() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            format!("{} already exists", kept.display()),
-        ));
+    let stamp = format!("{}-{:09}", now.as_secs(), now.subsec_nanos());
+    for attempt in 0..100 {
+        let mut kept = path.as_os_str().to_owned();
+        if attempt == 0 {
+            kept.push(format!(".broken-{stamp}"));
+        } else {
+            kept.push(format!(".broken-{stamp}-{attempt}"));
+        }
+        let kept = PathBuf::from(kept);
+        match fs::hard_link(path, &kept) {
+            Ok(()) => {
+                if let Err(error) = fs::remove_file(path) {
+                    let _ = fs::remove_file(&kept);
+                    return Err(error);
+                }
+                return Ok(Some(kept));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
     }
-    fs::rename(path, &kept)?;
-    Ok(Some(kept))
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "no free name to keep the broken configuration under",
+    ))
 }
 
 /// Write `source`'s contents to `path` as a new owner-only file.
@@ -303,6 +334,60 @@ mod tests {
         let backups = find_backups(&config);
         assert_eq!(backups.len(), 1);
         assert!(!backups[0].valid);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_valid_backup_behind_five_damaged_ones_is_still_offered() {
+        let dir = scratch("sixth");
+        let config = dir.join("expansions.toml");
+        fs::write(&config, "broken").unwrap();
+        let good = dir.join("expansions.toml.bak.6");
+        fs::write(
+            &good,
+            "[[expansion]]\ntrigger = \";ok\"\nreplacement = \"fine\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&good, fs::Permissions::from_mode(0o600)).unwrap();
+        let old = SystemTime::now() - std::time::Duration::from_secs(3600);
+        fs::File::options()
+            .write(true)
+            .open(&good)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        for number in 1..=5 {
+            fs::write(dir.join(format!("expansions.toml.bak.{number}")), "damaged").unwrap();
+        }
+        let backups = find_backups(&config);
+        assert!(
+            backups
+                .iter()
+                .any(|backup| backup.valid && backup.path == good),
+            "the older valid backup is offered"
+        );
+        assert_eq!(backups.iter().filter(|backup| !backup.valid).count(), 5);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn keeping_a_broken_file_never_collides_or_overwrites() {
+        let dir = scratch("collide");
+        let config = dir.join("expansions.toml");
+        let mut kept = Vec::new();
+        for round in 0..3 {
+            fs::write(&config, format!("broken {round}")).unwrap();
+            kept.push(keep_broken(&config).unwrap().expect("a file was kept"));
+            assert!(!config.exists(), "the original is moved away");
+        }
+        kept.sort();
+        kept.dedup();
+        assert_eq!(kept.len(), 3, "three recoveries keep three files");
+        let contents: std::collections::BTreeSet<String> = kept
+            .iter()
+            .map(|path| fs::read_to_string(path).unwrap())
+            .collect();
+        assert_eq!(contents.len(), 3, "no kept file was overwritten");
         fs::remove_dir_all(dir).unwrap();
     }
 }
