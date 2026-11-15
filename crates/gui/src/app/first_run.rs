@@ -79,19 +79,30 @@ fn uses_gnome_ibus_route(is_gnome: bool, ibus_active: bool, recommends_ibus: boo
     is_gnome && (ibus_active || recommends_ibus)
 }
 
+/// Whether a saved snippet can drive the real-application test: enabled,
+/// global, static text with no command or template to render.
+pub(super) fn desktop_testable(expansion: &ExpansionConfig) -> bool {
+    expansion.is_keyboard_matchable()
+        && expansion.app_filter.is_empty()
+        && expansion.command.is_none()
+        && !expansion.replacement.contains("{{")
+}
+
+/// The harmless tutorial snippet the guide can create for the test.
 fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     config.expansion.iter().find(|expansion| {
-        expansion.is_keyboard_matchable()
-            && expansion.app_filter.is_empty()
-            && expansion.command.is_none()
-            && !expansion.replacement.contains("{{")
+        desktop_testable(expansion)
             && expansion.replacement == ONBOARDING_REPLACEMENT
             && expansion.tags.iter().any(|tag| tag == "tutorial")
     })
 }
 
+/// The snippet the first-run test uses by default: the tutorial snippet when
+/// it exists, otherwise any testable snippet. Requiring the tutorial left
+/// users who wrote their own first snippet unable to finish setup, although
+/// the guide tells them a suitable static snippet works.
 pub(super) fn onboarding_test_snippet(config: &Config) -> Option<&ExpansionConfig> {
-    onboarding_snippet(config)
+    onboarding_snippet(config).or_else(|| config.expansion.iter().find(|e| desktop_testable(e)))
 }
 
 impl GuiApp {
@@ -132,6 +143,12 @@ impl GuiApp {
             return;
         }
         self.persist_onboarding(self.strings.onboarding_complete_note());
+    }
+
+    /// Dismiss the guide for good at the user's explicit request. Unlike
+    /// finishing it, this records no real-application verification.
+    pub(crate) fn skip_onboarding(&mut self) {
+        self.persist_onboarding(self.strings.onboarding_skipped_note());
     }
 
     pub(crate) fn defer_onboarding(&mut self) {
@@ -522,6 +539,14 @@ impl GuiApp {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.small_button(self.strings.onboarding_defer()).clicked() {
                                 self.defer_onboarding();
+                            }
+                            // Someone who already uses WayExpand (an imported
+                            // library, another machine) can dismiss the guide
+                            // for good; this never marks anything verified.
+                            if !self.config.expansion.is_empty()
+                                && ui.small_button(self.strings.onboarding_skip()).clicked()
+                            {
+                                self.skip_onboarding();
                             }
                         });
                     });
@@ -1010,12 +1035,13 @@ mod tests {
     use wayexpand_core::{Config, ExpansionConfig};
 
     #[test]
-    fn first_run_uses_only_the_dedicated_global_tutorial_snippet() {
+    fn first_run_prefers_the_global_tutorial_snippet_but_accepts_others() {
         let config = Config::parse(
             "[[expansion]]\ntrigger = ';custom-check'\nreplacement = 'Custom check passed'\n",
         )
         .unwrap();
-        assert!(onboarding_test_snippet(&config).is_none());
+        let custom = onboarding_test_snippet(&config).expect("a static snippet is testable");
+        assert_eq!(custom.trigger, ";custom-check");
 
         let mut config = Config::parse("").unwrap();
         let mut tutorial = ExpansionConfig {
@@ -1042,6 +1068,17 @@ mod tests {
         let snippet = onboarding_test_snippet(&config).expect("global tutorial is testable");
         assert_eq!(snippet.trigger, ":wayexpand-test");
         assert_eq!(snippet.replacement, "WayExpand is working!");
+
+        // With another testable snippet listed first, the tutorial still wins.
+        let mut both = Config::parse(
+            "[[expansion]]\ntrigger = ';custom-check'\nreplacement = 'Custom check passed'\n",
+        )
+        .unwrap();
+        both.expansion.push(config.expansion[0].clone());
+        assert_eq!(
+            onboarding_test_snippet(&both).unwrap().trigger,
+            ":wayexpand-test"
+        );
     }
 
     #[test]

@@ -105,7 +105,8 @@ for contract_field in current_link config user_units binary_links uninstall upgr
 done
 
 for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
-    "$project_dir/wayexpand.spec" "$project_dir/.github/workflows/release.yml"; do
+    "$project_dir/wayexpand.spec" "$project_dir/.github/workflows/release.yml" \
+    "$project_dir/.github/workflows/experimental.yml"; do
     grep -q -F 'wayexpand-e2e' "$manifest" || {
         printf '%s\n' "manifest omits the isolated certification helper build: $manifest" >&2
         exit 1
