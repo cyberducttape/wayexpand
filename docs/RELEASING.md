@@ -172,6 +172,15 @@ use that branch. It must not build the clean Git checkout: Launchpad builders
 do not have reliable crates.io access, and Debian packaging fails closed
 rather than attempting a network dependency download.
 
+The Sync Launchpad workflow mirrors `main` and every tag to Launchpad on each
+push to `main`. It never rewrites a tag that already exists there, so moving a
+release tag on GitHub makes every later sync fail at the tag step, before the
+`launchpad-vendored` branch is published. The failure prints the tag and the
+commit Launchpad has. To replace that one tag, run the workflow manually on
+`main` with `replace_tag` set to the tag and `replace_tag_launchpad_commit`
+set to that commit. The push is leased on Launchpad's current tag ref, so a
+concurrent change there makes it fail instead of being overwritten.
+
 The workflow pins every GitHub Action to a full commit SHA. Do not replace
 those pins with moving version tags during release-workflow maintenance.
 
