@@ -767,6 +767,7 @@ impl eframe::App for PickerApp {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn picker_row(
     ui: &mut egui::Ui,
     palette: &Palette,
