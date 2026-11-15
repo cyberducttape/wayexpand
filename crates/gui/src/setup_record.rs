@@ -41,6 +41,9 @@ pub(crate) struct SetupRecord {
     /// Desktop and session type, such as "KDE · wayland".
     #[serde(default)]
     pub desktop: Option<String>,
+    /// The compositor session the test ran in (see `current_session`).
+    #[serde(default)]
+    pub session: Option<String>,
     #[serde(default)]
     pub verified_at_unix: Option<u64>,
 }
@@ -48,8 +51,28 @@ pub(crate) struct SetupRecord {
 /// Why a saved verification no longer covers this environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Staleness {
-    RouteChanged { was: String },
-    DesktopChanged { was: String },
+    /// The record lacks what is needed to say what it covered.
+    Incomplete,
+    RouteChanged {
+        was: String,
+    },
+    DesktopChanged {
+        was: String,
+    },
+    /// A new login or compositor start since the test.
+    SessionChanged,
+    BuildChanged {
+        was: String,
+    },
+}
+
+/// What the current session is running, to compare a verification against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Scope<'a> {
+    pub route: Option<&'a str>,
+    pub desktop: &'a str,
+    pub session: Option<&'a str>,
+    pub build: &'a str,
 }
 
 impl SetupRecord {
@@ -60,6 +83,7 @@ impl SetupRecord {
             route,
             build: Some(current_build()),
             desktop: Some(current_desktop()),
+            session: current_session(),
             verified_at_unix: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .ok()
@@ -74,33 +98,51 @@ impl SetupRecord {
             route: None,
             build: None,
             desktop: None,
+            session: None,
             verified_at_unix: None,
         }
     }
 
-    /// Whether this verification still covers `route` on this desktop.
-    /// A new WayExpand build alone does not require a new test; a different
-    /// typing route or desktop session does. An unknown current route says
-    /// nothing either way, so it is treated as not yet covered.
-    pub(crate) fn staleness(&self, route: Option<&str>, desktop: &str) -> Option<Staleness> {
-        if let Some(was) = self.desktop.as_deref().filter(|was| *was != desktop) {
+    /// Why this verification does not cover `scope`, or `None` when it does.
+    /// A verification lasts for one compositor session, one WayExpand build
+    /// and one typing route on one desktop; anything missing from either
+    /// side means a new test, never a match.
+    pub(crate) fn staleness(&self, scope: &Scope<'_>) -> Option<Staleness> {
+        let (Some(route), Some(desktop), Some(session), Some(build)) = (
+            self.route.as_deref(),
+            self.desktop.as_deref(),
+            self.session.as_deref(),
+            self.build.as_deref(),
+        ) else {
+            return Some(Staleness::Incomplete);
+        };
+        if desktop != scope.desktop {
             return Some(Staleness::DesktopChanged {
-                was: was.to_owned(),
+                was: desktop.to_owned(),
             });
         }
-        match (self.route.as_deref(), route) {
-            (Some(was), Some(now)) if was != now => Some(Staleness::RouteChanged {
-                was: was.to_owned(),
+        if scope.session != Some(session) {
+            return Some(Staleness::SessionChanged);
+        }
+        if build != scope.build {
+            return Some(Staleness::BuildChanged {
+                was: build.to_owned(),
+            });
+        }
+        match scope.route {
+            Some(now) if now == route => None,
+            Some(_) => Some(Staleness::RouteChanged {
+                was: route.to_owned(),
             }),
-            _ => None,
+            // An unknown current route says nothing; it is not a match.
+            None => Some(Staleness::Incomplete),
         }
     }
 
-    /// A verification that still covers the current route and desktop.
-    pub(crate) fn covers(&self, route: Option<&str>, desktop: &str) -> bool {
-        self.outcome == SetupOutcome::Verified
-            && route.is_some()
-            && self.staleness(route, desktop).is_none()
+    /// A user-confirmed insertion that covers what is running now.
+    #[cfg(test)]
+    pub(crate) fn covers(&self, scope: &Scope<'_>) -> bool {
+        self.outcome == SetupOutcome::Verified && self.staleness(scope).is_none()
     }
 }
 
@@ -130,6 +172,26 @@ pub(crate) fn current_build() -> String {
         env!("WAYEXPAND_BUILD_VERSION"),
         env!("WAYEXPAND_COMMIT")
     )
+}
+
+/// The compositor session: the boot plus the creation time of the Wayland
+/// socket, which the compositor makes when it starts. A new login, a
+/// compositor restart (such as after a desktop update) or a reboot changes
+/// it. `None` outside a Wayland session.
+pub(crate) fn current_session() -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")?;
+    let display = std::env::var_os("WAYLAND_DISPLAY")?;
+    let socket = std::path::Path::new(&runtime).join(display);
+    let created = fs::metadata(socket).ok()?;
+    let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .map(|id| id.trim().to_owned())
+        .unwrap_or_default();
+    Some(format!(
+        "{boot}:{}.{}",
+        created.ctime(),
+        created.ctime_nsec()
+    ))
 }
 
 pub(crate) fn current_desktop() -> String {
@@ -170,7 +232,7 @@ pub(crate) fn save(record: &SetupRecord) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SetupOutcome, SetupRecord, Staleness};
+    use super::{Scope, SetupOutcome, SetupRecord, Staleness};
 
     fn verified(route: &str, desktop: &str) -> SetupRecord {
         SetupRecord {
@@ -179,25 +241,84 @@ mod tests {
             route: Some(route.into()),
             build: Some("1.3.6 (abc)".into()),
             desktop: Some(desktop.into()),
+            session: Some("boot:1".into()),
             verified_at_unix: Some(1),
         }
     }
 
+    fn scope<'a>(route: Option<&'a str>, desktop: &'a str, session: Option<&'a str>) -> Scope<'a> {
+        Scope {
+            route,
+            desktop,
+            session,
+            build: "1.3.6 (abc)",
+        }
+    }
+
     #[test]
-    fn a_verification_covers_only_the_route_and_desktop_it_tested() {
+    fn a_verification_covers_one_session_build_route_and_desktop() {
         let record = verified("ibus", "KDE · wayland");
-        assert!(record.covers(Some("ibus"), "KDE · wayland"));
-        assert!(!record.covers(None, "KDE · wayland"), "unknown route");
+        assert!(record.covers(&scope(Some("ibus"), "KDE · wayland", Some("boot:1"))));
+        assert!(
+            !record.covers(&scope(None, "KDE · wayland", Some("boot:1"))),
+            "unknown route"
+        );
         assert_eq!(
-            record.staleness(Some("evdev → libei"), "KDE · wayland"),
+            record.staleness(&scope(
+                Some("evdev → libei"),
+                "KDE · wayland",
+                Some("boot:1")
+            )),
             Some(Staleness::RouteChanged { was: "ibus".into() })
         );
         assert_eq!(
-            record.staleness(Some("ibus"), "GNOME · wayland"),
+            record.staleness(&scope(Some("ibus"), "GNOME · wayland", Some("boot:1"))),
             Some(Staleness::DesktopChanged {
                 was: "KDE · wayland".into()
             })
         );
+        // Logging out and back in, with the same desktop name, is a new
+        // session.
+        assert_eq!(
+            record.staleness(&scope(Some("ibus"), "KDE · wayland", Some("boot:2"))),
+            Some(Staleness::SessionChanged)
+        );
+        assert_eq!(
+            record.staleness(&Scope {
+                build: "1.3.7 (def)",
+                ..scope(Some("ibus"), "KDE · wayland", Some("boot:1"))
+            }),
+            Some(Staleness::BuildChanged {
+                was: "1.3.6 (abc)".into()
+            })
+        );
+    }
+
+    #[test]
+    fn a_record_missing_any_scope_field_never_counts() {
+        let current = scope(Some("ibus"), "KDE · wayland", Some("boot:1"));
+        let complete = verified("ibus", "KDE · wayland");
+        for incomplete in [
+            SetupRecord {
+                route: None,
+                ..complete.clone()
+            },
+            SetupRecord {
+                desktop: None,
+                ..complete.clone()
+            },
+            SetupRecord {
+                session: None,
+                ..complete.clone()
+            },
+            SetupRecord {
+                build: None,
+                ..complete.clone()
+            },
+        ] {
+            assert_eq!(incomplete.staleness(&current), Some(Staleness::Incomplete));
+            assert!(!incomplete.covers(&current));
+        }
     }
 
     #[test]
@@ -209,7 +330,11 @@ mod tests {
 
     #[test]
     fn skipping_never_counts_as_verified() {
-        assert!(!SetupRecord::skipped().covers(Some("ibus"), "KDE · wayland"));
+        assert!(!SetupRecord::skipped().covers(&scope(
+            Some("ibus"),
+            "KDE · wayland",
+            Some("boot:1")
+        )));
     }
 
     #[test]

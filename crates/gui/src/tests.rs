@@ -4035,7 +4035,7 @@ fn the_banner_names_one_problem_and_one_action() {
 }
 
 #[test]
-fn the_header_is_green_only_once_an_expansion_is_known_to_work() {
+fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
     use crate::lang::HeaderState;
     use wayexpand_backend_ibus::chain::{IbusChainReport, IbusCheck, IbusCheckState, IbusDesktop};
 
@@ -4071,11 +4071,38 @@ fn the_header_is_green_only_once_an_expansion_is_known_to_work() {
         (HeaderState::NeedsVerification, palette.accent)
     );
 
-    // The user confirmed a real-application test.
+    // The in-memory confirmation alone does not count; only a saved one
+    // scoped to this session, build, route and desktop does.
     app.desktop_test_verified = true;
-    assert_eq!(state(&app), (HeaderState::Working, palette.success));
+    assert_eq!(
+        state(&app),
+        (HeaderState::NeedsVerification, palette.accent)
+    );
+    app.setup_record = Some(crate::setup_record::SetupRecord::verified(
+        "Text editor",
+        app.current_route_label(),
+    ));
+    if crate::setup_record::current_session().is_some() {
+        assert_eq!(state(&app), (HeaderState::Working, palette.success));
+    } else {
+        // No Wayland session to identify (CI): fail closed.
+        assert_eq!(
+            state(&app),
+            (HeaderState::NeedsVerification, palette.accent)
+        );
+    }
+    // A confirmation from an earlier login is history, not proof.
+    if let Some(record) = app.setup_record.as_mut() {
+        record.session = Some("an earlier session".into());
+    }
+    assert_eq!(
+        state(&app),
+        (HeaderState::NeedsVerification, palette.accent)
+    );
 
-    // The daemon route: green once its backend acknowledged delivered text.
+    // The daemon route: backend acknowledgements never make it Working;
+    // they are process-wide and do not show the application's text.
+    app.setup_record = None;
     app.desktop_test_verified = false;
     app.ibus_active = false;
     app.daemon_reachable = Some(true);
@@ -4095,20 +4122,15 @@ fn the_header_is_green_only_once_an_expansion_is_known_to_work() {
     if build_identity_unverified() {
         return;
     }
-    let status = |acknowledged: u64| {
-        format!(
-            "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={} · \
-             expansion_output_acknowledgements_total={acknowledged}",
-            env!("WAYEXPAND_COMMIT"),
-            env!("WAYEXPAND_BUILD_VERSION")
-        )
-    };
-    app.daemon_status = status(0);
+    app.daemon_status = format!(
+        "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={} · \
+         expansion_output_acknowledgements_total=3",
+        env!("WAYEXPAND_COMMIT"),
+        env!("WAYEXPAND_BUILD_VERSION")
+    );
     assert_eq!(
         state(&app),
         (HeaderState::NeedsVerification, palette.accent),
-        "nothing delivered yet"
+        "acknowledged output is not a confirmed insertion"
     );
-    app.daemon_status = status(3);
-    assert_eq!(state(&app), (HeaderState::Working, palette.success));
 }

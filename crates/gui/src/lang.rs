@@ -115,6 +115,7 @@ mod import;
 mod insertion;
 mod next_step;
 mod onboarding;
+mod picker;
 mod recovery;
 mod sidebar;
 mod status_messages;

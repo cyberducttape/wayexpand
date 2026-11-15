@@ -557,26 +557,22 @@ impl GuiApp {
             ));
         }
         details.push(self.strings.header_status_details_hint().to_owned());
-        // What was last confirmed, or why it no longer applies.
-        if let Some(record) = self
-            .setup_record
-            .as_ref()
-            .filter(|record| record.outcome == crate::setup_record::SetupOutcome::Verified)
-        {
-            let route = self.current_route_label();
-            let desktop = crate::setup_record::current_desktop();
-            if let Some(change) = record.staleness(route.as_deref(), &desktop) {
-                details.insert(
-                    0,
-                    self.strings
-                        .setup_changed_since_test(&self.strings.setup_change(&change)),
-                );
-            } else if let (Some(application), Some(at)) =
+        // The last confirmed test is history, shown apart from the live
+        // state: when it no longer covers this session, say why.
+        if let Some((record, staleness)) = self.verification_status() {
+            if let (Some(application), Some(at)) =
                 (record.application.as_deref(), record.verified_at_unix)
             {
                 details.push(
                     self.strings
                         .last_confirmed(application, &crate::setup_record::date(at)),
+                );
+            }
+            if let Some(change) = staleness {
+                details.insert(
+                    0,
+                    self.strings
+                        .setup_changed_since_test(&self.strings.setup_change(&change)),
                 );
             }
         }
@@ -741,27 +737,39 @@ impl GuiApp {
         Some(format!("{source} → {backend}"))
     }
 
-    /// Whether an expansion is known to have reached an application: the
-    /// user confirmed a desktop test this session, or the daemon's output
-    /// backend acknowledged delivered text. The IBus engine cannot tell (its
-    /// clients do not acknowledge inserted text), so only a confirmed test
-    /// counts there.
+    /// The saved verification and why it does not cover what is running
+    /// now (`None` when it does).
+    pub(crate) fn verification_status(
+        &self,
+    ) -> Option<(
+        &crate::setup_record::SetupRecord,
+        Option<crate::setup_record::Staleness>,
+    )> {
+        let record = self
+            .setup_record
+            .as_ref()
+            .filter(|record| record.outcome == crate::setup_record::SetupOutcome::Verified)?;
+        let route = self.current_route_label();
+        let desktop = crate::setup_record::current_desktop();
+        let session = crate::setup_record::current_session();
+        let build = crate::setup_record::current_build();
+        let scope = crate::setup_record::Scope {
+            route: route.as_deref(),
+            desktop: &desktop,
+            session: session.as_deref(),
+            build: &build,
+        };
+        Some((record, record.staleness(&scope)))
+    }
+
+    /// Whether the user confirmed that an expansion reached an application
+    /// through what is running now: this compositor session, this build,
+    /// this typing route on this desktop. Backend acknowledgements do not
+    /// count; they are process-wide and do not show the application's
+    /// resulting text.
     pub(crate) fn expansion_observed(&self) -> bool {
-        let saved = self.setup_record.as_ref().is_some_and(|record| {
-            record.covers(
-                self.current_route_label().as_deref(),
-                &crate::setup_record::current_desktop(),
-            )
-        });
-        self.desktop_test_verified
-            || saved
-            || self.daemon_reachable == Some(true)
-                && runtime::status_field(
-                    &self.daemon_status,
-                    "expansion_output_acknowledgements_total",
-                )
-                .and_then(|value| value.parse::<u64>().ok())
-                .is_some_and(|count| count > 0)
+        self.verification_status()
+            .is_some_and(|(_, staleness)| staleness.is_none())
     }
 
     pub(crate) fn active_route_contract(
