@@ -23,11 +23,13 @@ produktiven Einsatz `wayexpand doctor` und die
   derselben Matching-Engine wie der Dienst – ohne Dienst oder Berechtigungen –
   und zählt die gesparten Tastenanschläge. Desktop-Erfassung und Einfügen
   prüft sie nicht; dafür gibt es `wayexpand doctor`.
-- **Schnelleinfügen.** Legen Sie `wayexpand-gui --picker` auf ein
-  Tastenkürzel: ein paar Buchstaben tippen, Enter drücken, und der laufende
-  WayExpand-Dienst tippt das Snippet in die zuvor aktive App. Das erfordert
-  Fenster-Tracking (derzeit KDE Plasma); andernfalls oder ohne Dienst kopiert
-  Enter es in die Zwischenablage. Skripte nutzen
+- **Schnelleinfügen.** Strg+Alt+Leertaste öffnet den Schnellwähler
+  (eingerichtet vom Einrichtungsassistenten oder mit `wayexpand shortcut set`
+  unter KDE Plasma und GNOME): ein paar Buchstaben tippen, Enter drücken.
+  Direkt in die vorherige App getippt wird nur auf einem Eingabeweg, der atomar
+  ersetzt und genau dieses Fenster erkennt; keiner der heutigen Standardwege
+  vereint beides. Meist kopiert Enter das Snippet daher zum Einfügen, auch bei
+  laufendem Dienst – die Fußzeile sagt, was passiert. Skripte nutzen
   `wayexpand insert ';sig'`.
 - **Ganze Konfigurationsdateien ausfüllen.** `wayexpand new playbook` fragt
   Host-Gruppe und Paket ab und schreibt ein fertiges Ansible-Playbook.

@@ -184,56 +184,88 @@ keystrokes saved, and can be collapsed.
 
 ### Quick-insert picker
 
-`wayexpand-gui --picker` opens a small search window. Type to filter enabled,
-static snippets that apply globally (triggers rank above descriptions, and
-scattered letters still match), move with the arrow keys, and press Enter.
-App-filtered snippets are available only when the daemon has an atomic route
-and verified target; the daemon applies their filters before insertion. They
-are omitted from copy-only mode because manual paste cannot verify the
-destination application. The window closes and the running daemon types a
-selected snippet once focus returns to the window that was active when the
-picker opened, under the same pause and password-field rules as a typed
-trigger. If focus does not return within two seconds, or returns to a different
-window, nothing is typed. Command-backed snippets are not listed.
+`wayexpand-gui --picker` opens a small search window. Type to filter (triggers
+rank above descriptions, and scattered letters still match), move with the
+arrow keys, and press Enter. The footer always says what Enter does in this
+session: type into the application you came from, or copy.
 
-Typing requires the daemon to identify the focused window, which currently
-means the KWin window tracker on KDE Plasma. If no daemon is running or the
-window cannot be identified, Enter copies an eligible global snippet to the
-clipboard instead and the window stays open so the clipboard remains
-available; press Esc when done. This clipboard path is blocked by an enforced
-organization policy requiring a verified insertion target.
+**Typing directly** needs a route that is both atomic and able to identify the
+exact window the picker was opened from (`focus_identity=exact` with an atomic
+replacement). The picker then minimizes so focus returns to that window, and
+the daemon types the snippet only into that exact window, under the same pause
+and password-field rules as a typed trigger. If focus does not return within
+two seconds, or returns elsewhere, nothing is typed. The picker waits for the
+daemon to confirm delivery and stays open, with the reason and *Copy instead*,
+if it does not. Esc or closing the window cancels an insert that has not been
+sent yet; once WayExpand has it, the picker stays until the result is known.
 
-Bind the picker to a desktop shortcut: the `.desktop` entry provides a *Quick
-Insert Snippet* action that KDE Plasma's and GNOME's shortcut settings can use
-directly, or run `wayexpand-gui --picker` from a custom shortcut.
+**Copy and paste** is used otherwise, and that is the common case today: none
+of the standard routes in the [support matrix](SUPPORT_MATRIX.md) currently
+combines atomic output with exact window identity (KDE's evdev/libei route
+tracks windows but types non-atomically; the IBus and input-method-v2 routes
+are atomic or text-committing but declare no window tracker for the picker).
+So the picker is often copy-only even when the service and desktop
+integration are running. Enter copies the snippet, and the window stays open so
+the clipboard remains available; press Esc when done. An enforced organization
+policy requiring a verified insertion target blocks this path.
+
+**Snippets the picker cannot use** stay listed, greyed and after every usable
+match, with the reason in place of the preview: a command-backed snippet
+(type its trigger), a snippet with input fields (type its trigger or use the
+editor), and in copy-only mode an app-restricted snippet (a paste cannot check
+its destination) or one that reads the clipboard. They cannot be chosen.
+Disabled and generate-only snippets are not listed.
+
+Give the picker a global shortcut with `wayexpand shortcut set` (KDE Plasma and
+GNOME; Ctrl+Alt+Space unless taken) or from the first-run guide. The
+`.desktop` entry also provides a *Quick Insert Snippet* action for any
+desktop's shortcut settings.
 
 ### First run and one-click setup
 
-With an empty library the editor shows three steps: turn on WayExpand, add a
-first snippet (test snippet, new snippet, or Espanso import), and try it. *Turn
-on WayExpand* runs `wayexpand setup --yes` in the background, which configures
-only the Recommended mode (the route planner's choice, which may be an
-experimental route such as input-method-v2 and is labelled as such) and never
-grants raw keyboard access; the result is
-shown in the status line and the daemon status refreshes. Setup may wait for
-an administrator password (installing the IBus component) or for the desktop
-to start IBus, so it is allowed three minutes; if it fails, the Diagnostics
-window opens on the checks that explain why. The same button appears in the
-toolbar whenever the library has snippets, no background service is running,
-and the WayExpand IBus engine is not active.
+Until it is finished or skipped, the editor shows a guide with three steps and
+an optional fourth: *Connect your desktop*, *Create a snippet*, *Test it*, and
+*Open snippets from any app* (a Quick Picker shortcut). Route, permission and
+certification notes sit in a collapsed *Troubleshooting details* section.
+*Turn on WayExpand* runs `wayexpand setup --yes` in the background, which
+configures only the Recommended mode (the route planner's choice, which may be
+an experimental route such as input-method-v2 and is labelled as such) and
+never grants raw keyboard access. Setup may wait for an administrator password
+(installing the IBus component) or for the desktop to start IBus, so it is
+allowed three minutes. *Test it* runs a real-application test: switch to a
+plain text field in another app within 30 seconds, type the trigger once, and
+confirm whether the exact text appeared.
 
-The toolbar shows one status chip with a one-word state — `Active`,
-`Limited`, `Paused`, `Off`, `Not set up`, and so on — and a colored dot.
-Clicking it opens Diagnostics. Its tooltip, and its accessible label for
-screen readers, list the facts behind the state: the background service
-(`Service: Running` / `Not running`), `IBus: Active` when the IBus engine is
-serving apps (the IBus route needs no background service, so a stopped
-service is not shown as an error then), the typing route's state while the
-service answers, sensitive-field protection, and replacement assurance.
-Separate chips appear only for things that need action: partial or uncertain
-output, and a service that must restart after an update. The ☰ menu holds
-the remaining actions; the profile switcher appears in the toolbar once
-profiles exist.
+When something stops expansion, one sentence says what is wrong and one button
+fixes it, in a banner under the toolbar (and in the guide's first step): turn
+WayExpand on, resume, grant permission or select the GNOME input source through
+guided setup, restart an older service, review replacement consent, check
+again, or open the Quick Picker when the desktop or the app cannot have text
+replaced. *Details* opens Diagnostics.
+
+The toolbar's status chip uses the same model:
+
+| State | Meaning |
+|---|---|
+| `Working` | An exact insertion was confirmed in a real application in this login session, with this build, typing route and route instance. A confirmation that could not be saved shows `Working (this session only)`. |
+| `Needs verification` | Connected with nothing wrong, but no insertion has been confirmed for what is running now. |
+| `Needs permission` / `Needs setup` | A permission, GNOME input source, service restart or replacement consent is still needed. |
+| `Limited` | Some protection is unavailable, or the last app's field refused replacement. |
+| `Copy-only` | The desktop cannot replace typed text; use the Quick Picker. |
+| `Disconnected` | A route that was available failed. |
+| `Paused`, `Off`, `Not set up`, `Starting…`, `Reconnecting…`, `Stopped`, `Checking…` | As named. |
+
+A running process alone is never shown as `Working`, and backend
+acknowledgements do not count: only a user-confirmed insertion does. The
+confirmation is saved in `gui-setup.toml` with the application, route, build,
+desktop session and date, and stops counting after a new login, an update, a
+route change or a restart of the input engine or service; the chip's tooltip
+then shows when it was last confirmed and what changed. The tooltip, and the
+accessible label for screen readers, lead with the current problem and its
+action, then list the facts behind the state. Separate chips appear only for
+partial or uncertain output and for a service that must restart after an
+update. The ☰ menu holds the remaining actions; the profile switcher appears in
+the toolbar once profiles exist.
 
 The `Settings` window is the single place for preferences and has two tabs:
 

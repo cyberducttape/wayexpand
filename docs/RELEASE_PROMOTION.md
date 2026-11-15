@@ -37,40 +37,42 @@ of earlier promotions belongs in the changelog, not in the active procedure.
 
 ---
 
-## Fedora Copr Repository Publication (Optional - 2-3 hours)
+## Fedora Copr Repository Publication (Optional)
 
-**Status:** PKGBUILD and wayexpand.spec prepared, not yet published to Copr.
+**Status:** the repository builds through Copr's SCM integration; no official
+Copr project is published yet.
 
-### Prerequisites
+Copr builds from the Git repository with the **make_srpm** method:
+`.copr/Makefile` runs `scripts/copr-srpm.sh`, which vendors the crates from
+the checkout (as the release workflow does) and builds the source RPM, so the
+RPM build itself needs no network. Nothing is uploaded by hand.
 
-- Fedora account with Copr authorization
-- `copr-cli` installed locally: `sudo dnf install copr-cli`
-- Copr project "wayexpand" already created (or create new one)
+The build is named from the checkout, so no two builds share an RPM version:
 
-### Publication Steps
+| Checkout | RPM version |
+|---|---|
+| exactly at the release tag of the spec's `Version` (`X.Y.Z` or `vX.Y.Z`) | `X.Y.Z-1` (stable) |
+| N commits after that tag | `X.Y.Z-1.N.gitSHA` (development; upgrades the release, sorts before the next) |
+| without that tag | refused |
 
-1. **Configure copr-cli**
-   ```bash
-   copr-cli config
-   # Enter your Copr credentials when prompted
-   ```
+### One-time setup
 
-2. **Build from GitHub**
-   ```bash
-   copr-cli build \
-     --nowait \
-     --enable-net=on \
-     wayexpand \
-     "https://github.com/cyberducttape/wayexpand/archive/v<VERSION>.tar.gz"
-   ```
+1. Create the Copr project with the chroots to publish (for example
+   `fedora-43-x86_64`, `fedora-44-x86_64` and their `aarch64` twins).
+2. *Packages → New package → SCM*: clone URL
+   `https://github.com/cyberducttape/wayexpand.git`, spec `wayexpand.spec`,
+   SRPM build method **make_srpm**. Leave *Committish* empty for development
+   builds from the default branch, or use a separate package that builds
+   release tags.
+3. *Settings → Integrations*: add the GitHub webhook so pushes and release
+   tags start builds.
 
-3. **Monitor Build**
-   - Visit https://copr.fedorainfracloud.org/coprs/yourusername/wayexpand/
-   - Verify builds complete for all architectures (x86_64, aarch64, etc.)
+### Each release
 
-4. **Enable Repository**
-   - In Copr project settings, mark repo as "enable by default"
-   - Users can then install: `sudo dnf copr enable yourusername/wayexpand`
+Pushing the release tag starts the stable build. Check it finishes for every
+chroot, then users can `sudo dnf copr enable <owner>/wayexpand`. Before the
+first publication, update `fedora_copr_published` in
+`packaging/release-status.json` and the README install table.
 
 ### Alternative: Community Package
 

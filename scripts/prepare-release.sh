@@ -37,17 +37,15 @@ fi
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
 
-# Check if either the canonical release tag or a legacy unprefixed alias exists.
-# Release automation only accepts vX.Y.Z, so leaving an unprefixed tag behind
-# would create an ambiguous public reference to a different source state.
-if git rev-parse "v$new_version" >/dev/null 2>&1; then
-    printf '%s\n' "error: tag v$new_version already exists" >&2
-    exit 1
-fi
-if git rev-parse "refs/tags/$new_version" >/dev/null 2>&1; then
-    printf '%s\n' "error: unprefixed tag $new_version already exists; remove it deliberately before releasing" >&2
-    exit 1
-fi
+# The canonical release tag is the bare X.Y.Z; the release workflow also
+# accepts vX.Y.Z. Refuse if either already exists, so one version never has
+# two tags that could point at different source.
+for existing in "$new_version" "v$new_version"; do
+    if git rev-parse -q --verify "refs/tags/$existing" >/dev/null; then
+        printf '%s\n' "error: tag $existing already exists" >&2
+        exit 1
+    fi
+done
 
 # A release without changelog entries is refused before anything changes,
 # rather than published with a placeholder section.
@@ -257,20 +255,20 @@ test "$committed_checksum" = "$checksum"
 printf '%s\n' "✓ Final release archive checksum verified: $checksum"
 
 # 7. Create tag
-printf '%s\n' "Creating git tag v$new_version..."
+printf '%s\n' "Creating git tag $new_version..."
 git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com' \
-    tag -a "v$new_version" -m "Release v$new_version"
+    tag -a "$new_version" -m "Release $new_version"
 
 printf '%s\n' ""
-printf '%s\n' "✓ Release v$new_version prepared successfully"
+printf '%s\n' "✓ Release $new_version prepared successfully"
 printf '%s\n' ""
 printf '%s\n' "Next steps:"
 printf '%s\n' "  1. Review the commit: git log -1"
-printf '%s\n' "  2. Review the tag: git show v$new_version"
-printf '%s\n' "  3. main only accepts pull requests: push this commit on a branch,"
+printf '%s\n' "  2. main only accepts pull requests: push this commit on a branch,"
 printf '%s\n' "     open a pull request, and merge it"
-printf '%s\n' "  4. Then push the tag, which must point at this commit:"
-printf '%s\n' "     git push origin v$new_version"
+printf '%s\n' "  3. Move the tag to the merge commit and push it:"
+printf '%s\n' "     git tag -fa $new_version <merge commit> -m 'Release $new_version'"
+printf '%s\n' "     git push origin refs/tags/$new_version"
 printf '%s\n' ""
 printf '%s\n' "The release workflow will then:"
 printf '%s\n' "  - Verify all versions match"
