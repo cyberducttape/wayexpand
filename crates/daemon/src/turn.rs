@@ -252,6 +252,30 @@ impl Daemon {
     /// happens when the request is refused because focus changed.
     pub(crate) fn handle_insert_request(&mut self) -> Result<bool> {
         if let Some(request) = self.control.take_insert_request() {
+            // Never carry a previous insert's id into this one.
+            self.finish_insert_tracking(wayexpand_core::InsertDelivery::Uncertain);
+            self.insert_tracking = request.tracking_id;
+            let busy = self.handle_taken_insert_request(request);
+            // Every synchronous path has resolved by now; only a job handed
+            // to the serialized output worker is still pending.
+            if self.pending_output.is_none() {
+                self.finish_insert_tracking(wayexpand_core::InsertDelivery::Delivered);
+            }
+            return busy;
+        }
+        Ok(false)
+    }
+
+    /// Resolve the tracked insert, if one is outstanding. Later calls are
+    /// no-ops, so the first, most specific outcome wins.
+    pub(crate) fn finish_insert_tracking(&mut self, outcome: wayexpand_core::InsertDelivery) {
+        if let Some(id) = self.insert_tracking.take() {
+            self.control.record_insert_outcome(id, outcome);
+        }
+    }
+
+    fn handle_taken_insert_request(&mut self, request: InsertRequest) -> Result<bool> {
+        {
             // Window-tracker events may have arrived while this reactor turn
             // was handling command completions. Drain again immediately
             // before the target check so it uses the freshest observed
@@ -278,12 +302,18 @@ impl Daemon {
                     .effective_enforcement_policy()
                     .require_verified_insert_target
                 {
+                    self.finish_insert_tracking(wayexpand_core::InsertDelivery::Failed(
+                        wayexpand_core::InsertFailure::PolicyRefused,
+                    ));
                     return Ok(true);
                 }
             }
             let snapshot = self.control.focus_snapshot();
             let current_token = self.config.engine.current_window().and_then(focus_token);
             if insert_focus_validation_failed(&request, current_token.as_deref(), &snapshot) {
+                self.finish_insert_tracking(wayexpand_core::InsertDelivery::Failed(
+                    wayexpand_core::InsertFailure::FocusChanged,
+                ));
                 return Ok(true);
             }
             match self.config.engine.prepare_insert(&request.trigger) {
@@ -299,6 +329,29 @@ impl Daemon {
                     };
                     if !gating.abandoned.is_empty() {
                         warn!("requested snippet insert abandoned because input arrived first");
+                    }
+                    if gating.results.is_empty() {
+                        self.finish_insert_tracking(wayexpand_core::InsertDelivery::Failed(
+                            wayexpand_core::InsertFailure::InputArrived,
+                        ));
+                    } else if self.policy.safe_mode
+                        && gating.results.iter().any(|result| {
+                            crate::policy::expansion_policy_violations(
+                                &self.policy,
+                                result.insert.len(),
+                                result.command_backed,
+                                self.active_backend,
+                            )
+                            .is_some()
+                        })
+                    {
+                        // Output applies the same rule (expansion_allowed),
+                        // logs it, and skips the snippet without an error,
+                        // so the refusal is recorded here. This check is
+                        // side-effect free.
+                        self.finish_insert_tracking(wayexpand_core::InsertDelivery::Failed(
+                            wayexpand_core::InsertFailure::PolicyRefused,
+                        ));
                     }
                     if self.serialized_output() {
                         self.start_output(
@@ -327,6 +380,11 @@ impl Daemon {
                                 warn!(
                                     "requested snippet insert skipped: input method reconnecting"
                                 );
+                                self.finish_insert_tracking(
+                                    wayexpand_core::InsertDelivery::Failed(
+                                        wayexpand_core::InsertFailure::NoBackend,
+                                    ),
+                                );
                                 Ok(())
                             }
                         }
@@ -342,9 +400,13 @@ impl Daemon {
                         outcome
                     } else {
                         warn!("requested snippet insert skipped: no injection backend");
+                        self.finish_insert_tracking(wayexpand_core::InsertDelivery::Failed(
+                            wayexpand_core::InsertFailure::NoBackend,
+                        ));
                         Ok(())
                     };
                     if let Err(error) = outcome {
+                        self.finish_insert_tracking(insert_delivery_for(&error.source));
                         self.recover_from_insert_error(&error);
                     }
                     replay_evdev_follow_up(
@@ -354,7 +416,12 @@ impl Daemon {
                         self.active_backend,
                     )?;
                 }
-                Err(error) => warn!(error_kind = ?error, "requested snippet insert refused"),
+                Err(error) => {
+                    warn!(error_kind = ?error, "requested snippet insert refused");
+                    self.finish_insert_tracking(wayexpand_core::InsertDelivery::Failed(
+                        wayexpand_core::InsertFailure::Refused,
+                    ));
+                }
             }
         }
         Ok(false)
@@ -755,6 +822,23 @@ impl Daemon {
     }
 }
 
+/// The tracked-insert state for an output transaction that did not
+/// acknowledge its text.
+pub(crate) fn insert_delivery_for(
+    outcome: &wayexpand_core::TransactionOutcome,
+) -> wayexpand_core::InsertDelivery {
+    if outcome.is_output_acknowledged() {
+        wayexpand_core::InsertDelivery::Delivered
+    } else if matches!(
+        outcome,
+        wayexpand_core::TransactionOutcome::NotApplied { .. }
+    ) {
+        wayexpand_core::InsertDelivery::Failed(wayexpand_core::InsertFailure::NotApplied)
+    } else {
+        wayexpand_core::InsertDelivery::Uncertain
+    }
+}
+
 #[cfg(test)]
 mod profile_pause_tests {
     use super::compute_effective_pause;
@@ -829,6 +913,7 @@ mod tests {
             trigger: ";sig".into(),
             focus_token: Some(expected_token.clone()),
             focus_generation: Some(4),
+            tracking_id: None,
         };
         let snapshot = FocusSnapshot {
             generation: 5,
@@ -877,6 +962,7 @@ mod tests {
             trigger: ";sig".into(),
             focus_token: None,
             focus_generation: None,
+            tracking_id: None,
         };
         let guarded = InsertRequest {
             focus_token: Some("abcd".into()),
@@ -906,6 +992,7 @@ mod tests {
             trigger: ";sig".into(),
             focus_token: Some(expected_token.clone()),
             focus_generation: Some(4),
+            tracking_id: None,
         };
         let current_token = focus_token(&second).unwrap();
         let changed_snapshot = FocusSnapshot {
@@ -929,6 +1016,7 @@ mod tests {
             trigger: ";sig".into(),
             focus_token: Some(token.into()),
             focus_generation: Some(8),
+            tracking_id: None,
         };
         let snapshot = FocusSnapshot {
             generation: 8,
@@ -946,6 +1034,7 @@ mod tests {
             trigger: ";sig".into(),
             focus_token: None,
             focus_generation: None,
+            tracking_id: None,
         };
         assert!(insert_target_matches_current_focus(
             &unguarded, None, &snapshot

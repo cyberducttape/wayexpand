@@ -1009,12 +1009,33 @@ alone does not withhold them, because verified inserts depend on them. `insert-t
 focused window still has that token and generation when the request is
 processed.
 
+`insert-target-tracked <generation> <token> <trigger>` is the same request
+with a reported outcome; the picker uses it. The daemon replies
+`insert scheduled id=<n>`, and `insert-result <n>` then answers
+`insert-result id=<n> state=<state>`, where `<state>` is:
+
+- `pending`: accepted, not yet resolved.
+- `delivered`: the output backend acknowledged the text.
+- `uncertain`: the backend could not tell whether the text, or part of it,
+  arrived.
+- `failed reason=<reason>`: nothing was typed. `<reason>` is `focus_changed`,
+  `policy_refused`, `input_arrived`, `no_backend`, `refused` (the snippet is
+  unknown, disabled or invalid), `not_applied`, or `superseded` (a newer
+  insert replaced it before it ran).
+- `unknown`: the daemon does not remember the id. It keeps only the 32 most
+  recent tracked inserts, and forgets them when it restarts.
+
+`insert-result` is read-only and allowed when
+`disable_control_socket_mutations` is true; `insert-target-tracked` is not.
+Neither reply includes snippet content.
+
 `wayexpand insert --verified <trigger>` is the verified-target form of the
 CLI: it reads `focus` and sends `insert-target` for the window focused when
 the command runs. It fails (exit `4`) when exact target details are unavailable
-or withheld by policy, rather than falling back to an unverified insert. As
-with the picker, a refusal because focus moved after the request was accepted
-is logged by the daemon, not reported to the client.
+or withheld by policy, rather than falling back to an unverified insert. A
+refusal because focus moved after the request was accepted is logged by the
+daemon, not reported to the CLI; the picker reports it through
+`insert-result`.
 
 When the administrator policy sets `require_verified_insert_target` and
 `safe_mode`, the daemon replies `insert refused: organization policy requires

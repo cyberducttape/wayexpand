@@ -58,7 +58,10 @@ pub use config::{
     Settings, TerminalPaste, ValidatedConfig, DEFAULT_KEYSTROKE_MAX_CHARS, MAX_KEYSTROKE_MAX_CHARS,
     PROCESS_EXECUTABLE_APP_ID_PREFIX, PROCESS_NAME_APP_ID_PREFIX,
 };
-pub use daemon_client::{DaemonClient, DaemonClientError, DaemonFocus, DaemonOperation};
+pub use daemon_client::{
+    parse_insert_scheduled_id, DaemonClient, DaemonClientError, DaemonFocus, DaemonOperation,
+    InsertDelivery, InsertFailure,
+};
 pub use daemon_status::{DaemonRouteState, DaemonStatus};
 pub use engine::route_limit;
 pub use engine::{

@@ -285,6 +285,12 @@ impl Daemon {
                 retry_allowed,
             ),
         };
+        if origin == OutputOrigin::Insert {
+            self.finish_insert_tracking(match &finished {
+                Ok(()) => wayexpand_core::InsertDelivery::Delivered,
+                Err(error) => crate::turn::insert_delivery_for(&error.source),
+            });
+        }
         let Err(error) = finished else {
             return Ok(true);
         };
@@ -1249,6 +1255,7 @@ mod tests {
                 output_worker: Some(worker),
                 retiring_output_workers: Vec::new(),
                 pending_output: None,
+                insert_tracking: None,
                 pending_results: Vec::new(),
                 ready_results: Vec::new(),
                 evdev_quiet_since: None,
@@ -1313,6 +1320,74 @@ mod tests {
             undoable: true,
             folded_suffix_chars: 0,
         }
+    }
+
+    fn tracked_insert(harness: &Harness, trigger: &str, token: Option<&str>) -> u64 {
+        harness
+            .daemon
+            .control
+            .schedule_tracked_insert(crate::control::InsertRequest {
+                trigger: trigger.into(),
+                focus_token: token.map(str::to_owned),
+                focus_generation: token.map(|_| 1),
+                tracking_id: None,
+            })
+    }
+
+    #[test]
+    fn a_tracked_insert_is_pending_until_its_output_is_acknowledged() {
+        use wayexpand_core::InsertDelivery;
+        let mut harness = Harness::new(false);
+        harness.open_gate();
+        let id = tracked_insert(&harness, ":x", None);
+        harness.daemon.handle_insert_request().unwrap();
+        assert!(harness.daemon.pending_output.is_some());
+        assert_eq!(
+            harness.daemon.control.insert_outcome(id),
+            Some(InsertDelivery::Pending)
+        );
+        harness.run_until_resolved();
+        assert_eq!(*harness.delivered.lock().unwrap(), "value");
+        assert_eq!(
+            harness.daemon.control.insert_outcome(id),
+            Some(InsertDelivery::Delivered)
+        );
+    }
+
+    #[test]
+    fn a_tracked_insert_that_fails_in_the_backend_is_not_reported_delivered() {
+        let mut harness = Harness::new(true);
+        harness.open_gate();
+        let id = tracked_insert(&harness, ":x", None);
+        harness.daemon.handle_insert_request().unwrap();
+        harness.run_until_resolved();
+        // Two characters reached the window before the failure.
+        assert_eq!(
+            harness.daemon.control.insert_outcome(id),
+            Some(wayexpand_core::InsertDelivery::Uncertain)
+        );
+    }
+
+    #[test]
+    fn tracked_inserts_that_never_reach_output_report_why() {
+        use wayexpand_core::{InsertDelivery, InsertFailure};
+        let mut harness = Harness::new(false);
+        harness.open_gate();
+        let unknown = tracked_insert(&harness, ":missing", None);
+        harness.daemon.handle_insert_request().unwrap();
+        assert_eq!(
+            harness.daemon.control.insert_outcome(unknown),
+            Some(InsertDelivery::Failed(InsertFailure::Refused))
+        );
+
+        // The picker's window no longer has focus.
+        let moved = tracked_insert(&harness, ":x", Some("abcd"));
+        harness.daemon.handle_insert_request().unwrap();
+        assert_eq!(
+            harness.daemon.control.insert_outcome(moved),
+            Some(InsertDelivery::Failed(InsertFailure::FocusChanged))
+        );
+        assert!(harness.delivered.lock().unwrap().is_empty());
     }
 
     #[test]

@@ -31,7 +31,7 @@ pub fn load_policy() -> Result<OrganizationPolicy, String> {
 
 /// Check for policy violations on an expansion (for detection and logging).
 /// Returns the violation message if any policy constraint is violated.
-fn expansion_policy_violations(
+pub(crate) fn expansion_policy_violations(
     policy: &OrganizationPolicy,
     replacement_size: usize,
     has_command: bool,

@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The Quick Picker closes only after the daemon confirms that the snippet was
+  typed. It used to close as soon as the daemon accepted the request, so an
+  insert refused afterwards (focus moved, policy, typing started first, the
+  output backend reconnecting or rejecting the text) vanished silently. The
+  picker now stays open, says what happened, and offers Copy instead. The new
+  control lines `insert-target-tracked` and `insert-result` are documented in
+  `docs/COMPATIBILITY.md`.
 - Rework the CLI help. `wayexpand help` fits one 80-column screen and groups
   commands by task, with examples; `wayexpand help --all` lists every command.
   Every command has its own help with usage, explanation, and examples through
