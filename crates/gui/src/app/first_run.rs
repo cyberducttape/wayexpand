@@ -26,23 +26,27 @@ fn first_run_outcome(
     }
 }
 
-fn first_run_outcome_label(outcome: FirstRunOutcome) -> &'static str {
+fn first_run_outcome_label(strings: &Strings, outcome: FirstRunOutcome) -> &'static str {
     match outcome {
-        FirstRunOutcome::WorkingInTestedApplication => "Working in tested application",
-        FirstRunOutcome::SafeFallback => "Safe fallback",
-        FirstRunOutcome::SetupIncomplete => "Setup incomplete",
+        FirstRunOutcome::WorkingInTestedApplication => strings.outcome_working(),
+        FirstRunOutcome::SafeFallback => strings.outcome_safe_fallback(),
+        FirstRunOutcome::SetupIncomplete => strings.outcome_setup_incomplete(),
     }
 }
 
-fn verification_scope_label(outcome: FirstRunOutcome, application: Option<&str>) -> String {
+fn verification_scope_label(
+    strings: &Strings,
+    outcome: FirstRunOutcome,
+    application: Option<&str>,
+) -> String {
     match (outcome, application) {
         (FirstRunOutcome::WorkingInTestedApplication, Some(application)) => {
-            format!("Verified in tested application: {application}")
+            strings.verification_in_application(application)
         }
         (FirstRunOutcome::WorkingInTestedApplication, None) => {
-            "Verified in tested application: the tested application".to_owned()
+            strings.verification_unnamed_application().to_owned()
         }
-        _ => "Verified in tested application: not tested".to_owned(),
+        _ => strings.verification_not_tested().to_owned(),
     }
 }
 
@@ -123,15 +127,11 @@ impl GuiApp {
 
     fn begin_onboarding_desktop_test(&mut self) {
         if !self.select_default_desktop_test() {
-            self.status = Status::warning(
-                "Create or enable the harmless WayExpand test expansion before testing insertion.",
-            );
+            self.status = Status::warning(self.strings.status_create_test_expansion_first());
             return;
         }
         if let Some(error) = self.require_desktop_test() {
-            self.status = Status::warning(format!(
-                "A real-app test is still required, but the pending first-run state could not be saved: {error}"
-            ));
+            self.status = Status::warning(self.strings.status_real_app_test_state_unsaved(&error));
         }
         self.test_expansion_dialog_open = true;
     }
@@ -139,9 +139,7 @@ impl GuiApp {
     pub(crate) fn finish_onboarding(&mut self) {
         if !self.desktop_test_verified {
             self.onboarding_visible = true;
-            self.status = Status::warning(
-                "First run is not complete: verify an exact insertion in a real application first.",
-            );
+            self.status = Status::warning(self.strings.status_first_run_not_complete());
             return;
         }
         self.persist_onboarding(self.strings.onboarding_complete_note());
@@ -158,18 +156,17 @@ impl GuiApp {
         // The guide returns on the next launch and cannot be recorded as
         // completed without a real-application verification.
         self.onboarding_visible = false;
-        self.status = Status::warning(
-            "Setup is not verified yet. The first-run guide will return until a real application test succeeds.",
-        );
+        self.status = Status::warning(self.strings.status_setup_deferred());
     }
 
     pub(crate) fn open_copy_only_picker(&mut self) {
         let executable = match env::current_exe() {
             Ok(executable) => executable,
             Err(error) => {
-                self.status = Status::error(format!(
-                    "Could not locate the Quick Picker executable: {error}"
-                ));
+                self.status = Status::error(
+                    self.strings
+                        .status_picker_executable_missing(&error.to_string()),
+                );
                 return;
             }
         };
@@ -183,12 +180,11 @@ impl GuiApp {
             .spawn()
         {
             Ok(_) => {
-                self.status = Status::info(
-                    "Quick Picker opened in copy-only mode. Choose a snippet, then paste it yourself; the picker does not request automatic insertion.",
-                );
+                self.status = Status::info(self.strings.status_picker_copy_only());
             }
             Err(error) => {
-                self.status = Status::error(format!("Could not open Quick Picker: {error}"));
+                self.status =
+                    Status::error(self.strings.status_picker_open_failed(&error.to_string()));
             }
         }
     }
@@ -407,14 +403,11 @@ impl GuiApp {
                 if self.gnome_setup_resume_pending {
                     theme::card(ui, palette, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.colored_label(
-                            palette.warning,
-                            "GNOME setup is ready to resume",
-                        );
-                        ui.label(
-                            "WayExpand's GNOME extension is prepared. If you have not logged out and back in since setup paused, do that first so GNOME can load it. Then continue IBus setup here; replacement consent and any administrator authorization are still reviewed separately.",
-                        );
-                        if theme::primary_button(ui, palette, "Resume GNOME setup").clicked() {
+                        ui.colored_label(palette.warning, self.strings.gnome_resume_title());
+                        ui.label(self.strings.gnome_resume_body());
+                        if theme::primary_button(ui, palette, self.strings.gnome_resume_button())
+                            .clicked()
+                        {
                             self.start_guided_setup();
                         }
                     });
@@ -424,16 +417,18 @@ impl GuiApp {
                     ui.set_width(ui.available_width());
                     match outcome {
                         FirstRunOutcome::WorkingInTestedApplication => {
-                            ui.colored_label(palette.success, first_run_outcome_label(outcome));
+                            ui.colored_label(
+                                palette.success,
+                                first_run_outcome_label(&self.strings, outcome),
+                            );
                             let application = self
                                 .desktop_test_verified_application
                                 .as_deref()
-                                .unwrap_or("the tested application");
-                            ui.label(format!(
-                                "You confirmed the exact test replacement in {application}. This verifies that application and session only."
-                            ));
+                                .unwrap_or(self.strings.the_tested_application());
+                            ui.label(self.strings.confirmed_in_application(application));
                             ui.label(
                                 RichText::new(verification_scope_label(
+                                    &self.strings,
                                     outcome,
                                     self.desktop_test_verified_application.as_deref(),
                                 ))
@@ -442,16 +437,20 @@ impl GuiApp {
                             );
                         }
                         FirstRunOutcome::SafeFallback => {
-                            ui.colored_label(palette.warning, "Safe fallback");
+                            ui.colored_label(palette.warning, self.strings.outcome_safe_fallback());
                             ui.label(
-                                RichText::new(verification_scope_label(outcome, None))
-                                    .small()
-                                    .color(palette.muted),
+                                RichText::new(verification_scope_label(
+                                    &self.strings,
+                                    outcome,
+                                    None,
+                                ))
+                                .small()
+                                .color(palette.muted),
                             );
                             if matcher_passed {
-                                ui.label("The local matcher produced the expected result. Automatic replacement has not been verified in a real application.");
+                                ui.label(self.strings.safe_fallback_matcher_passed());
                             } else {
-                                ui.label("No real-application insertion has been verified. Use Quick Picker to copy a snippet and paste it yourself.");
+                                ui.label(self.strings.safe_fallback_nothing_verified());
                             }
                             if let Some(assurance) = &route_assurance {
                                 ui.label(RichText::new(*assurance).small().color(palette.muted));
@@ -462,7 +461,7 @@ impl GuiApp {
                                     && theme::primary_button(
                                         ui,
                                         palette,
-                                        "Test in a real application",
+                                        self.strings.test_in_real_application(),
                                     )
                                     .clicked()
                                 {
@@ -472,7 +471,7 @@ impl GuiApp {
                                     && theme::primary_button(
                                         ui,
                                         palette,
-                                        "Review setup and replacement consent",
+                                        self.strings.review_setup_and_consent(),
                                     )
                                     .clicked()
                                 {
@@ -481,7 +480,7 @@ impl GuiApp {
                                 if theme::secondary_button(
                                     ui,
                                     palette,
-                                    "Open Quick Picker (copy and paste)",
+                                    self.strings.open_quick_picker_copy(),
                                 )
                                 .clicked()
                                 {
@@ -503,9 +502,13 @@ impl GuiApp {
                             // Never leave it implied that a real application
                             // was verified.
                             ui.label(
-                                RichText::new(verification_scope_label(outcome, None))
-                                    .small()
-                                    .color(palette.muted),
+                                RichText::new(verification_scope_label(
+                                    &self.strings,
+                                    outcome,
+                                    None,
+                                ))
+                                .small()
+                                .color(palette.muted),
                             );
                             ui.horizontal_wrapped(|ui| {
                                 if (daemon_running || ibus_only)
@@ -634,24 +637,49 @@ impl GuiApp {
                         });
                         if gnome_ibus {
                             ui.add_space(4.0);
-                            ui.label(RichText::new("GNOME input source").strong());
-                            ui.label(format!(
-                                "Registration: {} · Active: {}",
-                                if source_registered { "ready" } else { "needs setup" },
-                                if source_active { "WayExpand selected" } else { "select WayExpand" },
+                            ui.label(RichText::new(self.strings.gnome_input_source()).strong());
+                            ui.label(self.strings.gnome_source_state(
+                                if source_registered {
+                                    self.strings.gnome_source_ready()
+                                } else {
+                                    self.strings.gnome_source_needs_setup()
+                                },
+                                if source_active {
+                                    self.strings.gnome_source_selected()
+                                } else {
+                                    self.strings.gnome_source_select()
+                                },
                             ));
                             if !source_registered {
-                                ui.label("Continue guided setup to check dependencies, register the engine, and explain any required administrator authorization.");
-                                if theme::primary_button(ui, palette, "Continue guided setup").clicked() {
+                                ui.label(self.strings.gnome_register_help());
+                                if theme::primary_button(
+                                    ui,
+                                    palette,
+                                    self.strings.first_run_continue_setup(),
+                                )
+                                .clicked()
+                                {
                                     self.start_guided_setup();
                                 }
                             } else if !source_active {
-                                ui.label("Choose WayExpand from GNOME’s keyboard/input-source menu. Your existing keyboard layouts remain available.");
+                                ui.label(self.strings.gnome_select_help());
                                 ui.horizontal_wrapped(|ui| {
-                                    if theme::primary_button(ui, palette, "Activate WayExpand").clicked() {
+                                    if theme::primary_button(
+                                        ui,
+                                        palette,
+                                        self.strings.activate_wayexpand(),
+                                    )
+                                    .clicked()
+                                    {
                                         self.retry_gnome_source_activation();
                                     }
-                                    if theme::secondary_button(ui, palette, "I selected it — check again").clicked() {
+                                    if theme::secondary_button(
+                                        ui,
+                                        palette,
+                                        self.strings.gnome_selected_check_again(),
+                                    )
+                                    .clicked()
+                                    {
                                         self.refresh_diagnostics(true);
                                     }
                                 });
@@ -683,7 +711,7 @@ impl GuiApp {
                         } else if test_snippet.is_some() {
                             ui.colored_label(
                                 palette.success,
-                                "An enabled static expansion is available for the real-app test.",
+                                self.strings.static_test_expansion_available(),
                             );
                         } else {
                             ui.label(
@@ -743,7 +771,7 @@ impl GuiApp {
                             palette.accent,
                             test_snippet.as_ref().map_or_else(
                                 || self.strings.onboarding_expected_result().to_owned(),
-                                |(_, replacement)| format!("Expected result: {replacement}"),
+                                |(_, replacement)| self.strings.expected_result(replacement),
                             ),
                         );
                         if test_snippet.is_none() {
@@ -781,14 +809,20 @@ impl GuiApp {
                                 RichText::new(
                                     self.strings.onboarding_stale_daemon_state(restart_command),
                                 )
-                                    .color(palette.warning),
+                                .color(palette.warning),
                             );
                         } else if outcome == FirstRunOutcome::SafeFallback
                             && !replacement_test_admitted
                         {
-                            ui.label(RichText::new("Use the review action above to authorize compatibility replacement, or keep using Quick Picker for manual paste.").color(palette.warning));
+                            ui.label(
+                                RichText::new(self.strings.authorize_or_use_picker())
+                                    .color(palette.warning),
+                            );
                         } else if outcome == FirstRunOutcome::SafeFallback {
-                            ui.label(RichText::new("Use the test action above to verify this route in a real application.").color(palette.muted));
+                            ui.label(
+                                RichText::new(self.strings.use_test_action_above())
+                                    .color(palette.muted),
+                            );
                         }
                         if self.onboarding_show_troubleshooting {
                             ui.add_space(8.0);
@@ -913,15 +947,22 @@ mod guided_setup_tests {
     fn first_run_success_is_scoped_to_the_application_that_was_tested() {
         let outcome = FirstRunOutcome::WorkingInTestedApplication;
         assert_eq!(
-            first_run_outcome_label(outcome),
+            first_run_outcome_label(
+                &crate::lang::Strings::new(crate::lang::Language::English),
+                outcome
+            ),
             "Working in tested application"
         );
         assert_eq!(
-            verification_scope_label(outcome, Some("GTK 4 Text Editor")),
+            verification_scope_label(
+                &crate::lang::Strings::new(crate::lang::Language::English),
+                outcome,
+                Some("GTK 4 Text Editor")
+            ),
             "Verified in tested application: GTK 4 Text Editor"
         );
         assert_eq!(
-            verification_scope_label(FirstRunOutcome::SafeFallback, Some("GTK 4 Text Editor")),
+            verification_scope_label(&crate::lang::Strings::new(crate::lang::Language::English), FirstRunOutcome::SafeFallback, Some("GTK 4 Text Editor")),
             "Verified in tested application: not tested",
             "a test in another app cannot be shown as a current verification after the route is blocked"
         );

@@ -65,14 +65,55 @@ impl Strings {
     }
 }
 
+/// One `&'static str` method per entry: English, German, Indonesian.
+#[macro_export]
+macro_rules! texts {
+    ($($name:ident => $en:expr, $de:expr, $id:expr;)*) => {
+        impl $crate::lang::Strings {
+            $(
+                pub fn $name(&self) -> &'static str {
+                    match self.lang {
+                        $crate::lang::Language::English => $en,
+                        $crate::lang::Language::German => $de,
+                        $crate::lang::Language::Indonesian => $id,
+                    }
+                }
+            )*
+        }
+    };
+}
+
+/// Fill each `{}` or `{name}` placeholder of a translated template with the
+/// next value, in order. Translations keep the placeholders' order.
+pub(crate) fn fill(template: &str, values: &[&dyn std::fmt::Display]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut values = values.iter();
+    let mut rest = template;
+    while let Some(start) = rest.find('{') {
+        let Some(end) = rest[start..].find('}') else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+        match values.next() {
+            Some(value) => out.push_str(&value.to_string()),
+            None => out.push_str(&rest[start..start + end + 1]),
+        }
+        rest = &rest[start + end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 mod appearance;
 mod diagnostics;
+mod diagnostics_ui;
 mod dialogs;
 mod dialogs_editor;
 mod editor;
 mod editor_chrome;
 mod import;
 mod insertion;
+mod onboarding;
 mod recovery;
 mod sidebar;
 mod status_messages;
