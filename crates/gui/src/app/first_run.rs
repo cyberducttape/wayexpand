@@ -59,7 +59,11 @@ fn gnome_ibus_is_configured(
 
 /// Whether first-run should judge this desktop by its GNOME IBus route. A
 /// companion daemon runs beside the engine, so it never decides this.
-fn uses_gnome_ibus_route(is_gnome: bool, ibus_active: bool, recommends_ibus: bool) -> bool {
+pub(super) fn uses_gnome_ibus_route(
+    is_gnome: bool,
+    ibus_active: bool,
+    recommends_ibus: bool,
+) -> bool {
     is_gnome && (ibus_active || recommends_ibus)
 }
 
@@ -253,18 +257,6 @@ impl GuiApp {
             self.recommended_route
                 .is_some_and(|route| route.setup_backend() == "ibus"),
         );
-        let source_registered = self.ibus_route.as_ref().is_some_and(|report| {
-            report
-                .check("gnome-source-registered")
-                .is_some_and(|check| {
-                    check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
-                })
-        });
-        let source_active = self.ibus_route.as_ref().is_some_and(|report| {
-            report.check("gnome-source-active").is_some_and(|check| {
-                check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
-            })
-        });
         // A running IBus engine is only a configured GNOME route when GNOME
         // has registered and actually selected the source. A connection by
         // itself must never look like a working desktop integration.
@@ -462,104 +454,73 @@ impl GuiApp {
                                 ),
                             );
                         } else {
-                            ui.colored_label(
-                                palette.warning,
-                                self.strings.onboarding_session_state(
-                                    false,
-                                    &route_state_detail,
-                                    daemon_build,
-                                    restart_command,
-                                ),
-                            );
-                            ui.horizontal_wrapped(|ui| {
-                                if daemon_build == Some(runtime::DaemonBuildState::RestartRequired)
-                                {
-                                    if let Some(unit) = restart_unit {
+                            // One problem and one action: the same answer the
+                            // banner under the header gives after first run.
+                            let busy = self.setup_task.is_some();
+                            match self.current_next_step() {
+                                Some((problem, action)) => {
+                                    ui.colored_label(
+                                        palette.warning,
+                                        self.strings.problem_text(problem),
+                                    );
+                                    let help = match problem {
+                                        super::Problem::InputSourceNotSetUp => {
+                                            Some(self.strings.gnome_register_help())
+                                        }
+                                        super::Problem::InputSourceNotSelected => {
+                                            Some(self.strings.gnome_select_help())
+                                        }
+                                        _ => None,
+                                    };
+                                    if let Some(help) = help {
+                                        ui.label(RichText::new(help).color(palette.muted));
+                                    }
+                                    ui.horizontal_wrapped(|ui| {
                                         if ui
-                                            .add_enabled(
-                                                self.setup_task.is_none(),
-                                                egui::Button::new(
-                                                    self.strings.first_run_restart_service(),
-                                                ),
+                                            .add_enabled_ui(!busy, |ui| {
+                                                theme::primary_button(
+                                                    ui,
+                                                    palette,
+                                                    self.strings.action_label(action),
+                                                )
+                                            })
+                                            .inner
+                                            .clicked()
+                                        {
+                                            self.perform_next_step(action);
+                                        }
+                                        if action != super::NextAction::CheckAgain
+                                            && theme::secondary_button(
+                                                ui,
+                                                palette,
+                                                self.strings.first_run_check_again(),
                                             )
                                             .clicked()
                                         {
-                                            self.service_restart_unit = Some(unit.to_owned());
-                                            self.service_restart_confirm_open = true;
+                                            self.refresh_diagnostics(true);
                                         }
-                                    }
+                                    });
                                 }
-                                if !gnome_ibus
-                                    && !replacement_test_admitted
-                                    && daemon_build == Some(runtime::DaemonBuildState::Current)
-                                    && theme::primary_button(
-                                        ui,
-                                        palette,
-                                        self.strings.first_run_continue_setup(),
-                                    )
-                                    .clicked()
-                                {
-                                    self.start_guided_setup();
-                                }
-                                if theme::secondary_button(
-                                    ui,
-                                    palette,
-                                    self.strings.first_run_check_again(),
-                                )
-                                .clicked()
-                                {
-                                    self.refresh_diagnostics(true);
-                                }
-                            });
-                        }
-                        if gnome_ibus && !checking {
-                            ui.add_space(4.0);
-                            ui.label(RichText::new(self.strings.gnome_input_source()).strong());
-                            ui.label(self.strings.gnome_source_state(
-                                if source_registered {
-                                    self.strings.gnome_source_ready()
-                                } else {
-                                    self.strings.gnome_source_needs_setup()
-                                },
-                                if source_active {
-                                    self.strings.gnome_source_selected()
-                                } else {
-                                    self.strings.gnome_source_select()
-                                },
-                            ));
-                            if !source_registered {
-                                ui.label(self.strings.gnome_register_help());
-                                if theme::primary_button(
-                                    ui,
-                                    palette,
-                                    self.strings.first_run_continue_setup(),
-                                )
-                                .clicked()
-                                {
-                                    self.start_guided_setup();
-                                }
-                            } else if !source_active {
-                                ui.label(self.strings.gnome_select_help());
-                                ui.horizontal_wrapped(|ui| {
-                                    if theme::primary_button(
-                                        ui,
-                                        palette,
-                                        self.strings.activate_wayexpand(),
-                                    )
-                                    .clicked()
-                                    {
-                                        self.retry_gnome_source_activation();
-                                    }
+                                None => {
+                                    ui.colored_label(
+                                        palette.warning,
+                                        self.strings.onboarding_session_state(
+                                            false,
+                                            &route_state_detail,
+                                            daemon_build,
+                                            restart_command,
+                                        ),
+                                    );
                                     if theme::secondary_button(
                                         ui,
                                         palette,
-                                        self.strings.gnome_selected_check_again(),
+                                        self.strings.first_run_check_again(),
                                     )
                                     .clicked()
                                     {
                                         self.refresh_diagnostics(true);
                                     }
-                                });
+                                }
                             }
                         }
                     });

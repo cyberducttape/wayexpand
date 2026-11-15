@@ -163,32 +163,38 @@ For the release RPM, install the downloaded local package with:
 sudo dnf install ./wayexpand-<version>-1.x86_64.rpm
 ```
 
-**Local build from spec file:**
+**Local build from the repository:** the spec builds offline from the
+vendored source archive (`Source0`), which a Git checkout does not contain.
+`.copr/Makefile` produces it from the checkout, as the release workflow does,
+and wraps it in a source RPM:
 
-```bash
-# Prepare for rpmbuild
-rpmbuild -ba wayexpand.spec
-
-# Or use mock for clean builds
-# Replace ${VERSION} with the current release version (e.g., 1.3.3)
-mock wayexpand-${VERSION}-1.fc39.src.rpm
-```
-
-**To build from the repository spec file:**
 ```bash
 git clone https://github.com/cyberducttape/wayexpand
 cd wayexpand
-rpmbuild -ba wayexpand.spec
+make -f .copr/Makefile srpm outdir=/tmp/wayexpand-srpm
+rpmbuild --rebuild /tmp/wayexpand-srpm/wayexpand-*.src.rpm   # or: mock <srpm>
 ```
 
-**To set up an official Copr repository:**
+**Setting up the official Copr repository** (maintainer, one time):
 
-1. Create account at https://copr.fedorainfracloud.org
-2. Create new project
-3. Configure to auto-build from GitHub releases
-4. Announce in README
+1. Sign in at https://copr.fedorainfracloud.org and create a project, for
+   example `wayexpand`, with the chroots to publish (`fedora-43-x86_64`,
+   `fedora-44-x86_64`, and their `aarch64` twins). Fedora 43 ships Rust
+   1.99, above the required 1.92.
+2. *Packages → New package → SCM*: clone URL
+   `https://github.com/cyberducttape/wayexpand.git`, spec file
+   `wayexpand.spec`, SRPM build method **make_srpm**. Leave *Committish*
+   empty to build the default branch, or set a release tag.
+3. *Settings → Integrations*: add the GitHub webhook, so pushing a release
+   tag rebuilds the package. Build from release tags only; a build from
+   `main` carries the version of the last release.
+4. Once a build succeeds, set `fedora_copr_published` in
+   `packaging/release-status.json` and add the `dnf copr enable` line to
+   the README.
 
-**Contributions welcome:** If you maintain a Copr repo or want to create one, please open an issue or PR.
+`make_srpm` runs `.copr/Makefile` as root in a network-enabled chroot; it
+installs `cargo`, `git` and `rpm-build` if missing and vendors crates there.
+The RPM build itself runs without network access.
 
 ### aarch64
 
@@ -294,14 +300,10 @@ checkout has no `vendor/`, and `debian/rules` stops the build.
 
 ### Fedora/Copr
 
-**First Time:**
-1. Create account at https://copr.fedorainfracloud.org
-2. Create new project
-3. Upload spec file and source tarball
-
-**Updates:**
-1. Update spec file
-2. Re-upload or let Copr auto-rebuild from GitHub releases
+Copr builds the package itself through `.copr/Makefile` (see
+[Fedora/RHEL](#fedorarhel) for the one-time setup). With the webhook in
+place, pushing the release tag starts the build; nothing is uploaded by hand.
+`scripts/prepare-release.sh` keeps the spec's `Version` in step with the tag.
 
 ---
 

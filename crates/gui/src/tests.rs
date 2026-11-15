@@ -2499,12 +2499,12 @@ fn first_run_requires_a_verified_build_before_offering_live_test() {
         (
             "stale",
             "source=evdev · backend=libei · daemon_commit=older-build",
-            "daemon is running a different build",
+            "The running WayExpand service is from an older version.",
         ),
         (
             "unknown",
             "source=evdev · backend=libei",
-            "daemon's build identity is unknown",
+            "The running WayExpand service cannot say which version it is.",
         ),
     ] {
         let path = std::env::temp_dir().join(format!(
@@ -2547,17 +2547,18 @@ fn first_run_requires_a_verified_build_before_offering_live_test() {
                 .nodes
         );
         let expected_warning = if build_identity_unverified() {
-            "daemon's build identity is unknown"
+            "The running WayExpand service cannot say which version it is."
         } else {
             expected_warning
         };
         assert!(semantics.contains(expected_warning), "{semantics}");
-        if case == "stale" && !build_identity_unverified() {
-            assert!(
-                semantics.contains("systemctl --user restart wayexpand-evdev.service"),
-                "{semantics}"
-            );
-        }
+        // One action, not a command to copy: restart through the
+        // confirmation dialog.
+        assert!(semantics.contains("Restart WayExpand"), "{semantics}");
+        assert!(
+            !semantics.contains("Test in a real application"),
+            "{semantics}"
+        );
         assert!(!semantics.contains("It expanded correctly"));
         let _ = fs::remove_file(path);
     }
@@ -3462,7 +3463,15 @@ fn header_reports_a_live_ibus_engine_instead_of_a_stopped_service() {
     app.ibus_active = false;
     let semantics = header_semantics(&mut app);
     assert!(semantics.contains("Service: Not running"), "{semantics}");
-    assert!(semantics.contains("Turn on WayExpand"), "{semantics}");
+    // The action lives in the banner under the header, not in it.
+    assert!(!semantics.contains("Turn on WayExpand"), "{semantics}");
+    assert_eq!(
+        app.current_next_step(),
+        Some((
+            crate::app::Problem::ServiceOff,
+            crate::app::NextAction::TurnOn
+        ))
+    );
     // Without a running service the typing-route chip has nothing to say.
     assert!(!semantics.contains("Typing integration"), "{semantics}");
 }
@@ -3821,5 +3830,80 @@ fn writing_a_first_snippet_returns_to_the_guide() {
     assert!(app.onboarding_visible, "the guide is back after saving");
     assert_eq!(app.config.expansion.len(), 1);
     assert_eq!(app.config.expansion[0].trigger, ";sig");
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn the_banner_names_one_problem_and_one_action() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-next-step-banner-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.language = Language::English;
+    app.strings.set_language(Language::English);
+    app.ibus_active = false;
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let render = |app: &mut GuiApp| {
+        let frame = run_gui_test_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                app.render_next_step_banner(ui, &palette);
+            },
+        );
+        frame
+            .platform_output
+            .accesskit_update
+            .map(|update| format!("{:?}", update.nodes))
+            .unwrap_or_default()
+    };
+
+    app.onboarding_visible = false;
+    app.daemon_reachable = Some(false);
+    let off = render(&mut app);
+    assert!(
+        off.contains("WayExpand is off, so snippets do not expand."),
+        "{off}"
+    );
+    assert!(off.contains("Turn on"), "{off}");
+    assert!(off.contains("Details"), "{off}");
+
+    app.daemon_reachable = Some(true);
+    app.route_state = Some(runtime::RouteState::PermissionRequired);
+    app.daemon_status = format!(
+        "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={}",
+        env!("WAYEXPAND_COMMIT"),
+        env!("WAYEXPAND_BUILD_VERSION")
+    );
+    if build_identity_unverified() {
+        // Without a recorded identity the build problem rightly comes first.
+        let _ = fs::remove_file(path);
+        return;
+    }
+    let permission = render(&mut app);
+    assert!(
+        permission.contains("has not yet allowed WayExpand"),
+        "{permission}"
+    );
+    assert!(permission.contains("Fix with guided setup"), "{permission}");
+    assert!(!permission.contains("Turn on"), "{permission}");
+
+    // The first-run guide shows the same answer in its first step.
+    app.onboarding_visible = true;
+    let during_guide = render(&mut app);
+    assert!(
+        !during_guide.contains("has not yet allowed"),
+        "{during_guide}"
+    );
     let _ = fs::remove_file(path);
 }

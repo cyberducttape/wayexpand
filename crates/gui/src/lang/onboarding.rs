@@ -55,26 +55,6 @@ texts! {
         "Open Quick Picker (copy and paste)",
         "Schnellwähler öffnen (kopieren und einfügen)",
         "Buka Quick Picker (salin dan tempel)";
-    gnome_input_source =>
-        "GNOME input source",
-        "GNOME-Eingabequelle",
-        "Sumber input GNOME";
-    gnome_source_ready =>
-        "ready",
-        "bereit",
-        "siap";
-    gnome_source_needs_setup =>
-        "needs setup",
-        "muss eingerichtet werden",
-        "perlu disiapkan";
-    gnome_source_selected =>
-        "WayExpand selected",
-        "WayExpand ausgewählt",
-        "WayExpand dipilih";
-    gnome_source_select =>
-        "select WayExpand",
-        "WayExpand auswählen",
-        "pilih WayExpand";
     gnome_register_help =>
         "Continue guided setup to check dependencies, register the engine, and explain any required administrator authorization.",
         "Setzen Sie die geführte Einrichtung fort, um Abhängigkeiten zu prüfen, die Engine zu registrieren und eine nötige Administrator-Freigabe zu erklären.",
@@ -83,14 +63,6 @@ texts! {
         "Choose WayExpand from GNOME’s keyboard/input-source menu. Your existing keyboard layouts remain available.",
         "Wählen Sie WayExpand im Tastatur- bzw. Eingabequellen-Menü von GNOME. Ihre bisherigen Tastaturbelegungen bleiben verfügbar.",
         "Pilih WayExpand dari menu papan ketik/sumber input GNOME. Tata letak papan ketik Anda tetap tersedia.";
-    activate_wayexpand =>
-        "Activate WayExpand",
-        "WayExpand aktivieren",
-        "Aktifkan WayExpand";
-    gnome_selected_check_again =>
-        "I selected it — check again",
-        "Ausgewählt – erneut prüfen",
-        "Sudah dipilih — periksa lagi";
     authorize_or_use_picker =>
         "Before testing, review and allow compatibility replacement for this desktop, or keep using Quick Picker to paste snippets yourself.",
         "Prüfen und erlauben Sie vor dem Test die Kompatibilitäts-Ersetzung für diesen Desktop, oder fügen Sie Snippets weiter selbst mit dem Schnellwähler ein.",
@@ -427,14 +399,6 @@ impl Strings {
             ),
         }
     }
-
-    pub fn gnome_source_state(&self, registration: &str, active: &str) -> String {
-        match self.lang {
-            Language::English => format!("Registration: {registration} · Active: {active}"),
-            Language::German => format!("Registrierung: {registration} · Aktiv: {active}"),
-            Language::Indonesian => format!("Pendaftaran: {registration} · Aktif: {active}"),
-        }
-    }
 }
 
 impl Strings {
@@ -483,10 +447,6 @@ texts! {
         "Check again",
         "Erneut prüfen",
         "Periksa lagi";
-    first_run_restart_service =>
-        "Restart WayExpand",
-        "WayExpand neu starten",
-        "Mulai ulang WayExpand";
     first_run_snippet_ready =>
         "Ready: typing {trigger} becomes “{replacement}”.",
         "Bereit: Aus {trigger} wird „{replacement}“.",

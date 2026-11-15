@@ -10,6 +10,8 @@ mod editor_preview;
 mod first_run;
 mod import;
 mod library;
+mod next_step;
+pub(crate) use next_step::{Action as NextAction, Problem};
 mod pack;
 mod profile;
 mod runtime_events;

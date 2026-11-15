@@ -4,6 +4,23 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- When expansion is not working, the GUI says why in one sentence and offers
+  one action, in a banner under the header, in the status chip's tooltip,
+  and in the first-run guide. Each case has its action:
+  - the service is off: *Turn on*
+  - expansion is paused: *Resume*
+  - the desktop withheld or withdrew permission: guided setup
+  - GNOME has not set up or selected the input source: setup or *Select
+    WayExpand*
+  - the running service is an older or unidentified build: *Restart
+    WayExpand*, through the confirmation dialog
+  - replacement needs approval: *Review and allow*
+  - the typing route failed: guided setup
+  - the desktop or the last app's field cannot have text replaced: *Open
+    Quick Picker*
+  The diagnostics report stays one click away under *Details*. The header no
+  longer has its own *Turn on* button; the banner holds it.
+- The README's editor screenshot shows the Basic editor.
 - `wayexpand new` lists templates in the 80-column layout of `wayexpand help`:
   your templates and the built-in ones under separate headings, each as
   `name  description → file`. Previously one long output path set the width
