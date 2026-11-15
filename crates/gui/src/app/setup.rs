@@ -10,7 +10,6 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 const MAX_SETUP_OUTPUT_BYTES: usize = 128 * 1024;
 const SETUP_OUTPUT_READS_PER_DRAIN: usize = 64;
-const NON_ATOMIC_SETUP_WARNING: &str = "Text replacement is not atomic: WayExpand checks and removes the trigger, then inserts the snippet separately. If you keep typing, your keys can interleave with the snippet and leave partial or corrupted text. Focus changes or backend failures can also leave text that cannot be rolled back. WayExpand will not retry an uncertain result. Headless tests do not certify physical-session target integrity; there is no accepted physical-session certification for this route.";
 
 fn ibus_registration_needed(report: &serde_json::Value) -> Option<bool> {
     let checks = report.get("checks")?.as_array()?;
@@ -296,8 +295,8 @@ impl GuiApp {
         if ibus_route {
             self.start_cli_task(
                 vec!["ibus".into(), "status".into(), "--json".into()],
-                "Checking the IBus component, GNOME source, and replacement authorization…".into(),
-                "Setup preflight complete.".into(),
+                self.strings.setup_checking_ibus().into(),
+                self.strings.setup_preflight_complete().into(),
             );
             if self.setup_task.is_some() {
                 self.cli_task_kind = Some("setup-preflight".into());
@@ -305,9 +304,7 @@ impl GuiApp {
         } else if self.recommended_route.is_none() {
             self.guided_setup_waiting_for_route = true;
             self.refresh_diagnostics(false);
-            self.status = Status::info(
-                "Checking available input routes. Setup will continue automatically when preflight finishes.",
-            );
+            self.status = Status::info(self.strings.setup_waiting_for_routes());
         } else {
             self.guided_setup_waiting_for_route = false;
             self.start_setup();
@@ -317,8 +314,8 @@ impl GuiApp {
     pub(crate) fn retry_gnome_source_activation(&mut self) {
         self.start_cli_task(
             vec!["repair".into(), "--gnome-input-source".into()],
-            "Selecting WayExpand in GNOME…".into(),
-            "WayExpand was selected; refreshing the GNOME checks.".into(),
+            self.strings.setup_selecting_gnome().into(),
+            self.strings.setup_gnome_selected_refreshing().into(),
         );
         if self.setup_task.is_some() {
             self.cli_task_kind = Some("gnome-source-repair".into());
@@ -540,7 +537,11 @@ impl GuiApp {
             .to_owned()
     }
 
-    fn setup_completion_status(output: &str, fallback: String) -> (Status, bool) {
+    fn setup_completion_status(
+        strings: &Strings,
+        output: &str,
+        fallback: String,
+    ) -> (Status, bool) {
         if output.contains("WX-GNOME-SESSION-RESTART-001")
             || output
                 .to_ascii_lowercase()
@@ -550,28 +551,16 @@ impl GuiApp {
                 .contains("restart your gnome session")
         {
             (
-                Status::warning(
-                    "Needs desktop restart: GNOME must load the installed extension after you log out and back in. Setup is not yet verified; resume it after the new session starts.",
-                ),
+                Status::warning(strings.setup_needs_desktop_restart()),
                 false,
             )
         } else if output.contains("WX-POLICY-001") {
-            (
-                Status::warning(
-                    "Needs permission: replacement is disabled. Review and explicitly authorize the non-atomic replacement behavior before expecting trigger expansion.",
-                ),
-                false,
-            )
+            (Status::warning(strings.setup_needs_permission()), false)
         } else if output
             .lines()
             .any(|line| line.trim() == "DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW")
         {
-            (
-                Status::info(
-                    "Output activity observed. Check the target field and confirm the exact text before recording a result.",
-                ),
-                false,
-            )
+            (Status::info(strings.setup_output_observed()), false)
         } else if output.lines().any(|line| {
             matches!(
                 line.trim(),
@@ -582,46 +571,27 @@ impl GuiApp {
             )
         }) {
             (
-                Status::warning(
-                    "Desktop test was not verified. Inspect Diagnostics and the target field; do not retry uncertain output automatically.",
-                ),
+                Status::warning(strings.setup_desktop_test_unverified()),
                 true,
             )
         } else if output
             .lines()
             .any(|line| line.trim() == "SETUP RESULT: CONFIGURED, AWAITING TEST")
         {
-            (
-                Status::info(
-                    "Configured, untested: complete Desktop Integration Test to verify a real insertion in a target application.",
-                ),
-                true,
-            )
+            (Status::info(strings.setup_configured_untested()), true)
         } else if output
             .lines()
             .any(|line| line.trim() == "SETUP RESULT: WORKING")
         {
-            (
-                Status::success(
-                    "Working: a real insertion was confirmed in the tested application.",
-                ),
-                false,
-            )
+            (Status::success(strings.setup_working()), false)
         } else if output
             .lines()
             .any(|line| line.trim() == "SETUP RESULT: ACTION REQUIRED")
         {
-            (
-                Status::warning(
-                    "Setup needs action. Review Diagnostics for the failing prerequisite.",
-                ),
-                true,
-            )
+            (Status::warning(strings.setup_needs_action()), true)
         } else {
             (
-                Status::info(format!(
-                    "{fallback} Configuration and service state were not enough to verify a real application insertion; check Diagnostics."
-                )),
+                Status::info(strings.setup_unverified_fallback(&fallback)),
                 true,
             )
         }
@@ -630,22 +600,18 @@ impl GuiApp {
     fn setup_preflight_result(&mut self, output: &str) -> Status {
         let Ok(report) = serde_json::from_str::<serde_json::Value>(output) else {
             self.diagnostics_open = true;
-            return Status::error(
-                "Could not read IBus setup checks. Open Diagnostics, refresh the report, and try setup again.",
-            );
+            return Status::error(self.strings.setup_checks_unreadable());
         };
         let Some(registration_needed) = ibus_registration_needed(&report) else {
             self.diagnostics_open = true;
-            return Status::error(
-                "IBus setup checks were incomplete. Open Diagnostics and resolve the IBus registration check before continuing.",
-            );
+            return Status::error(self.strings.setup_checks_incomplete());
         };
         self.setup_system_integration_required = registration_needed;
         self.setup_system_integration_acknowledged = !registration_needed;
         self.setup_consent_acknowledged =
             self.config.settings.compatibility_mode != wayexpand_core::CompatibilityMode::Off;
         self.setup_consent_open = true;
-        Status::info("Review the setup stages and any required consent to continue.")
+        Status::info(self.strings.setup_review_stages())
     }
 
     pub(crate) fn select_default_desktop_test(&mut self) -> bool {
@@ -687,9 +653,8 @@ impl GuiApp {
         });
         self.start_cli_task(
             arguments,
-            "Desktop test running; type the selected trigger once in the confirmed disposable field."
-                .into(),
-            "Desktop test finished.".into(),
+            self.strings.setup_desktop_test_running().into(),
+            self.strings.setup_desktop_test_finished().into(),
         );
         if self.setup_task.is_some() {
             self.cli_task_kind = Some("desktop-test".into());
@@ -739,9 +704,9 @@ impl GuiApp {
                             self.desktop_test_verified = false;
                             self.desktop_test_verified_application = None;
                             if self.desktop_test_dialog_required {
-                                Status::info("WayExpand was selected in GNOME. Input-source configuration is updated; first-run setup still requires a real-app test.")
+                                Status::info(self.strings.setup_gnome_selected_first_run())
                             } else {
-                                Status::info("WayExpand was selected in GNOME. Input-source configuration is updated; real insertion remains unverified.")
+                                Status::info(self.strings.setup_gnome_selected())
                             }
                         } else {
                             match task_kind.as_deref() {
@@ -774,15 +739,23 @@ impl GuiApp {
                                     }
                                     self.desktop_test_review_open =
                                         self.desktop_test_review.is_some();
-                                    Status::info("Activity observed but not correlated to the test trigger. Visually verify the exact target text before confirming.")
+                                    Status::info(self.strings.setup_activity_uncorrelated())
                                 } else {
                                     self.pending_desktop_test = None;
                                     self.diagnostics_open = true;
-                                    Self::setup_completion_status(&output, success_message).0
+                                    Self::setup_completion_status(
+                                        &self.strings,
+                                        &output,
+                                        success_message,
+                                    )
+                                    .0
                                 }
                             } else {
-                                let (status, open_diagnostics) =
-                                    Self::setup_completion_status(&output, success_message);
+                                let (status, open_diagnostics) = Self::setup_completion_status(
+                                    &self.strings,
+                                    &output,
+                                    success_message,
+                                );
                                 if is_setup
                                     && output.lines().any(|line| {
                                         line.trim() == "SETUP RESULT: CONFIGURED, AWAITING TEST"
@@ -792,9 +765,12 @@ impl GuiApp {
                                     self.test_expansion_dialog_open = true;
                                     self.diagnostics_open = false;
                                     if let Some(error) = onboarding_state_error {
-                                        Status::warning(format!("WayExpand is configured but unverified. The incomplete first-run state could not be saved, so the guide may not reopen automatically: {error}"))
+                                        Status::warning(
+                                            self.strings
+                                                .setup_unverified_state_unsaved(&error.to_string()),
+                                        )
                                     } else {
-                                        Status::info("Configured, unverified: complete the Desktop Integration Test and confirm the exact result in a real application. You can defer it, but WayExpand will not mark the route Working until confirmation.")
+                                        Status::info(self.strings.setup_configured_unverified())
                                     }
                                 } else {
                                     self.diagnostics_open |= open_diagnostics;
@@ -823,11 +799,13 @@ impl GuiApp {
                             };
                             let summary = setup_failure_summary(&report);
                             let outcome = Self::setup_completion_status(
+                                &self.strings,
                                 &report,
                                 self.strings.status_setup_failed(&summary),
                             )
                             .0;
                             let (_, open_diagnostics) = Self::setup_completion_status(
+                                &self.strings,
                                 &report,
                                 self.strings.status_setup_failed(&summary),
                             );
@@ -837,9 +815,7 @@ impl GuiApp {
                             outcome
                         } else if task_kind.as_deref() == Some("setup-preflight") {
                             self.diagnostics_open = true;
-                            Status::error(format!(
-                                "Could not check the IBus setup stages: {detail}"
-                            ))
+                            Status::error(self.strings.setup_could_not_check_stages(&detail))
                         } else if task_kind.as_deref() == Some("gnome-source-repair") {
                             let report = setup_failure_report(
                                 &[],
@@ -848,6 +824,7 @@ impl GuiApp {
                             );
                             let summary = setup_failure_summary(&report);
                             let outcome = Self::setup_completion_status(
+                                &self.strings,
                                 &report,
                                 self.strings.status_setup_failed(&summary),
                             )
@@ -936,10 +913,10 @@ impl GuiApp {
                     success_message: format!("{unit} restarted; refreshing diagnostics."),
                     is_setup: false,
                 });
-                self.status = Status::info(format!("Restarting {unit}…"));
+                self.status = Status::info(self.strings.status_restarting_unit(&unit));
             }
             Err(error) => {
-                self.status = Status::error(format!("Could not start service restart: {error}"))
+                self.status = Status::error(self.strings.status_restart_failed(&error.to_string()))
             }
         }
     }
@@ -976,140 +953,144 @@ impl GuiApp {
         let (input_title, input_detail, tracking_title, tracking_detail) =
             match wayexpand_backend_selection::Compositor::detect() {
                 wayexpand_backend_selection::Compositor::Gnome => (
-                    "Register and select the IBus source",
-                    "Keep your existing keyboard sources and layout in GNOME.",
-                    "Enable GNOME window tracking",
-                    "Used for app-specific snippets; ordinary snippets do not depend on it. No administrator access is needed.",
+                    self.strings.setup_gnome_input(),
+                    self.strings.setup_gnome_input_detail(),
+                    self.strings.setup_gnome_tracking(),
+                    self.strings.setup_gnome_tracking_detail(),
                 ),
                 wayexpand_backend_selection::Compositor::KdePlasma => (
-                    "Connect IBus to the KDE virtual keyboard",
-                    "WayExpand will preserve your configured keyboard layout.",
-                    "Use KWin window tracking",
-                    "Used for app-specific snippets; ordinary snippets do not depend on it.",
+                    self.strings.setup_kde_input(),
+                    self.strings.setup_kde_input_detail(),
+                    self.strings.setup_kde_tracking(),
+                    self.strings.setup_tracking_detail(),
                 ),
                 compositor => (
-                    "Activate the IBus input source",
-                    "Your existing keyboard configuration is left in place.",
-                    "Check application window tracking",
+                    self.strings.setup_other_input(),
+                    self.strings.setup_other_input_detail(),
+                    self.strings.setup_other_tracking(),
                     if compositor == wayexpand_backend_selection::Compositor::Unknown {
-                        "App-specific snippets need a supported window tracker; Diagnostics will show whether one is available."
+                        self.strings.setup_unknown_tracking_detail()
                     } else {
-                        "App-specific snippets need a supported window tracker; ordinary snippets do not depend on it."
+                        self.strings.setup_other_tracking_detail()
                     },
                 ),
             };
         egui::Modal::new(egui::Id::new("ibus_replacement_consent")).show(ctx, |ui| {
-                ui.set_width(430.0);
-                ui.heading("Set up WayExpand");
-                ui.add_space(8.0);
-                ui.label(RichText::new("Setup checks").strong());
-                for (id, label) in [
-                    ("tools", "Required tools and desktop dependencies"),
-                    ("component", "IBus engine component installed"),
-                    ("registered", "IBus engine registered"),
-                    ("gnome-source-registered", "GNOME input source registered"),
-                    ("gnome-source-active", "WayExpand selected in GNOME"),
-                    ("consent", "Replacement authorization"),
-                ] {
-                    let state = self
-                        .ibus_route
-                        .as_ref()
-                        .and_then(|report| report.check(id))
-                        .map(|check| check.state);
-                    let (symbol, detail) = match state {
-                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Pass) => ("✓", "Ready"),
-                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Warn) => ("!", "Action may be needed"),
-                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Fail) => ("✗", "Will be addressed during setup"),
-                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Skip) => ("·", "Not required here"),
-                        _ => ("·", "Checked during setup"),
-                    };
-                    ui.label(format!("{symbol} {label}: {detail}"));
-                }
-                ui.add_space(8.0);
-                for (number, title, detail) in [
-                    (
-                        "1",
-                        "Prepare WayExpand",
-                        "Use the installed files and create your configuration if needed.",
-                    ),
-                    (
-                        "2",
-                        input_title,
-                        input_detail,
-                    ),
-                    (
-                        "3",
-                        "Activate and check the input engine",
-                        "Then test a real expansion in a text field.",
-                    ),
-                    (
-                        "4",
-                        tracking_title,
-                        tracking_detail,
-                    ),
-                ] {
-                    ui.horizontal_top(|ui| {
-                        ui.label(RichText::new(number).strong());
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(title).strong());
-                            ui.label(detail);
-                        });
+            ui.set_width(430.0);
+            ui.heading(self.strings.setup_title());
+            ui.add_space(8.0);
+            ui.label(RichText::new(self.strings.setup_checks()).strong());
+            for (id, label) in [
+                ("tools", self.strings.setup_check_tools()),
+                ("component", self.strings.setup_check_component()),
+                ("registered", self.strings.setup_check_registered()),
+                (
+                    "gnome-source-registered",
+                    self.strings.setup_check_gnome_registered(),
+                ),
+                (
+                    "gnome-source-active",
+                    self.strings.setup_check_gnome_active(),
+                ),
+                ("consent", self.strings.setup_check_consent()),
+            ] {
+                let state = self
+                    .ibus_route
+                    .as_ref()
+                    .and_then(|report| report.check(id))
+                    .map(|check| check.state);
+                let (symbol, detail) = match state {
+                    Some(wayexpand_backend_ibus::chain::IbusCheckState::Pass) => {
+                        ("✓", self.strings.setup_state_ready())
+                    }
+                    Some(wayexpand_backend_ibus::chain::IbusCheckState::Warn) => {
+                        ("!", self.strings.setup_state_warn())
+                    }
+                    Some(wayexpand_backend_ibus::chain::IbusCheckState::Fail) => {
+                        ("✗", self.strings.setup_state_fail())
+                    }
+                    Some(wayexpand_backend_ibus::chain::IbusCheckState::Skip) => {
+                        ("·", self.strings.setup_state_skip())
+                    }
+                    _ => ("·", self.strings.setup_state_unknown()),
+                };
+                ui.label(format!("{symbol} {label}: {detail}"));
+            }
+            ui.add_space(8.0);
+            for (number, title, detail) in [
+                (
+                    "1",
+                    self.strings.setup_step_prepare(),
+                    self.strings.setup_step_prepare_detail(),
+                ),
+                ("2", input_title, input_detail),
+                (
+                    "3",
+                    self.strings.setup_step_activate(),
+                    self.strings.setup_step_activate_detail(),
+                ),
+                ("4", tracking_title, tracking_detail),
+            ] {
+                ui.horizontal_top(|ui| {
+                    ui.label(RichText::new(number).strong());
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(title).strong());
+                        ui.label(detail);
                     });
-                }
-                ui.add_space(8.0);
-                if self.setup_system_integration_required {
-                    ui.add_space(8.0);
-                    ui.label("WayExpand needs one system-wide input-method registration. An administrator prompt may appear to install the shared registration and engine; this does not grant raw keyboard-device access. You can cancel if you prefer to install a distribution package instead.");
-                    ui.checkbox(
-                        &mut self.setup_system_integration_acknowledged,
-                        "Allow WayExpand to request administrator authorization for IBus registration if needed.",
-                    );
-                } else {
-                    ui.add_space(8.0);
-                    ui.label("The shared input-method registration is already valid. No administrator authorization is needed for this step.");
-                }
-                if self.config.settings.compatibility_mode
-                    == wayexpand_core::CompatibilityMode::Off
-                {
-                    ui.add_space(8.0);
-                    ui.label(NON_ATOMIC_SETUP_WARNING);
-                    ui.checkbox(
-                        &mut self.setup_consent_acknowledged,
-                        "I understand the interleaving and partial-write risk and want to enable tracked-focus replacement.",
-                    );
-                } else {
-                    ui.add_space(8.0);
-                    ui.label("Tracked-focus text replacement is already enabled.");
-                }
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(
-                            (!self.setup_system_integration_required
-                                || self.setup_system_integration_acknowledged)
-                                && self.setup_consent_acknowledged
-                                && self.setup_task.is_none(),
-                            egui::Button::new("Continue setup"),
-                        )
-                        .clicked()
-                    {
-                        self.setup_consent_open = false;
-                        let replacement_consent = self.config.settings.compatibility_mode
-                            == wayexpand_core::CompatibilityMode::Off;
-                        self.start_setup_with_replacement_consent(
-                            replacement_consent,
-                            self.setup_system_integration_required
-                                && self.setup_system_integration_acknowledged,
-                        );
-                    }
-                    if ui.button("Cancel").clicked() {
-                        self.setup_consent_open = false;
-                        self.setup_consent_acknowledged = false;
-                        self.setup_system_integration_required = false;
-                        self.setup_system_integration_acknowledged = false;
-                    }
                 });
+            }
+            ui.add_space(8.0);
+            if self.setup_system_integration_required {
+                ui.add_space(8.0);
+                ui.label(self.strings.setup_admin_needed());
+                ui.checkbox(
+                    &mut self.setup_system_integration_acknowledged,
+                    self.strings.setup_admin_checkbox(),
+                );
+            } else {
+                ui.add_space(8.0);
+                ui.label(self.strings.setup_admin_not_needed());
+            }
+            if self.config.settings.compatibility_mode == wayexpand_core::CompatibilityMode::Off {
+                ui.add_space(8.0);
+                ui.label(self.strings.non_atomic_setup_warning());
+                ui.checkbox(
+                    &mut self.setup_consent_acknowledged,
+                    self.strings.setup_consent_checkbox(),
+                );
+            } else {
+                ui.add_space(8.0);
+                ui.label(self.strings.setup_consent_already());
+            }
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        (!self.setup_system_integration_required
+                            || self.setup_system_integration_acknowledged)
+                            && self.setup_consent_acknowledged
+                            && self.setup_task.is_none(),
+                        egui::Button::new(self.strings.setup_continue()),
+                    )
+                    .clicked()
+                {
+                    self.setup_consent_open = false;
+                    let replacement_consent = self.config.settings.compatibility_mode
+                        == wayexpand_core::CompatibilityMode::Off;
+                    self.start_setup_with_replacement_consent(
+                        replacement_consent,
+                        self.setup_system_integration_required
+                            && self.setup_system_integration_acknowledged,
+                    );
+                }
+                if ui.button(self.strings.cancel()).clicked() {
+                    self.setup_consent_open = false;
+                    self.setup_consent_acknowledged = false;
+                    self.setup_system_integration_required = false;
+                    self.setup_system_integration_acknowledged = false;
+                }
             });
+        });
     }
 
     pub(crate) fn render_evdev_setup(&mut self, ctx: &egui::Context, palette: &Palette) {
@@ -1196,7 +1177,9 @@ mod tests {
             "no accepted physical-session certification for this route",
         ] {
             assert!(
-                NON_ATOMIC_SETUP_WARNING.contains(required_warning),
+                crate::lang::Strings::new(crate::lang::Language::English)
+                    .non_atomic_setup_warning()
+                    .contains(required_warning),
                 "missing consent warning: {required_warning}"
             );
         }
@@ -1339,6 +1322,7 @@ mod tests {
     #[test]
     fn setup_status_does_not_call_an_unverified_route_working() {
         let (status, open_diagnostics) = GuiApp::setup_completion_status(
+            &crate::lang::Strings::new(crate::lang::Language::English),
             "SETUP RESULT: CONFIGURED, AWAITING TEST",
             "generic success".into(),
         );
@@ -1352,8 +1336,11 @@ mod tests {
 
     #[test]
     fn setup_status_reports_working_only_after_a_confirmed_test() {
-        let (status, open_diagnostics) =
-            GuiApp::setup_completion_status("SETUP RESULT: WORKING", "generic success".into());
+        let (status, open_diagnostics) = GuiApp::setup_completion_status(
+            &crate::lang::Strings::new(crate::lang::Language::English),
+            "SETUP RESULT: WORKING",
+            "generic success".into(),
+        );
         assert_eq!(
             status.text(),
             "Working: a real insertion was confirmed in the tested application."
@@ -1364,6 +1351,7 @@ mod tests {
     #[test]
     fn setup_status_explains_restart_and_replacement_authorization_states() {
         let (restart, open_diagnostics) = GuiApp::setup_completion_status(
+            &crate::lang::Strings::new(crate::lang::Language::English),
             "WX-GNOME-SESSION-RESTART-001: log out of GNOME and log back in",
             "setup failed".into(),
         );
@@ -1371,6 +1359,7 @@ mod tests {
         assert!(!open_diagnostics);
 
         let (permission, open_diagnostics) = GuiApp::setup_completion_status(
+            &crate::lang::Strings::new(crate::lang::Language::English),
             "WX-POLICY-001: replacement is disabled",
             "setup incomplete".into(),
         );
@@ -1380,8 +1369,11 @@ mod tests {
 
     #[test]
     fn generic_setup_completion_is_never_presented_as_verified_success() {
-        let (status, open_diagnostics) =
-            GuiApp::setup_completion_status("IBus component installed", "Setup finished.".into());
+        let (status, open_diagnostics) = GuiApp::setup_completion_status(
+            &crate::lang::Strings::new(crate::lang::Language::English),
+            "IBus component installed",
+            "Setup finished.".into(),
+        );
         assert!(!status.is_error());
         assert!(status
             .text()
@@ -1392,6 +1384,7 @@ mod tests {
     #[test]
     fn desktop_test_without_activity_opens_diagnostics_not_success() {
         let (status, open_diagnostics) = GuiApp::setup_completion_status(
+            &crate::lang::Strings::new(crate::lang::Language::English),
             "DESKTOP TEST RESULT: INPUT NOT OBSERVED",
             "generic success".into(),
         );

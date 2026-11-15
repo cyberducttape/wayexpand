@@ -15,15 +15,15 @@ fn desktop_test_options(expansions: &[ExpansionConfig]) -> Vec<(String, String)>
         .collect()
 }
 
-fn desktop_test_review_instruction(review: &DesktopTestReview) -> String {
-    format!(
-        "In {}, inspect the field where you attempted to type {}. Do not type the trigger again.",
-        review.application_class, review.trigger
+fn desktop_test_review_instruction(strings: &Strings, review: &DesktopTestReview) -> String {
+    crate::lang::fill(
+        strings.dg_in_inspect_the_field_where_you(),
+        &[&review.application_class, &review.trigger],
     )
 }
 
-fn no_surrounding_text_guidance() -> &'static str {
-    "A recent input was refused because its field did not provide verifiable surrounding text. This observation may not describe the currently focused application or field. Automatic replacement remains disabled when surrounding text cannot be verified. Use Quick Picker to copy a snippet and paste it yourself."
+fn no_surrounding_text_guidance(strings: &Strings) -> &'static str {
+    strings.dg_no_surrounding_text_guidance()
 }
 
 impl GuiApp {
@@ -136,14 +136,17 @@ impl GuiApp {
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         if let Some(report) = self.setup_failure_report.as_deref() {
             ui.group(|ui| {
-                ui.colored_label(palette.danger, "Setup failed");
+                ui.colored_label(palette.danger, self.strings.dg_setup_failed());
                 if let Some(summary) = report
                     .lines()
                     .find_map(|line| line.strip_prefix("Summary: "))
                 {
                     ui.label(summary);
                 }
-                if ui.button("View diagnostic report").clicked() {
+                if ui
+                    .button(self.strings.dg_view_diagnostic_report())
+                    .clicked()
+                {
                     self.setup_failure_report_open = true;
                 }
             });
@@ -257,12 +260,12 @@ impl GuiApp {
                             if route.assessment.certified { "certified" } else { "not certified" },
                         )).small().color(palette.muted));
                         if route.contract.requires_raw_input() {
-                            ui.label(RichText::new("Compatibility mode: Maximum").strong());
-                            ui.label("Advantage: reaches more applications through global keyboard capture.");
-                            ui.label("Recommended for operators who understand and accept these limitations:");
+                            ui.label(RichText::new(self.strings.dg_compatibility_mode_maximum()).strong());
+                            ui.label(self.strings.dg_advantage_reaches_more_applications_through_global());
+                            ui.label(self.strings.dg_recommended_for_operators_who_understand_and());
                         }
                         if !route.assessment.limitations.is_empty() {
-                            ui.label(RichText::new("Limitations").strong());
+                            ui.label(RichText::new(self.strings.dg_limitations()).strong());
                             for limitation in &route.assessment.limitations {
                                 ui.label(format!("• {}", limitation.description()));
                             }
@@ -1080,7 +1083,7 @@ impl GuiApp {
             });
         }
         ui.separator();
-        if ui.button("Export Support Report").clicked() {
+        if ui.button(self.strings.dg_export_support_report()).clicked() {
             self.support_export_open = true;
             self.support_preview = None;
             self.support_preview_error = None;
@@ -1099,20 +1102,20 @@ impl GuiApp {
             _ => None,
         };
 
-        theme::section_header(ui, "", "Quick checks and actions");
+        theme::section_header(ui, "", self.strings.dg_quick_checks_and_actions());
         theme::card(ui, palette, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
-                ui.strong("Installation");
-                ui.colored_label(palette.muted, "Use guided setup checks");
-                if ui.button("Open setup").clicked() {
+                ui.strong(self.strings.dg_installation());
+                ui.colored_label(palette.muted, self.strings.dg_use_guided_setup_checks());
+                if ui.button(self.strings.dg_open_setup()).clicked() {
                     self.diagnostics_close_requested = true;
                     self.onboarding_visible = true;
                     self.refresh_diagnostics(false);
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                ui.strong("Configuration");
+                ui.strong(self.strings.dg_configuration());
                 ui.colored_label(
                     if config_ok {
                         palette.success
@@ -1120,30 +1123,33 @@ impl GuiApp {
                         palette.danger
                     },
                     if config_ok {
-                        "Valid"
+                        self.strings.dg_valid()
                     } else {
-                        "Needs attention"
+                        self.strings.dg_needs_attention()
                     },
                 );
-                if ui.button("Edit").clicked() {
+                if ui.button(self.strings.dg_edit()).clicked() {
                     // The main window is the configuration editor.
                     self.diagnostics_close_requested = true;
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                ui.strong("Recovery");
-                ui.label("Reset integration, services, or GUI preferences with a preview and backup where applicable.");
-                if ui.button("Reset…").clicked() {
+                ui.strong(self.strings.dg_recovery());
+                ui.label(
+                    self.strings
+                        .dg_reset_integration_services_or_gui_preferences(),
+                );
+                if ui.button(self.strings.dg_reset()).clicked() {
                     self.reset_dialog_open = true;
                 }
-                if ui.button("Backup / restore…").clicked() {
+                if ui.button(self.strings.dg_backup_restore()).clicked() {
                     self.config_backup_dialog_open = true;
                     self.restore_preview = None;
                     self.restore_confirmed = false;
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                ui.strong("Input and output");
+                ui.strong(self.strings.dg_input_and_output());
                 ui.colored_label(
                     if matching && output_ok {
                         palette.success
@@ -1151,17 +1157,17 @@ impl GuiApp {
                         palette.warning
                     },
                     if matching && output_ok {
-                        "Available"
+                        self.strings.dg_available()
                     } else {
-                        "Degraded / unavailable"
+                        self.strings.dg_degraded_unavailable()
                     },
                 );
-                if ui.button("Test").clicked() {
+                if ui.button(self.strings.dg_test()).clicked() {
                     self.backend_test_help_open = true;
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                ui.strong("User service");
+                ui.strong(self.strings.dg_user_service());
                 ui.colored_label(
                     if self.daemon_reachable == Some(true) {
                         palette.success
@@ -1169,14 +1175,17 @@ impl GuiApp {
                         palette.warning
                     },
                     if self.daemon_reachable == Some(true) {
-                        "Daemon responding"
+                        self.strings.dg_daemon_responding()
                     } else {
-                        "Not responding"
+                        self.strings.dg_not_responding()
                     },
                 );
                 if let Some(unit) = active_service {
                     if ui
-                        .add_enabled(self.setup_task.is_none(), egui::Button::new("Restart…"))
+                        .add_enabled(
+                            self.setup_task.is_none(),
+                            egui::Button::new(self.strings.dg_restart()),
+                        )
                         .clicked()
                     {
                         self.service_restart_unit = Some(unit.to_owned());
@@ -1185,18 +1194,25 @@ impl GuiApp {
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                ui.strong("Software versions");
+                ui.strong(self.strings.dg_software_versions());
+                let versions_match = self.daemon_reachable == Some(true)
+                    && runtime::daemon_build_state(&self.daemon_status)
+                        == runtime::DaemonBuildState::Current;
                 let version_state = if self.daemon_reachable != Some(true) {
-                    "Daemon unavailable"
+                    self.strings.dg_daemon_unavailable()
                 } else {
                     match runtime::daemon_build_state(&self.daemon_status) {
-                        runtime::DaemonBuildState::Current => "CLI and daemon match",
-                        runtime::DaemonBuildState::RestartRequired => "Daemon restart required",
-                        runtime::DaemonBuildState::Unverified => "Version not verified",
+                        runtime::DaemonBuildState::Current => self.strings.dg_versions_match(),
+                        runtime::DaemonBuildState::RestartRequired => {
+                            self.strings.dg_daemon_restart_required()
+                        }
+                        runtime::DaemonBuildState::Unverified => {
+                            self.strings.dg_version_not_verified()
+                        }
                     }
                 };
                 ui.colored_label(
-                    if version_state == "CLI and daemon match" {
+                    if versions_match {
                         palette.success
                     } else {
                         palette.warning
@@ -1204,25 +1220,28 @@ impl GuiApp {
                     version_state,
                 );
                 if ui
-                    .add_enabled(!self.diagnostics_running, egui::Button::new("Check again"))
+                    .add_enabled(
+                        !self.diagnostics_running,
+                        egui::Button::new(self.strings.dg_check_again()),
+                    )
                     .clicked()
                 {
                     self.refresh_diagnostics(true);
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                ui.strong("Test Expansion");
+                ui.strong(self.strings.dg_test_expansion());
                 ui.colored_label(
                     palette.accent,
-                    "Choose a local matcher check or a real desktop check",
+                    self.strings.dg_choose_a_local_matcher_check_or(),
                 );
-                if ui.button("Test Expansion…").clicked() {
+                if ui.button(self.strings.dg_test_expansion_2()).clicked() {
                     self.test_expansion_dialog_open = true;
                 }
             });
             if let Some(route) = self.recommended_route {
                 ui.separator();
-                ui.label(RichText::new("Capability-based recommendation").strong());
+                ui.label(RichText::new(self.strings.dg_capability_based_recommendation()).strong());
                 ui.label(format!(
                     "{} — {}. Based on live capability probes and organization policy; desktop name alone is not treated as proof.",
                     route.contract().label,
@@ -1232,7 +1251,7 @@ impl GuiApp {
                 ui.separator();
                 ui.colored_label(
                     palette.warning,
-                    "No policy-allowed route is currently recommended by the capability probes.",
+                    self.strings.dg_no_policy_allowed_route_is_currently(),
                 );
             }
             let profile_id = self
@@ -1250,30 +1269,36 @@ impl GuiApp {
             {
                 ui.separator();
                 ui.label(
-                    RichText::new(format!("Integration profile · {}", profile.desktop)).strong(),
+                    RichText::new(crate::lang::fill(
+                        self.strings.dg_integration_profile(),
+                        &[&profile.desktop],
+                    ))
+                    .strong(),
                 );
-                ui.label(format!(
-                    "Recommended capture route: {} · injection: {}",
-                    profile.recommended_route_id,
-                    profile.supported_injection_backends.join(", "),
+                ui.label(crate::lang::fill(
+                    self.strings.dg_recommended_capture_route_injection(),
+                    &[
+                        &profile.recommended_route_id,
+                        &profile.supported_injection_backends.join(", "),
+                    ],
                 ));
                 ui.label(
-                    RichText::new(format!(
-                        "Certification: {}",
-                        profile.last_certification_result
+                    RichText::new(crate::lang::fill(
+                        self.strings.dg_certification(),
+                        &[&profile.last_certification_result],
                     ))
                     .color(palette.warning),
                 );
-                ui.collapsing("Profile details", |ui| {
-                    ui.label(RichText::new("Required permissions").strong());
+                ui.collapsing(self.strings.dg_profile_details(), |ui| {
+                    ui.label(RichText::new(self.strings.dg_required_permissions()).strong());
                     for item in &profile.required_permissions {
                         ui.label(format!("• {item}"));
                     }
-                    ui.label(RichText::new("Setup").strong());
+                    ui.label(RichText::new(self.strings.dg_setup()).strong());
                     for item in &profile.setup_instructions {
                         ui.label(format!("• {item}"));
                     }
-                    ui.label(RichText::new("Known limitations").strong());
+                    ui.label(RichText::new(self.strings.dg_known_limitations()).strong());
                     for item in &profile.known_limitations {
                         ui.label(format!("• {item}"));
                     }
@@ -1282,7 +1307,11 @@ impl GuiApp {
                     } else {
                         profile.verified_applications.join(", ")
                     };
-                    ui.label(format!("Verified applications: {verified_applications}"));
+                    ui.label(crate::lang::fill(
+                        self.strings
+                            .dg_verified_applications_verified_applications(),
+                        &[&verified_applications],
+                    ));
                 });
             }
         });
@@ -1294,7 +1323,7 @@ impl GuiApp {
         }
         let mut open = self.backend_test_help_open;
         let mut close_clicked = false;
-        egui::Window::new("Desktop backend test")
+        egui::Window::new(self.strings.dg_desktop_backend_test())
             .id(egui::Id::new("diagnostics_backend_test_help"))
             .order(egui::Order::Foreground)
             .open(&mut open)
@@ -1302,22 +1331,38 @@ impl GuiApp {
             .resizable(false)
             .default_width(500.0)
             .show(ctx, |ui| {
-                ui.label(RichText::new("Matcher Test").strong());
-                ui.label("Use the editor’s Test matcher action to check a trigger against the loaded configuration. This does not exercise desktop capture or insertion.");
-                ui.label(RichText::new("Desktop Test").strong());
-                ui.label(RichText::new("These one-shot checks test evdev capture and libei injection separately. Capture requires explicit consent and never records key values, though your typing still reaches the focused field. Injection inserts only a harmless marker after confirmation; no deletion or Enter key is sent. Neither test certifies the combined route or a specific application.").color(palette.warning));
+                ui.label(RichText::new(self.strings.dg_matcher_test()).strong());
+                ui.label(self.strings.dg_use_the_editor_s_test_matcher());
+                ui.label(RichText::new(self.strings.dg_desktop_test()).strong());
+                ui.label(
+                    RichText::new(self.strings.dg_these_one_shot_checks_test_evdev())
+                        .color(palette.warning),
+                );
                 ui.horizontal_wrapped(|ui| {
-                    for command in ["wayexpand backend test --capture", "wayexpand backend test --injection"] {
-                        if ui.button(format!("Copy: {command}")).clicked() {
+                    for command in [
+                        "wayexpand backend test --capture",
+                        "wayexpand backend test --injection",
+                    ] {
+                        if ui
+                            .button(crate::lang::fill(
+                                self.strings.dg_copy_command(),
+                                &[&command],
+                            ))
+                            .clicked()
+                        {
                             ui.ctx().copy_text(command.to_owned());
                         }
                     }
                 });
-                if ui.button("Copy portal help: WX-PORTAL-001").clicked() {
-                    ui.ctx().copy_text("wayexpand help finding WX-PORTAL-001".into());
+                if ui
+                    .button(self.strings.dg_copy_portal_help_wx_portal_001())
+                    .clicked()
+                {
+                    ui.ctx()
+                        .copy_text("wayexpand help finding WX-PORTAL-001".into());
                 }
-                ui.label("Run the copied command in a terminal to complete its consent and target-focus prompts. For the active route, use the harmless tutorial trigger in a normal application and inspect the exact result.");
-                if ui.button("Close").clicked() {
+                ui.label(self.strings.dg_run_the_copied_command_in_a());
+                if ui.button(self.strings.dg_close()).clicked() {
                     close_clicked = true;
                 }
             });
@@ -1372,7 +1417,7 @@ impl GuiApp {
                 .desktop_test_application_class
                 .chars()
                 .any(char::is_control);
-        egui::Window::new("Test Expansion")
+        egui::Window::new(self.strings.dg_test_expansion())
             .id(egui::Id::new("test_expansion_mode_picker"))
             .order(egui::Order::Foreground)
             .open(&mut open)
@@ -1380,25 +1425,28 @@ impl GuiApp {
             .resizable(false)
             .default_width(520.0)
             .show(ctx, |ui| {
-                ui.label(RichText::new(if first_run_verification {
-                    "Complete this real-app test to finish first-run setup. Until you confirm the exact result, WayExpand remains configured but unverified. You can defer and return to the guide later."
-                } else {
-                    "A real insertion test verifies text in a target application. It never presses Enter or retries an uncertain insertion."
-                }).color(palette.muted));
-                ui.label(RichText::new("Matcher Test").strong());
-                ui.label("Checks the loaded snippets and template rendering locally. It does not read keyboard input or modify another application.");
-                if ui.button("Open Matcher Test").clicked() {
+                ui.label(
+                    RichText::new(if first_run_verification {
+                        self.strings.dg_complete_this_real_app_test_to()
+                    } else {
+                        self.strings.dg_real_insertion_test_explainer()
+                    })
+                    .color(palette.muted),
+                );
+                ui.label(RichText::new(self.strings.dg_matcher_test()).strong());
+                ui.label(self.strings.dg_checks_the_loaded_snippets_and_template());
+                if ui.button(self.strings.dg_open_matcher_test()).clicked() {
                     self.diagnostics_close_requested = true;
                     self.try_live_open = true;
                     close = true;
                 }
                 ui.separator();
-                ui.label(RichText::new("Desktop Test").strong());
-                ui.label("Tests the active route in a disposable text field. It never presses Enter or retries insertion. Activity counters are not tied to this test trigger; inspect the resulting text and confirm an exact match yourself. This verifies only the selected application in this session.");
+                ui.label(RichText::new(self.strings.dg_desktop_test()).strong());
+                ui.label(self.strings.dg_tests_the_active_route_in_a());
                 if desktop_tests.len() > 1 {
                     egui::ComboBox::from_id_salt("desktop_test_trigger_choice")
                         .selected_text(if self.desktop_test_trigger.is_empty() {
-                            "Choose a saved static snippet"
+                            self.strings.dg_choose_a_saved_static_snippet()
                         } else {
                             &self.desktop_test_trigger
                         })
@@ -1414,11 +1462,14 @@ impl GuiApp {
                 }
                 if let Some((trigger, replacement)) = &desktop_test {
                     ui.label(
-                        RichText::new(format!("Type this once: {trigger}"))
-                            .heading()
-                            .strong(),
+                        RichText::new(crate::lang::fill(
+                            self.strings.dg_type_this_once_trigger(),
+                            &[&trigger],
+                        ))
+                        .heading()
+                        .strong(),
                     );
-                    ui.label(RichText::new("Expected replacement").strong());
+                    ui.label(RichText::new(self.strings.dg_expected_replacement()).strong());
                     ui.add(
                         egui::TextEdit::multiline(&mut replacement.as_str())
                             .code_editor()
@@ -1428,7 +1479,7 @@ impl GuiApp {
                     );
                 }
                 ui.horizontal(|ui| {
-                    ui.label("Application type (for the test report)");
+                    ui.label(self.strings.dg_application_type_for_the_test_report());
                     egui::ComboBox::from_id_salt("desktop_test_application_type")
                         .selected_text(&self.desktop_test_application_class)
                         .show_ui(ui, |ui| {
@@ -1449,7 +1500,7 @@ impl GuiApp {
                 });
                 ui.checkbox(
                     &mut self.desktop_test_target_acknowledged,
-                    "I am focused on a disposable, non-sensitive text field and will type the trigger once.",
+                    self.strings.dg_i_am_focused_on_a_disposable(),
                 );
                 let can_run_test = desktop_test.is_some()
                     && application_class_valid
@@ -1458,7 +1509,10 @@ impl GuiApp {
                     && !self.new_draft
                     && self.setup_task.is_none();
                 if ui
-                    .add_enabled(can_run_test, egui::Button::new("Start Desktop Test"))
+                    .add_enabled(
+                        can_run_test,
+                        egui::Button::new(self.strings.dg_start_desktop_test()),
+                    )
                     .clicked()
                 {
                     if let Some((trigger, replacement)) = desktop_test.clone() {
@@ -1474,27 +1528,39 @@ impl GuiApp {
                 if self.draft.is_some() || self.new_draft {
                     ui.colored_label(
                         palette.warning,
-                        "Save or discard the current snippet draft before testing; the desktop test runs the saved configuration.",
+                        self.strings.dg_save_or_discard_the_current_snippet(),
                     );
                 }
                 if let Some(command) = &desktop_test_command {
-                    if ui.button("Copy desktop test command").clicked() {
+                    if ui
+                        .button(self.strings.dg_copy_desktop_test_command())
+                        .clicked()
+                    {
                         ui.ctx().copy_text(command.clone());
                     }
                 } else if first_run_verification {
-                    ui.label("A real-app test needs a saved, enabled static snippet. Add the harmless WayExpand test snippet or enable a suitable static snippet; command-backed and templated snippets are excluded.");
-                    if ui.button("Add harmless test snippet").clicked() {
+                    ui.label(self.strings.dg_real_app_test_needs_snippet());
+                    if ui
+                        .button(self.strings.dg_add_harmless_test_snippet())
+                        .clicked()
+                    {
                         self.create_test_snippet();
                     }
                 } else {
-                    ui.label("No enabled static snippet is available for a desktop test. Save or enable a harmless static snippet, then try again. Templated and command-backed snippets are excluded.");
+                    ui.label(self.strings.dg_no_enabled_static_snippet_is_available());
                 }
-                ui.colored_label(palette.warning, "If the matcher succeeds but desktop insertion fails, inspect the Input and Output route assessment and run the guided backend checks.");
-                if ui.button(if first_run_verification {
-                    "Continue later — setup stays unverified"
-                } else {
-                    "Close"
-                }).clicked() {
+                ui.colored_label(
+                    palette.warning,
+                    self.strings.dg_if_the_matcher_succeeds_but_desktop(),
+                );
+                if ui
+                    .button(if first_run_verification {
+                        self.strings.dg_continue_later_setup_stays_unverified()
+                    } else {
+                        self.strings.dg_close()
+                    })
+                    .clicked()
+                {
                     close = true;
                 }
             });
@@ -1517,49 +1583,53 @@ impl GuiApp {
         let mut rejected = false;
         let mut dismissed = false;
         egui::Modal::new(egui::Id::new("desktop_test_result_review")).show(ctx, |ui| {
-                ui.set_width(520.0);
-                ui.colored_label(
-                    palette.warning,
-                    "WayExpand observed input/output activity during the test window, but could not correlate it to this trigger. No insertion was retried.",
-                );
-                ui.label(desktop_test_review_instruction(review));
-                ui.label(format!(
-                    "Capture: {} · Output: {} · Trigger correlation: not verified",
-                    if review.capture_activity_observed {
+            ui.set_width(520.0);
+            ui.colored_label(
+                palette.warning,
+                self.strings
+                    .dg_wayexpand_observed_input_output_activity_during(),
+            );
+            ui.label(desktop_test_review_instruction(&self.strings, review));
+            ui.label(crate::lang::fill(
+                self.strings
+                    .dg_capture_output_trigger_correlation_not_verified(),
+                &[
+                    &if review.capture_activity_observed {
                         "activity observed"
                     } else {
                         "not observed"
                     },
-                    if review.output_activity_observed {
+                    &if review.output_activity_observed {
                         "activity observed"
                     } else {
                         "not observed"
-                    }
-                ));
-                ui.label("Expected replacement:");
-                egui::ScrollArea::vertical()
-                    .max_height(200.0)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::Label::new(RichText::new(&review.replacement).code())
-                                .wrap()
-                                .selectable(true),
-                        );
-                    });
-                ui.label("Did this exact text appear once, with no lost, duplicated, interleaved, or wrong-field text?");
-                ui.horizontal(|ui| {
-                    if ui.button("Yes, exact result").clicked() {
-                        confirmed = true;
-                    }
-                    if ui.button("No or unsure").clicked() {
-                        rejected = true;
-                    }
-                    if ui.button("Leave unverified").clicked() {
-                        dismissed = true;
-                    }
+                    },
+                ],
+            ));
+            ui.label(self.strings.dg_expected_replacement_2());
+            egui::ScrollArea::vertical()
+                .max_height(200.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(RichText::new(&review.replacement).code())
+                            .wrap()
+                            .selectable(true),
+                    );
                 });
+            ui.label(self.strings.dg_did_this_exact_text_appear_once());
+            ui.horizontal(|ui| {
+                if ui.button(self.strings.dg_yes_exact_result()).clicked() {
+                    confirmed = true;
+                }
+                if ui.button(self.strings.dg_no_or_unsure()).clicked() {
+                    rejected = true;
+                }
+                if ui.button(self.strings.dg_leave_unverified()).clicked() {
+                    dismissed = true;
+                }
             });
+        });
         if confirmed {
             self.desktop_test_verified = true;
             self.desktop_test_verified_application = Some(application_class.clone());
@@ -1568,23 +1638,24 @@ impl GuiApp {
                 self.onboarding_visible = true;
                 self.finish_onboarding();
             } else {
-                self.status = Status::success(format!(
-                    "User-confirmed exact insertion in {}. This does not certify other applications or sessions.",
-                    application_class
+                self.status = Status::success(crate::lang::fill(
+                    self.strings.dg_user_confirmed_exact_insertion_in_this(),
+                    &[&application_class],
                 ));
             }
         } else if rejected {
             self.desktop_test_verified = false;
             self.desktop_test_verified_application = None;
             self.status = Status::error(
-                "Desktop insertion was not confirmed. Inspect the target field and Diagnostics; do not retry automatically.",
+                self.strings
+                    .dg_desktop_insertion_was_not_confirmed_inspect(),
             );
             self.desktop_test_review = None;
             self.diagnostics_open = true;
         } else if dismissed {
             self.desktop_test_verified = false;
             self.desktop_test_verified_application = None;
-            self.status = Status::warning("Desktop test result remains unverified.");
+            self.status = Status::warning(self.strings.dg_desktop_test_result_remains_unverified());
             self.desktop_test_review = None;
         }
         if confirmed || rejected || dismissed {
@@ -1598,24 +1669,33 @@ impl GuiApp {
         }
         let mut open = self.service_restart_confirm_open;
         let mut close_clicked = false;
-        egui::Window::new("Restart WayExpand service?")
+        egui::Window::new(self.strings.dg_restart_wayexpand_service())
             .id(egui::Id::new("diagnostics_restart_confirmation"))
             .order(egui::Order::Foreground)
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                let unit = self.service_restart_unit.as_deref().unwrap_or("unknown service");
-                ui.label(format!("Restart {unit} using your user systemd manager?"));
-                ui.colored_label(palette.warning, "The input route may be interrupted briefly. No administrator privileges or keyboard-device permissions will be requested.");
+                let unit = self
+                    .service_restart_unit
+                    .as_deref()
+                    .unwrap_or("unknown service");
+                ui.label(crate::lang::fill(
+                    self.strings.dg_restart_unit_using_your_user_systemd(),
+                    &[&unit],
+                ));
+                ui.colored_label(
+                    palette.warning,
+                    self.strings.dg_the_input_route_may_be_interrupted(),
+                );
                 ui.horizontal(|ui| {
-                    if ui.button("Restart service").clicked() {
+                    if ui.button(self.strings.dg_restart_service()).clicked() {
                         if let Some(unit) = self.service_restart_unit.take() {
                             self.start_service_restart(unit);
                         }
                         close_clicked = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(self.strings.cancel()).clicked() {
                         self.service_restart_unit = None;
                         close_clicked = true;
                     }
@@ -1631,7 +1711,7 @@ impl GuiApp {
         if self.reset_dialog_open {
             let mut open = self.reset_dialog_open;
             let mut close_clicked = false;
-            egui::Window::new("Preview recovery reset")
+            egui::Window::new(self.strings.dg_preview_recovery_reset())
                 .id(egui::Id::new("diagnostics_reset_preview"))
                 .order(egui::Order::Foreground)
                 .open(&mut open)
@@ -1639,24 +1719,50 @@ impl GuiApp {
                 .resizable(false)
                 .default_width(500.0)
                 .show(ctx, |ui| {
-                    ui.label("Choose one reset scope. Your expansion library is never removed.");
-                    ui.radio_value(&mut self.reset_scope, "integration".into(), "Integration: stop services and clear remembered route consent");
-                    ui.radio_value(&mut self.reset_scope, "services".into(), "Services: stop and disable WayExpand user services only");
-                    ui.radio_value(&mut self.reset_scope, "preferences".into(), "Preferences: back up and reset GUI-only preferences");
+                    ui.label(self.strings.dg_choose_one_reset_scope_your_expansion());
+                    ui.radio_value(
+                        &mut self.reset_scope,
+                        "integration".into(),
+                        self.strings
+                            .dg_integration_stop_services_and_clear_remembered(),
+                    );
+                    ui.radio_value(
+                        &mut self.reset_scope,
+                        "services".into(),
+                        self.strings.dg_services_stop_and_disable_wayexpand_user(),
+                    );
+                    ui.radio_value(
+                        &mut self.reset_scope,
+                        "preferences".into(),
+                        self.strings.dg_preferences_back_up_and_reset_gui(),
+                    );
                     ui.separator();
                     match self.reset_scope.as_str() {
                         "integration" => {
-                            ui.label("Preview: disable and stop installed WayExpand services; remove the evdev consent marker and saved portal restoration token. Keep configuration and snippets unchanged.");
-                            ui.colored_label(palette.warning, "The next evdev or libei use may require renewed permission. No administrator permission is requested.");
+                            ui.label(
+                                self.strings
+                                    .dg_preview_disable_and_stop_installed_wayexpand(),
+                            );
+                            ui.colored_label(
+                                palette.warning,
+                                self.strings.dg_the_next_evdev_or_libei_use(),
+                            );
                         }
-                        "services" => { ui.label("Preview: disable and stop installed WayExpand user services. Configuration, snippets, permissions, and portal token remain unchanged."); }
-                        _ => { ui.label("Preview: create a private backup of gui-prefs.toml, then remove that GUI preference file. Your expansion library is unchanged."); }
+                        "services" => {
+                            ui.label(
+                                self.strings
+                                    .dg_preview_disable_and_stop_installed_wayexpand_2(),
+                            );
+                        }
+                        _ => {
+                            ui.label(self.strings.dg_preview_create_a_private_backup_of());
+                        }
                     }
                     ui.horizontal(|ui| {
-                        if ui.button("Review and continue…").clicked() {
+                        if ui.button(self.strings.dg_review_and_continue()).clicked() {
                             self.reset_confirm_open = true;
                         }
-                        if ui.button("Close").clicked() {
+                        if ui.button(self.strings.dg_close()).clicked() {
                             close_clicked = true;
                         }
                     });
@@ -1669,7 +1775,7 @@ impl GuiApp {
         if self.reset_confirm_open {
             let mut open = self.reset_confirm_open;
             let mut close_clicked = false;
-            egui::Window::new("Confirm reset")
+            egui::Window::new(self.strings.dg_confirm_reset())
                 .id(egui::Id::new("diagnostics_reset_confirm"))
                 .order(egui::Order::Foreground)
                 .open(&mut open)
@@ -1678,16 +1784,16 @@ impl GuiApp {
                 .show(ctx, |ui| {
                     ui.colored_label(
                         palette.warning,
-                        format!(
-                            "Apply the {} reset now? This cannot be undone automatically.",
-                            self.reset_scope
+                        crate::lang::fill(
+                            self.strings.dg_apply_the_reset_now_this_cannot(),
+                            &[&self.reset_scope],
                         ),
                     );
                     ui.horizontal(|ui| {
                         if ui
                             .add_enabled(
                                 self.setup_task.is_none(),
-                                egui::Button::new("Apply reset"),
+                                egui::Button::new(self.strings.dg_apply_reset()),
                             )
                             .clicked()
                         {
@@ -1707,13 +1813,16 @@ impl GuiApp {
                                     "--apply".into(),
                                     "--yes".into(),
                                 ],
-                                format!("Applying {} reset…", self.reset_scope),
+                                crate::lang::fill(
+                                    self.strings.dg_applying_reset(),
+                                    &[&self.reset_scope],
+                                ),
                                 completion,
                             );
                             close_clicked = true;
                             self.reset_dialog_open = false;
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(self.strings.cancel()).clicked() {
                             close_clicked = true;
                         }
                     });
@@ -1730,7 +1839,7 @@ impl GuiApp {
             return;
         }
         let mut open = self.config_backup_dialog_open;
-        egui::Window::new("Configuration backup and restore")
+        egui::Window::new(self.strings.dg_configuration_backup_and_restore())
             .id(egui::Id::new("diagnostics_config_backup_restore"))
             .order(egui::Order::Foreground)
             .open(&mut open)
@@ -1738,69 +1847,148 @@ impl GuiApp {
             .resizable(true)
             .default_width(560.0)
             .show(ctx, |ui| {
-                ui.label("Export creates a private, no-overwrite backup. Restore validates the selected file and previews trigger-level differences before replacing the active configuration. The current configuration is backed up before restore.");
+                ui.label(self.strings.dg_export_creates_a_private_no_overwrite());
                 ui.separator();
-                ui.label(RichText::new("Export current configuration").strong());
-                if ui.text_edit_singleline(&mut self.config_backup_path).changed() {
+                ui.label(RichText::new(self.strings.dg_export_current_configuration()).strong());
+                if ui
+                    .text_edit_singleline(&mut self.config_backup_path)
+                    .changed()
+                {
                     self.restore_preview = None;
                     self.last_cli_task_output = None;
                 }
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(self.setup_task.is_none() && !self.config_backup_path.trim().is_empty(), egui::Button::new("Export backup")).clicked() {
+                    if ui
+                        .add_enabled(
+                            self.setup_task.is_none() && !self.config_backup_path.trim().is_empty(),
+                            egui::Button::new(self.strings.dg_export_backup()),
+                        )
+                        .clicked()
+                    {
                         self.start_cli_task(
-                            vec!["backup".into(), self.path.display().to_string(), self.config_backup_path.trim().to_owned()],
-                            "Creating configuration backup…".into(),
-                            "Configuration backup created.".into(),
+                            vec![
+                                "backup".into(),
+                                self.path.display().to_string(),
+                                self.config_backup_path.trim().to_owned(),
+                            ],
+                            self.strings.dg_creating_configuration_backup().into(),
+                            self.strings.dg_configuration_backup_created().into(),
                         );
                     }
                 });
                 ui.separator();
-                ui.label(RichText::new("Review a backup to restore").strong());
-                if ui.text_edit_singleline(&mut self.config_backup_path).changed() {
+                ui.label(RichText::new(self.strings.dg_review_a_backup_to_restore()).strong());
+                if ui
+                    .text_edit_singleline(&mut self.config_backup_path)
+                    .changed()
+                {
                     self.restore_preview = None;
                     self.last_cli_task_output = None;
                 }
-                if ui.add_enabled(self.setup_task.is_none() && !self.config_backup_path.trim().is_empty(), egui::Button::new("Review differences")).clicked() {
+                if ui
+                    .add_enabled(
+                        self.setup_task.is_none() && !self.config_backup_path.trim().is_empty(),
+                        egui::Button::new(self.strings.dg_review_differences()),
+                    )
+                    .clicked()
+                {
                     self.restore_preview = None;
                     self.restore_confirmed = false;
                     self.start_cli_task(
-                        vec!["restore".into(), self.config_backup_path.trim().to_owned(), "--check".into(), "--json".into()],
-                        "Validating restore backup…".into(),
-                        "Restore preview validated.".into(),
+                        vec![
+                            "restore".into(),
+                            self.config_backup_path.trim().to_owned(),
+                            "--check".into(),
+                            "--json".into(),
+                        ],
+                        self.strings.dg_validating_restore_backup().into(),
+                        self.strings.dg_restore_preview_validated().into(),
                     );
                     self.cli_task_kind = Some("restore-check".into());
                 }
                 if let Some(report) = self.restore_preview.as_ref() {
                     if report["valid"] == true && report["changes"].is_object() {
-                        ui.colored_label(palette.success, "Backup is valid. Review the differences:");
+                        ui.colored_label(
+                            palette.success,
+                            self.strings.dg_backup_is_valid_review_the_differences(),
+                        );
                         for (label, key) in [
-                            ("Added", "added_triggers"),
-                            ("Removed", "removed_triggers"),
-                            ("Modified", "modified_triggers"),
+                            (self.strings.dg_added(), "added_triggers"),
+                            (self.strings.dg_removed(), "removed_triggers"),
+                            (self.strings.dg_modified(), "modified_triggers"),
                         ] {
-                            let values = report["changes"][key].as_array().cloned().unwrap_or_default();
-                            ui.label(format!("{label} triggers ({}): {}", values.len(), values.iter().filter_map(serde_json::Value::as_str).collect::<Vec<_>>().join(", ")));
+                            let values = report["changes"][key]
+                                .as_array()
+                                .cloned()
+                                .unwrap_or_default();
+                            ui.label(format!(
+                                "{label} triggers ({}): {}",
+                                values.len(),
+                                values
+                                    .iter()
+                                    .filter_map(serde_json::Value::as_str)
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ));
                         }
-                        ui.label(format!("Settings changed: {}; hotkeys changed: {}", report["changes"]["settings_changed"], report["changes"]["hotkeys_changed"]));
-                        ui.checkbox(&mut self.restore_confirmed, "I reviewed these differences and want to restore this configuration");
-                        if ui.add_enabled(self.setup_task.is_none() && self.restore_confirmed, egui::Button::new("Restore and back up current config")).clicked() {
-                            let current_fingerprint = report["current_fingerprint"].as_str().unwrap_or_default().to_owned();
-                            let backup_fingerprint = report["backup_fingerprint"].as_str().unwrap_or_default().to_owned();
+                        ui.label(crate::lang::fill(
+                            self.strings.dg_settings_changed_hotkeys_changed(),
+                            &[
+                                &report["changes"]["settings_changed"],
+                                &report["changes"]["hotkeys_changed"],
+                            ],
+                        ));
+                        ui.checkbox(
+                            &mut self.restore_confirmed,
+                            self.strings.dg_restore_confirm(),
+                        );
+                        if ui
+                            .add_enabled(
+                                self.setup_task.is_none() && self.restore_confirmed,
+                                egui::Button::new(
+                                    self.strings.dg_restore_and_back_up_current_config(),
+                                ),
+                            )
+                            .clicked()
+                        {
+                            let current_fingerprint = report["current_fingerprint"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_owned();
+                            let backup_fingerprint = report["backup_fingerprint"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_owned();
                             self.start_cli_task(
-                                vec!["restore".into(), self.config_backup_path.trim().to_owned(), "--apply".into(), "--yes".into(), "--json".into(), format!("--expected-current={current_fingerprint}"), format!("--expected-backup={backup_fingerprint}")],
-                                "Restoring configuration…".into(),
-                                "Configuration restored; diagnostics refreshed.".into(),
+                                vec![
+                                    "restore".into(),
+                                    self.config_backup_path.trim().to_owned(),
+                                    "--apply".into(),
+                                    "--yes".into(),
+                                    "--json".into(),
+                                    format!("--expected-current={current_fingerprint}"),
+                                    format!("--expected-backup={backup_fingerprint}"),
+                                ],
+                                self.strings.dg_restoring_configuration().into(),
+                                self.strings
+                                    .dg_configuration_restored_diagnostics_refreshed()
+                                    .into(),
                             );
                             self.cli_task_kind = Some("restore-apply".into());
                         }
                     } else {
-                        ui.colored_label(palette.danger, "Restore validation did not return an applicable backup report.");
+                        ui.colored_label(
+                            palette.danger,
+                            self.strings.dg_restore_validation_did_not_return_an(),
+                        );
                     }
                 }
                 if let Some(output) = self.last_cli_task_output.as_deref() {
                     ui.label(RichText::new(output).small().color(palette.muted));
                 }
-                if self.setup_task.is_some() { ui.spinner(); }
+                if self.setup_task.is_some() {
+                    ui.spinner();
+                }
             });
         self.config_backup_dialog_open = open;
     }
@@ -1810,7 +1998,7 @@ impl GuiApp {
             return;
         }
         let mut open = self.setup_failure_report_open;
-        egui::Window::new("Setup diagnostic report")
+        egui::Window::new(self.strings.dg_setup_diagnostic_report())
             .id(egui::Id::new("setup_failure_diagnostic_report"))
             .order(egui::Order::Foreground)
             .open(&mut open)
@@ -1818,14 +2006,21 @@ impl GuiApp {
             .resizable(true)
             .default_size(egui::vec2(680.0, 520.0))
             .show(ctx, |ui| {
-                ui.label(RichText::new("Sanitized setup output; home-directory paths are shortened. No environment variables or input contents are included.").small().color(palette.muted));
+                ui.label(
+                    RichText::new(
+                        self.strings
+                            .dg_sanitized_setup_output_home_directory_paths(),
+                    )
+                    .small()
+                    .color(palette.muted),
+                );
                 ui.horizontal(|ui| {
-                    if ui.button("Copy report").clicked() {
+                    if ui.button(self.strings.dg_copy_report()).clicked() {
                         if let Some(report) = &self.setup_failure_report {
                             ui.ctx().copy_text(report.clone());
                         }
                     }
-                    if ui.button("Open Diagnostics").clicked() {
+                    if ui.button(self.strings.dg_open_diagnostics()).clicked() {
                         self.diagnostics_open = true;
                     }
                 });
@@ -1846,7 +2041,7 @@ impl GuiApp {
             return;
         }
         let mut open = self.support_export_open;
-        egui::Window::new("Export Support Report")
+        egui::Window::new(self.strings.dg_export_support_report())
             .id(egui::Id::new("support_report_export"))
             .order(egui::Order::Foreground)
             .open(&mut open)
@@ -1854,23 +2049,26 @@ impl GuiApp {
             .resizable(true)
             .default_size(egui::vec2(640.0, 520.0))
             .show(ctx, |ui| {
-                ui.label(RichText::new("This report includes").strong());
+                ui.label(RichText::new(self.strings.dg_this_report_includes()).strong());
                 for item in [
-                    "WayExpand version and desktop session",
-                    "Backend and route availability",
-                    "Service states, exit codes, restart counts, and stable error IDs",
-                    "Bounded sanitized event counters and certification summary",
+                    self.strings.dg_wayexpand_version_and_desktop_session(),
+                    self.strings.dg_backend_and_route_availability(),
+                    self.strings.dg_service_states_exit_codes_restart_counts(),
+                    self.strings
+                        .dg_bounded_sanitized_event_counters_and_certification(),
                 ] {
                     ui.label(format!("✓ {item}"));
                 }
                 ui.add_space(6.0);
-                ui.label(RichText::new("This report excludes").strong());
+                ui.label(RichText::new(self.strings.dg_this_report_excludes()).strong());
                 for item in [
-                    "Typed text and keystrokes",
-                    "Snippet and replacement contents",
-                    "Clipboard contents",
-                    "Authentication tokens and raw journal messages",
-                    "Configuration paths and free-form diagnostic details",
+                    self.strings.dg_typed_text_and_keystrokes(),
+                    self.strings.dg_snippet_and_replacement_contents(),
+                    self.strings.dg_clipboard_contents(),
+                    self.strings
+                        .dg_authentication_tokens_and_raw_journal_messages(),
+                    self.strings
+                        .dg_configuration_paths_and_free_form_diagnostic(),
                 ] {
                     ui.label(format!("✓ {item}"));
                 }
@@ -1878,7 +2076,7 @@ impl GuiApp {
                     if ui
                         .add_enabled(
                             !self.support_preview_loading,
-                            egui::Button::new("Preview Report"),
+                            egui::Button::new(self.strings.dg_preview_report()),
                         )
                         .clicked()
                     {
@@ -1887,37 +2085,46 @@ impl GuiApp {
                         if let Some(sender) = self.diagnostics_sender.as_ref() {
                             if sender.try_send(runtime::Request::SupportPreview).is_err() {
                                 self.support_preview_loading = false;
-                                self.support_preview_error =
-                                    Some("The background diagnostics queue is busy.".into());
+                                self.support_preview_error = Some(
+                                    self.strings
+                                        .dg_the_background_diagnostics_queue_is_busy()
+                                        .into(),
+                                );
                             }
                         } else {
                             self.support_preview_loading = false;
-                            self.support_preview_error =
-                                Some("Background diagnostics are unavailable.".into());
+                            self.support_preview_error = Some(
+                                self.strings
+                                    .dg_background_diagnostics_are_unavailable()
+                                    .into(),
+                            );
                         }
                     }
                     if self.support_preview_loading {
                         ui.spinner();
-                        ui.label("Collecting sanitized report…");
+                        ui.label(self.strings.dg_collecting_sanitized_report());
                     }
                     if ui
                         .add_enabled(
                             self.support_preview.is_some(),
-                            egui::Button::new("Save Report"),
+                            egui::Button::new(self.strings.dg_save_report()),
                         )
                         .clicked()
                     {
                         match self.save_support_report() {
                             Ok(()) => {
-                                self.support_preview_error =
-                                    Some("Report saved with owner-only permissions.".into())
+                                self.support_preview_error = Some(
+                                    self.strings
+                                        .dg_report_saved_with_owner_only_permissions()
+                                        .into(),
+                                )
                             }
                             Err(error) => self.support_preview_error = Some(error),
                         }
                     }
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Save as");
+                    ui.label(self.strings.dg_save_as());
                     ui.text_edit_singleline(&mut self.support_output_path);
                 });
                 if let Some(error) = &self.support_preview_error {
@@ -1937,7 +2144,7 @@ impl GuiApp {
                             );
                         });
                 }
-                if ui.button("Desktop test…").clicked() {
+                if ui.button(self.strings.dg_desktop_test_2()).clicked() {
                     self.backend_test_help_open = true;
                 }
             });
@@ -1948,25 +2155,33 @@ impl GuiApp {
         use std::{io::Write, os::unix::fs::OpenOptionsExt};
         let path = std::path::PathBuf::from(self.support_output_path.trim());
         if path.as_os_str().is_empty() {
-            return Err("Choose a report path first.".into());
+            return Err(self.strings.dg_choose_a_report_path_first().into());
         }
         let report = self
             .support_preview
             .as_deref()
-            .ok_or("Preview the report before saving.")?;
+            .ok_or(self.strings.dg_preview_the_report_before_saving())?;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(&path)
-            .map_err(|error| format!("Could not create report file: {error}"))?;
+            .map_err(|error| {
+                crate::lang::fill(
+                    self.strings.dg_could_not_create_report_file_error(),
+                    &[&error],
+                )
+            })?;
         if let Err(error) = file
             .write_all(report.as_bytes())
             .and_then(|()| file.sync_all())
         {
             drop(file);
             let _ = std::fs::remove_file(&path);
-            return Err(format!("Could not write report: {error}"));
+            return Err(crate::lang::fill(
+                self.strings.dg_could_not_write_report_error(),
+                &[&error],
+            ));
         }
         Ok(())
     }
@@ -2037,29 +2252,31 @@ impl GuiApp {
                     |app| format!("user-confirmed in {app} this session"),
                 )
         } else if readiness.output_emitted_unverified {
-            "Output emitted; application result unknown".to_owned()
+            self.strings
+                .dg_output_emitted_application_result_unknown()
+                .to_owned()
         } else {
-            "Not verified in an application".to_owned()
+            self.strings.dg_not_verified_in_an_application().to_owned()
         };
         ui.group(|ui| {
             ui.label(RichText::new(self.strings.input_method_progress_title()).strong());
             ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
                     if readiness.configuration == wayexpand_backend_ibus::chain::IbusCheckState::Pass { palette.success } else { palette.warning },
-                    format!("Configured: {}", readiness.configuration.label()),
+                    crate::lang::fill(self.strings.dg_configured(), &[&readiness.configuration.label()]),
                 );
                 ui.colored_label(
                     if running { palette.success } else if readiness.ibus_running && readiness.engine_running { palette.warning } else { palette.muted },
-                    format!("Running: {running_text}"),
+                    crate::lang::fill(self.strings.dg_running_running_text(), &[&running_text]),
                 );
                 ui.colored_label(
                     if self.desktop_test_verified { palette.success } else { palette.muted },
-                    format!("Verified: {verified_text}"),
+                    crate::lang::fill(self.strings.dg_verified_verified_text(), &[&verified_text]),
                 );
             });
             if !self.desktop_test_verified {
-                ui.label(RichText::new("Only a user-confirmed exact result in a real application is marked verified.").small().color(palette.muted));
-                if ui.small_button("Run Desktop Integration Test…").clicked() {
+                ui.label(RichText::new(self.strings.dg_only_a_user_confirmed_exact_result()).small().color(palette.muted));
+                if ui.small_button(self.strings.dg_run_desktop_integration_test()).clicked() {
                     self.test_expansion_dialog_open = true;
                 }
             }
@@ -2099,19 +2316,28 @@ impl GuiApp {
             });
             if !source_active {
                 ui.group(|ui| {
-                    ui.label(RichText::new("Finish GNOME input-source selection").strong());
+                    ui.label(
+                        RichText::new(self.strings.dg_finish_gnome_input_source_selection())
+                            .strong(),
+                    );
                     if source_registered {
-                        ui.label("WayExpand is registered, but GNOME is using another input source. Open the keyboard/layout selector in the GNOME top bar and choose WayExpand. Your existing keyboard layouts remain available.");
-                        if ui.button("Try selecting WayExpand").clicked() {
+                        ui.label(self.strings.dg_wayexpand_is_registered_but_gnome_is());
+                        if ui
+                            .button(self.strings.dg_try_selecting_wayexpand())
+                            .clicked()
+                        {
                             self.retry_gnome_source_activation();
                         }
                     } else {
-                        ui.label("WayExpand is not yet registered as a GNOME input source. Continue the guided setup to register it and activate it; any required administrator prompt is explained before it appears.");
-                        if ui.button("Continue guided setup").clicked() {
+                        ui.label(self.strings.dg_wayexpand_is_not_yet_registered_as());
+                        if ui.button(self.strings.first_run_continue_setup()).clicked() {
                             self.start_guided_setup();
                         }
                     }
-                    if ui.small_button("Recheck input-source status").clicked() {
+                    if ui
+                        .small_button(self.strings.dg_recheck_input_source_status())
+                        .clicked()
+                    {
                         self.refresh_diagnostics(true);
                     }
                 });
@@ -2163,9 +2389,12 @@ impl GuiApp {
                     ui.label(RichText::new(&check.detail).small().color(palette.muted));
                     if let Some(problem_id) = check.problem_id {
                         ui.label(
-                            RichText::new(format!("Problem: {problem_id}"))
-                                .small()
-                                .color(color),
+                            RichText::new(crate::lang::fill(
+                                self.strings.dg_problem_problem_id(),
+                                &[&problem_id],
+                            ))
+                            .small()
+                            .color(color),
                         );
                     }
                     if check.state != IbusCheckState::Pass {
@@ -2230,12 +2459,12 @@ impl GuiApp {
                 );
                 if verdict == wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText {
                     ui.label(
-                        RichText::new(no_surrounding_text_guidance())
+                        RichText::new(no_surrounding_text_guidance(&self.strings))
                             .small()
                             .color(palette.warning),
                     );
                     if ui
-                        .small_button("Open Quick Picker (copy and paste)")
+                        .small_button(self.strings.open_quick_picker_copy())
                         .clicked()
                     {
                         self.open_copy_only_picker();
@@ -2697,14 +2926,19 @@ app_filter = ["app_id_exact:org.example.Editor"]
             capture_activity_observed: true,
             output_activity_observed: true,
         };
-        let instruction = desktop_test_review_instruction(&review);
+        let instruction = desktop_test_review_instruction(
+            &crate::lang::Strings::new(crate::lang::Language::English),
+            &review,
+        );
         assert!(instruction.contains("inspect the field where you attempted to type"));
         assert!(instruction.contains("Do not type the trigger again"));
     }
 
     #[test]
     fn stale_field_limitation_is_not_presented_as_current_focus_diagnosis() {
-        let guidance = no_surrounding_text_guidance();
+        let guidance = no_surrounding_text_guidance(&crate::lang::Strings::new(
+            crate::lang::Language::English,
+        ));
         assert!(guidance.contains("A recent input was refused"));
         assert!(guidance.contains("may not describe the currently focused"));
         assert!(!guidance.contains("this field does not provide"));

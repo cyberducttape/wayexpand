@@ -10,6 +10,7 @@
 #
 #   WAYEXPAND_GUI_SCREENSHOT_VIEW  screen to open first (see screenshot.rs)
 #   WAYEXPAND_GUI_SCREENSHOT_PACK  color pack code, for example retro_80s_neon
+#   WAYEXPAND_GUI_SCREENSHOT_LANGUAGE  interface language: en, de or id
 #   WAYEXPAND_GUI_SCREENSHOT_PICKER=1  capture the quick-insert picker
 #                                  (wayexpand-gui --picker) instead
 #   WAYEXPAND_GUI_SCREENSHOT_DAEMON=1  also run a sandboxed daemon that reads
@@ -63,8 +64,9 @@ config_home="$work/home/.config"
 mkdir -m 700 "$work/home" "$config_home" "$config_home/wayexpand"
 cp -- "$config" "$config_home/wayexpand/expansions.toml"
 chmod 600 "$config_home/wayexpand/expansions.toml"
-if [ -n "${WAYEXPAND_GUI_SCREENSHOT_PACK:-}" ]; then
-    printf 'language = "en"\ncolorpack = "%s"\n' "$WAYEXPAND_GUI_SCREENSHOT_PACK" \
+if [ -n "${WAYEXPAND_GUI_SCREENSHOT_PACK:-}${WAYEXPAND_GUI_SCREENSHOT_LANGUAGE:-}" ]; then
+    printf 'language = "%s"\ncolorpack = "%s"\n' \
+        "${WAYEXPAND_GUI_SCREENSHOT_LANGUAGE:-en}" "${WAYEXPAND_GUI_SCREENSHOT_PACK:-default}" \
         >"$config_home/wayexpand/gui-prefs.toml"
     chmod 600 "$config_home/wayexpand/gui-prefs.toml"
 fi
