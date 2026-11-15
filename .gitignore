@@ -1,3 +1,7 @@
 /target/
 /vendor/
 
+
+# Python bytecode from running the scripts/ checks
+__pycache__/
+*.pyc
