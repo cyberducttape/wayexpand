@@ -557,6 +557,29 @@ impl GuiApp {
             ));
         }
         details.push(self.strings.header_status_details_hint().to_owned());
+        // What was last confirmed, or why it no longer applies.
+        if let Some(record) = self
+            .setup_record
+            .as_ref()
+            .filter(|record| record.outcome == crate::setup_record::SetupOutcome::Verified)
+        {
+            let route = self.current_route_label();
+            let desktop = crate::setup_record::current_desktop();
+            if let Some(change) = record.staleness(route.as_deref(), &desktop) {
+                details.insert(
+                    0,
+                    self.strings
+                        .setup_changed_since_test(&self.strings.setup_change(&change)),
+                );
+            } else if let (Some(application), Some(at)) =
+                (record.application.as_deref(), record.verified_at_unix)
+            {
+                details.push(
+                    self.strings
+                        .last_confirmed(application, &crate::setup_record::date(at)),
+                );
+            }
+        }
         // Lead with what to do, the same answer the banner under the header
         // gives, before the facts behind it.
         if let Some((problem, action)) = self.current_next_step() {
@@ -632,48 +655,113 @@ impl GuiApp {
         }
     }
 
-    /// The header chip's state and color, from the service and route state.
+    /// The header chip's state and color. It follows the same readiness
+    /// model as the banner and the first-run guide: a live process alone is
+    /// never success. A problem `next_step` names wins; with none, the chip
+    /// is green only once an expansion is known to have reached an app (a
+    /// confirmed desktop test, or output the daemon's backend acknowledged),
+    /// and otherwise reads Running in a neutral color.
     pub(crate) fn header_state(
         &self,
         ibus_only: bool,
         control_only: bool,
         palette: &Palette,
     ) -> (HeaderState, Color32) {
+        use super::Problem as P;
         use HeaderState as S;
-        if ibus_only {
-            return (S::Active, palette.success);
+        if let Some((problem, _)) = self.current_next_step() {
+            return match problem {
+                P::ServiceOff if self.config.expansion.is_empty() => (S::NotSetUp, palette.muted),
+                P::ServiceOff => (S::Off, palette.danger),
+                P::Paused => (S::Paused, palette.warning),
+                P::PermissionNeeded | P::PermissionRevoked => (S::NeedsPermission, palette.warning),
+                P::Connecting if self.route_state == Some(runtime::RouteState::Reconnecting) => {
+                    (S::Reconnecting, palette.warning)
+                }
+                P::Connecting => (S::Starting, palette.warning),
+                P::RouteFailed if self.route_state == Some(runtime::RouteState::Stopped) => {
+                    (S::Stopped, palette.muted)
+                }
+                P::RouteFailed => (S::Disconnected, palette.danger),
+                P::Unsupported => (S::CopyOnly, palette.muted),
+                P::FieldCannotReplace => (S::Limited, palette.warning),
+                P::RestartNeeded
+                | P::BuildUnknown
+                | P::InputSourceNotSetUp
+                | P::InputSourceNotSelected
+                | P::ReplacementNotAllowed => (S::NeedsSetup, palette.warning),
+            };
         }
-        match self.daemon_reachable {
-            None => return (S::Checking, palette.muted),
-            Some(false) if self.config.expansion.is_empty() => return (S::NotSetUp, palette.muted),
-            Some(false) => return (S::Off, palette.danger),
-            Some(true) if control_only => return (S::Running, palette.success),
-            Some(true) => {}
-        }
-        match self.route_state {
-            Some(runtime::RouteState::Connected) if self.paused => (S::Paused, palette.warning),
-            Some(runtime::RouteState::Connected) => {
+        let ibus_route = ibus_only || control_only && self.ibus_active;
+        if !ibus_route {
+            match self.daemon_reachable {
+                None => return (S::Checking, palette.muted),
+                Some(false) => return (S::Off, palette.danger),
+                Some(true) => {}
+            }
+            if !control_only {
+                match self.route_state {
+                    None => return (S::Checking, palette.muted),
+                    Some(runtime::RouteState::Degraded) => return (S::Limited, palette.warning),
+                    _ => {}
+                }
                 let full_protection = self
                     .daemon_capabilities
                     .as_ref()
                     .is_some_and(|capabilities| capabilities.provides_full_protection());
-                if full_protection {
-                    (S::Active, palette.success)
-                } else {
-                    (S::Limited, palette.warning)
+                if !full_protection {
+                    return (S::Limited, palette.warning);
                 }
             }
-            Some(runtime::RouteState::Degraded) => (S::Limited, palette.warning),
-            Some(runtime::RouteState::Reconnecting) => (S::Reconnecting, palette.warning),
-            Some(runtime::RouteState::Starting) => (S::Starting, palette.warning),
-            Some(runtime::RouteState::PermissionRequired | runtime::RouteState::PortalRevoked) => {
-                (S::PermissionNeeded, palette.warning)
-            }
-            Some(runtime::RouteState::Unsupported) => (S::Unsupported, palette.muted),
-            Some(runtime::RouteState::Failed) => (S::Error, palette.danger),
-            Some(runtime::RouteState::Stopped) => (S::Stopped, palette.muted),
-            None => (S::Checking, palette.muted),
         }
+        if self.expansion_observed() {
+            (S::Working, palette.success)
+        } else {
+            (S::NeedsVerification, palette.accent)
+        }
+    }
+
+    /// The typing route as a setup record names it: "ibus" for the IBus
+    /// route, "<source> → <backend>" for a connected daemon, `None` while
+    /// unknown.
+    pub(crate) fn current_route_label(&self) -> Option<String> {
+        let situation = self.situation();
+        if situation.gnome_ibus
+            || self.ibus_active && (self.daemon_reachable != Some(true) || situation.control_only)
+        {
+            return Some("ibus".into());
+        }
+        if self.daemon_reachable != Some(true)
+            || self.route_state != Some(runtime::RouteState::Connected)
+        {
+            return None;
+        }
+        let source = runtime::status_field(&self.daemon_status, "source")?;
+        let backend = runtime::status_field(&self.daemon_status, "backend")?;
+        Some(format!("{source} → {backend}"))
+    }
+
+    /// Whether an expansion is known to have reached an application: the
+    /// user confirmed a desktop test this session, or the daemon's output
+    /// backend acknowledged delivered text. The IBus engine cannot tell (its
+    /// clients do not acknowledge inserted text), so only a confirmed test
+    /// counts there.
+    pub(crate) fn expansion_observed(&self) -> bool {
+        let saved = self.setup_record.as_ref().is_some_and(|record| {
+            record.covers(
+                self.current_route_label().as_deref(),
+                &crate::setup_record::current_desktop(),
+            )
+        });
+        self.desktop_test_verified
+            || saved
+            || self.daemon_reachable == Some(true)
+                && runtime::status_field(
+                    &self.daemon_status,
+                    "expansion_output_acknowledgements_total",
+                )
+                .and_then(|value| value.parse::<u64>().ok())
+                .is_some_and(|count| count > 0)
     }
 
     pub(crate) fn active_route_contract(

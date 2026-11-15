@@ -138,6 +138,18 @@ impl GuiApp {
     /// Dismiss the guide for good at the user's explicit request. Unlike
     /// finishing it, this records no real-application verification.
     pub(crate) fn skip_onboarding(&mut self) {
+        // Skipping records that nothing was verified, without erasing an
+        // earlier confirmed test.
+        let verified = self
+            .setup_record
+            .as_ref()
+            .is_some_and(|record| record.outcome == crate::setup_record::SetupOutcome::Verified);
+        if !verified {
+            let record = crate::setup_record::SetupRecord::skipped();
+            if crate::setup_record::save(&record).is_ok() {
+                self.setup_record = Some(record);
+            }
+        }
         self.persist_onboarding(self.strings.onboarding_skipped_note());
     }
 

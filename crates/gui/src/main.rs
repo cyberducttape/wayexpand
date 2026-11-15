@@ -16,6 +16,7 @@ mod recovery;
 mod runtime;
 mod screenshot;
 mod settings;
+mod setup_record;
 mod status;
 mod theme;
 
@@ -210,6 +211,8 @@ struct GuiApp {
     library_revision: u64,
     /// The Quick Picker's global shortcut, from the last diagnostics run.
     picker_shortcut: Option<runtime::PickerShortcut>,
+    /// What first-run setup established, from `gui-setup.toml`.
+    setup_record: Option<setup_record::SetupRecord>,
     /// Why the last attempt to set it failed (a conflict, usually).
     picker_shortcut_error: Option<String>,
     /// Snippet indices the desktop test may use, keyed by library revision
@@ -630,6 +633,7 @@ impl GuiApp {
             search_index,
             library_revision: 0,
             picker_shortcut: None,
+            setup_record: setup_record::load(),
             picker_shortcut_error: None,
             desktop_test_cache: None,
             visible_indices_cache: None,

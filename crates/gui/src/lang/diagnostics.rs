@@ -11,10 +11,10 @@ impl Strings {
     ) -> &'static str {
         use crate::lang::HeaderState as S;
         match (self.lang, state, password_fields_detected) {
-            (Language::English, S::Running, _) => {
-                "The service is running in control-only mode and is not watching your typing."
+            (Language::English, S::NeedsVerification, _) => {
+                "WayExpand is connected, but no expansion has been confirmed in a real application yet. Use Test in a real application."
             }
-            (Language::English, S::Active, _) => {
+            (Language::English, S::Working, _) => {
                 "Expansion is working. Password fields are detected where your desktop reports them."
             }
             (Language::English, S::Limited, false) => {
@@ -30,10 +30,10 @@ impl Strings {
             (Language::English, _, _) => {
                 "Expansion is not working right now. The checks below show what needs attention."
             }
-            (Language::German, S::Running, _) => {
-                "Der Dienst läuft nur zur Steuerung und beobachtet Ihre Eingaben nicht."
+            (Language::German, S::NeedsVerification, _) => {
+                "WayExpand ist verbunden, aber noch keine Ersetzung wurde in einer echten Anwendung bestätigt. Nutzen Sie „In einer echten Anwendung testen“."
             }
-            (Language::German, S::Active, _) => {
+            (Language::German, S::Working, _) => {
                 "Die Erweiterung funktioniert. Passwortfelder werden erkannt, wo der Desktop sie meldet."
             }
             (Language::German, S::Limited, false) => {
@@ -51,10 +51,10 @@ impl Strings {
             (Language::German, _, _) => {
                 "Die Erweiterung funktioniert gerade nicht. Die Prüfungen unten zeigen, was zu tun ist."
             }
-            (Language::Indonesian, S::Running, _) => {
-                "Layanan berjalan dalam mode kendali saja dan tidak memantau ketikan Anda."
+            (Language::Indonesian, S::NeedsVerification, _) => {
+                "WayExpand terhubung, tetapi belum ada ekspansi yang dipastikan di aplikasi nyata. Gunakan Uji di aplikasi nyata."
             }
-            (Language::Indonesian, S::Active, _) => {
+            (Language::Indonesian, S::Working, _) => {
                 "Ekspansi berfungsi. Kolom kata sandi dikenali bila desktop Anda melaporkannya."
             }
             (Language::Indonesian, S::Limited, false) => {
