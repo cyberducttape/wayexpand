@@ -35,6 +35,14 @@ Bind \fBwayexpand-gui --picker\fR to a desktop shortcut to choose a snippet
 interactively instead. Inserts follow the same pause, sensitive-field, and
 application-filter rules as typed triggers; command snippets are not run.
 .TP
+.B shortcut [status] [--json] | set [KEYS] | remove
+Show, set, or remove the global keyboard shortcut that opens the Quick
+Picker (\fBwayexpand-gui --picker\fR). On KDE Plasma it is the \fBpicker\fR
+action of \fBwayexpand.desktop\fR in KDE's global shortcut service; on GNOME
+it is a custom keybinding. \fIKEYS\fR defaults to \fBCtrl+Alt+Space\fR and needs
+Ctrl, Alt, or Super. A combination another action already uses is refused,
+never taken over. On other desktops, the command prints what to bind instead.
+.TP
 .B status [--json]
 Show the active daemon status. The JSON form is stable for automation.
 .TP

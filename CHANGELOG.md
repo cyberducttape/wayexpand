@@ -21,6 +21,47 @@ All notable changes to WayExpand are documented here.
   The diagnostics report stays one click away under *Details*. The header no
   longer has its own *Turn on* button; the banner holds it.
 - The README's editor screenshot shows the Basic editor.
+- New `wayexpand shortcut [status|set [KEYS]|remove]` gives the Quick Picker
+  a global keyboard shortcut on KDE Plasma (through KDE's global shortcut
+  service, as System Settings does) and on GNOME (as a custom keybinding).
+  The default is Ctrl+Alt+Space; Super+Period is Plasma's emoji selector. A
+  combination another action already uses is refused, and its owner named,
+  never taken over. Other desktops get the command to bind by hand.
+- The first-run guide has an optional fourth step, *Open snippets from any
+  app*, that sets this shortcut with one click and shows it afterwards. The
+  Quick Picker is also how to insert in fields where a typed trigger cannot
+  expand.
+- `set-enabled` moved to the full command list (`wayexpand help --all`) to
+  keep `wayexpand help` on one screen.
+- The recovery screen validates backups until it finds the five newest valid
+  ones. Previously it took the five newest files and validated only those, so
+  five damaged recent backups hid an older good one. A broken configuration
+  set aside during recovery is named `<name>.broken-<seconds>-<nanoseconds>`
+  and claimed without overwriting, so two recoveries in the same second no
+  longer fail.
+- After the library file changes on disk and is reloaded, the sidebar's
+  visible-snippet list and the reusable-snippet choices are rebuilt. The
+  reload kept their old revision, so they could show stale rows.
+- The real-application test dialog keeps a cached list of eligible snippets,
+  updated when the library changes, instead of copying every eligible
+  trigger and replacement on each repaint.
+- Quick Picker fixes:
+  - Pressing Escape, Cancel or closing the window while an insert waits for
+    focus now cancels it. Previously the waiting worker kept running, and
+    closing the picker returned focus to the original window, which is
+    exactly when it inserted. If WayExpand has already accepted the insert,
+    the picker says it is too late to cancel and reports the real result.
+  - After you choose a snippet, the picker minimizes itself so focus returns
+    to the window it was opened from. It no longer waits two seconds for you
+    to switch back by hand. If the insert then fails, the picker asks to be
+    shown again.
+  - After a failed insert, *Copy instead* follows the copy-only rules: a
+    snippet limited to specific applications, or one that reads the
+    clipboard, is not offered for manual paste.
+  - With a WayExpand service older than the picker, which cannot confirm
+    delivery, the picker no longer sends an untracked insert and closes as if
+    it had worked. It inserts nothing, explains why, and names
+    `wayexpand service restart --yes`.
 - `wayexpand new` lists templates in the 80-column layout of `wayexpand help`:
   your templates and the built-in ones under separate headings, each as
   `name  description → file`. Previously one long output path set the width

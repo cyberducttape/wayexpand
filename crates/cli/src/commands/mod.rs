@@ -21,6 +21,7 @@ pub(crate) mod profile;
 pub(crate) mod reset;
 pub(crate) mod restore;
 pub(crate) mod service;
+pub(crate) mod shortcut;
 pub(crate) mod system;
 pub(crate) mod workflow;
 

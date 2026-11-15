@@ -2,12 +2,55 @@
 
 use crate::*;
 
-fn desktop_test_options(expansions: &[ExpansionConfig]) -> Vec<(String, String)> {
-    expansions
+/// Indices of the snippets the desktop test can use, with first run's
+/// default first when `first_run`. Indices, not copies: the dialog borrows
+/// trigger and replacement from the library and copies one only to start a
+/// test.
+pub(crate) fn desktop_test_indices(config: &Config, first_run: bool) -> Vec<usize> {
+    let mut indices: Vec<usize> = config
+        .expansion
         .iter()
-        .filter(|expansion| super::first_run::desktop_testable(expansion))
-        .map(|expansion| (expansion.trigger.clone(), expansion.replacement.clone()))
-        .collect()
+        .enumerate()
+        .filter(|(_, expansion)| super::first_run::desktop_testable(expansion))
+        .map(|(index, _)| index)
+        .collect();
+    if first_run {
+        if let Some(default) = super::first_run::onboarding_test_snippet(config) {
+            if let Some(position) = indices
+                .iter()
+                .position(|index| std::ptr::eq(&config.expansion[*index], default))
+            {
+                let index = indices.remove(position);
+                indices.insert(0, index);
+            }
+        }
+    }
+    indices
+}
+
+impl GuiApp {
+    /// [`desktop_test_indices`], rebuilt only when the library changes
+    /// (`library_revision`) or first-run ordering is toggled, instead of on
+    /// every repaint of the dialog.
+    pub(crate) fn cached_desktop_tests(&mut self, first_run: bool) -> Vec<usize> {
+        let key = (self.library_revision, first_run);
+        let stale = self
+            .desktop_test_cache
+            .as_ref()
+            .is_none_or(|(cached, indices)| {
+                *cached != key
+                    || indices
+                        .iter()
+                        .any(|index| *index >= self.config.expansion.len())
+            });
+        if stale {
+            self.desktop_test_cache = Some((key, desktop_test_indices(&self.config, first_run)));
+        }
+        self.desktop_test_cache
+            .as_ref()
+            .map(|(_, indices)| indices.clone())
+            .unwrap_or_default()
+    }
 }
 
 fn desktop_test_review_instruction(strings: &Strings, review: &DesktopTestReview) -> String {
@@ -1382,36 +1425,25 @@ impl GuiApp {
         let first_run_verification = self.desktop_test_dialog_required;
         // First-run offers every testable snippet, with the tutorial snippet
         // first when it exists; it is a default, not a requirement.
-        let mut desktop_tests = desktop_test_options(&self.config.expansion);
-        if first_run_verification {
-            if let Some(default) = super::first_run::onboarding_test_snippet(&self.config) {
-                desktop_tests.retain(|(trigger, _)| trigger != &default.trigger);
-                desktop_tests.insert(0, (default.trigger.clone(), default.replacement.clone()));
-            }
-        }
+        let desktop_tests = self.cached_desktop_tests(first_run_verification);
+        let trigger_at = |index: usize| self.config.expansion[index].trigger.as_str();
         if !desktop_tests
             .iter()
-            .any(|(trigger, _)| trigger == &self.desktop_test_trigger)
+            .any(|index| trigger_at(*index) == self.desktop_test_trigger)
         {
             self.desktop_test_trigger = self
                 .selected_index()
-                .and_then(|index| self.config.expansion.get(index))
-                .filter(|expansion| {
-                    expansion.is_keyboard_matchable()
-                        && expansion.app_filter.is_empty()
-                        && expansion.command.is_none()
-                        && !expansion.replacement.contains("{{")
-                })
-                .map(|expansion| expansion.trigger.clone())
-                .or_else(|| desktop_tests.first().map(|(trigger, _)| trigger.clone()))
+                .filter(|index| desktop_tests.contains(index))
+                .or_else(|| desktop_tests.first().copied())
+                .map(|index| self.config.expansion[index].trigger.clone())
                 .unwrap_or_default();
         }
         let desktop_test = desktop_tests
             .iter()
-            .find(|(trigger, _)| trigger == &self.desktop_test_trigger)
-            .cloned();
-        let desktop_test_command = desktop_test.as_ref().map(|(trigger, _)| {
-            let trigger = trigger.replace('\'', "'\\''");
+            .copied()
+            .find(|index| self.config.expansion[*index].trigger == self.desktop_test_trigger);
+        let desktop_test_command = desktop_test.map(|index| {
+            let trigger = self.config.expansion[index].trigger.replace('\'', "'\\''");
             format!("wayexpand debug --test '{trigger}'")
         });
         let application_class_valid = !self.desktop_test_application_class.trim().is_empty()
@@ -1459,7 +1491,8 @@ impl GuiApp {
                             &self.desktop_test_trigger
                         })
                         .show_ui(ui, |ui| {
-                            for (trigger, _) in &desktop_tests {
+                            for index in &desktop_tests {
+                                let trigger = &self.config.expansion[*index].trigger;
                                 ui.selectable_value(
                                     &mut self.desktop_test_trigger,
                                     trigger.clone(),
@@ -1468,7 +1501,12 @@ impl GuiApp {
                             }
                         });
                 }
-                if let Some((trigger, replacement)) = &desktop_test {
+                if let Some(index) = desktop_test {
+                    let ExpansionConfig {
+                        trigger,
+                        replacement,
+                        ..
+                    } = &self.config.expansion[index];
                     ui.label(
                         RichText::new(crate::lang::fill(
                             self.strings.dg_type_this_once_trigger(),
@@ -1526,7 +1564,10 @@ impl GuiApp {
                     )
                     .clicked()
                 {
-                    if let Some((trigger, replacement)) = desktop_test.clone() {
+                    if let Some(index) = desktop_test {
+                        let expansion = &self.config.expansion[index];
+                        let (trigger, replacement) =
+                            (expansion.trigger.clone(), expansion.replacement.clone());
                         self.start_desktop_test(
                             trigger,
                             replacement,
@@ -2925,10 +2966,10 @@ app_filter = ["app_id_exact:org.example.Editor"]
 "#,
         )
         .unwrap();
-        assert_eq!(
-            desktop_test_options(&config.expansion),
-            vec![(";custom-check".into(), "read-only check".into())]
-        );
+        let indices = desktop_test_indices(&config, false);
+        assert_eq!(indices.len(), 1);
+        assert_eq!(config.expansion[indices[0]].trigger, ";custom-check");
+        assert_eq!(config.expansion[indices[0]].replacement, "read-only check");
     }
 
     #[test]

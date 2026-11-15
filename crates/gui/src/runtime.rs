@@ -96,7 +96,49 @@ pub(crate) struct DiagnosticsSnapshot {
     pub route_state: Option<RouteState>,
     pub paused: Option<bool>,
     pub ibus_route: wayexpand_backend_ibus::chain::IbusChainReport,
+    pub picker_shortcut: Option<PickerShortcut>,
     pub announce: bool,
+}
+
+/// The Quick Picker's global shortcut, as `wayexpand shortcut --json`
+/// reports it. `None` in a snapshot means the CLI could not say.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PickerShortcut {
+    /// Whether WayExpand can set shortcuts on this desktop (KDE, GNOME).
+    pub supported: bool,
+    /// The combination, such as "Ctrl+Alt+Space", when one is set.
+    pub keys: Option<String>,
+}
+
+/// The `wayexpand` CLI installed beside this binary (release archives and
+/// development builds), else whatever `wayexpand` is on PATH.
+pub(crate) fn cli_executable() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("wayexpand")))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("wayexpand"))
+}
+
+fn read_picker_shortcut() -> Option<PickerShortcut> {
+    let output = std::process::Command::new(cli_executable())
+        .args(["shortcut", "--json"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_picker_shortcut(&output.stdout)
+}
+
+pub(crate) fn parse_picker_shortcut(json: &[u8]) -> Option<PickerShortcut> {
+    let report: serde_json::Value = serde_json::from_slice(json).ok()?;
+    Some(PickerShortcut {
+        supported: report["supported"].as_bool()?,
+        keys: report["shortcut"].as_str().map(str::to_owned),
+    })
 }
 
 /// Whether the WayExpand IBus engine is live and serving input contexts,
@@ -838,6 +880,7 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         route_state,
         paused,
         ibus_route,
+        picker_shortcut: read_picker_shortcut(),
         announce,
     }
 }
@@ -894,16 +937,6 @@ pub(crate) fn control_command(
 ) -> anyhow::Result<String> {
     wayexpand_core::DaemonClient::from_environment()?
         .execute(operation)
-        .map_err(Into::into)
-}
-
-pub(crate) fn insert_target(generation: u64, token: &str, trigger: &str) -> anyhow::Result<String> {
-    wayexpand_core::DaemonClient::from_environment()?
-        .execute(wayexpand_core::DaemonOperation::InsertTarget {
-            generation,
-            token: token.to_owned(),
-            trigger: trigger.to_owned(),
-        })
         .map_err(Into::into)
 }
 

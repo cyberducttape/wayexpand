@@ -32,6 +32,7 @@ wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-libei = { path = "../backend-libei" }
 wayexpand-backend-selection = { path = "../backend-selection" }
 wayexpand-backend-gnome-window = { path = "../backend-gnome-window" }
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 
 [build-dependencies]
 wayexpand-build-info = { path = "../build-info" }

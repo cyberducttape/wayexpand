@@ -39,9 +39,17 @@ impl GuiApp {
     /// that replaces `self.config` must call this (or refresh both caches).
     pub(crate) fn rebuild_search_index(&mut self) {
         self.search_index = library::SearchIndex::new(&self.config);
+        self.library_replaced();
+        self.playground.invalidate();
+    }
+
+    /// Mark every cache keyed by `library_revision` (visible rows, reusable
+    /// snippet choices, desktop-test candidates) stale. Call after any
+    /// change to `self.config`, including a reload from disk that brings its
+    /// own search index.
+    pub(crate) fn library_replaced(&mut self) {
         self.library_revision = self.library_revision.wrapping_add(1);
         self.visible_indices_cache = None;
-        self.playground.invalidate();
     }
 
     /// Distinct, sorted, non-empty categories currently in use — drives the

@@ -484,3 +484,39 @@ texts! {
         "Die IBus-Einrichtungsprüfung wurde unerwartet beendet. Öffnen Sie die Diagnose und versuchen Sie es erneut.",
         "Pemeriksaan penyiapan IBus berhenti tiba-tiba. Buka Diagnostik dan coba lagi.";
 }
+
+// The optional Quick Picker shortcut step.
+texts! {
+    step_shortcut_title =>
+        "Open snippets from any app (optional)",
+        "Snippets in jeder App öffnen (optional)",
+        "Buka cuplikan dari aplikasi mana pun (opsional)";
+    shortcut_help =>
+        "Give the Quick Picker a keyboard shortcut. Press it in any app to search your snippets and insert one, including in fields where typing a trigger cannot expand.",
+        "Geben Sie dem Schnellwähler ein Tastenkürzel. Damit durchsuchen Sie Ihre Snippets in jeder App und fügen eines ein, auch in Feldern, in denen ein getippter Auslöser nicht ersetzt werden kann.",
+        "Beri Quick Picker pintasan papan ketik. Tekan di aplikasi mana pun untuk mencari cuplikan dan menyisipkannya, termasuk di kolom yang tidak bisa mengganti pemicu yang diketik.";
+    shortcut_use_keys =>
+        "Use {keys}",
+        "{keys} verwenden",
+        "Pakai {keys}";
+    shortcut_ready =>
+        "Press {keys} in any app to open the Quick Picker.",
+        "Drücken Sie {keys} in einer beliebigen App, um den Schnellwähler zu öffnen.",
+        "Tekan {keys} di aplikasi mana pun untuk membuka Quick Picker.";
+    shortcut_manual =>
+        "This desktop does not let WayExpand set shortcuts. Add one in its keyboard settings that runs: wayexpand-gui --picker",
+        "Auf diesem Desktop kann WayExpand keine Tastenkürzel setzen. Legen Sie in den Tastatureinstellungen eines an, das Folgendes ausführt: wayexpand-gui --picker",
+        "Desktop ini tidak mengizinkan WayExpand mengatur pintasan. Tambahkan di pengaturan papan ketiknya pintasan yang menjalankan: wayexpand-gui --picker";
+    shortcut_change_hint =>
+        "Change it later in your desktop's keyboard settings.",
+        "Ändern lässt es sich später in den Tastatureinstellungen des Desktops.",
+        "Ubah nanti di pengaturan papan ketik desktop Anda.";
+    shortcut_setting =>
+        "Setting the Quick Picker shortcut…",
+        "Tastenkürzel für den Schnellwähler wird gesetzt …",
+        "Mengatur pintasan Quick Picker…";
+    shortcut_set_done =>
+        "Quick Picker shortcut set.",
+        "Tastenkürzel für den Schnellwähler gesetzt.",
+        "Pintasan Quick Picker diatur.";
+}
