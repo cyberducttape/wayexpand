@@ -944,43 +944,112 @@ fn print_templates(layers: &[(&Config, Source)], requested_json: bool) {
         println!("  replacement = \"\"\"FROM {{{{field:image=debian:stable-slim}}}}\n  \"\"\"");
         return;
     }
-    let width = templates
+    print!(
+        "{}",
+        template_list(&crate::help::Style::stdout(), &templates)
+    );
+}
+
+/// The human-readable template list: the user's templates, then the built-in
+/// ones, each as `name  description → file` in the same 80-column layout as
+/// `wayexpand help`.
+fn template_list(style: &crate::help::Style, templates: &[(&ExpansionConfig, Source)]) -> String {
+    // Wide enough for the longest name plus two spaces, within reason.
+    let column = templates
         .iter()
-        .map(|(snippet, _)| short_name(&snippet.trigger).chars().count())
+        .map(|(snippet, _)| short_name(&snippet.trigger).chars().count() + 2)
         .max()
-        .unwrap_or(0);
-    let file_width = templates
-        .iter()
-        .map(|(snippet, _)| {
-            snippet
-                .output_file
-                .as_deref()
-                .unwrap_or_default()
-                .chars()
-                .count()
-        })
-        .max()
-        .unwrap_or(0);
-    for (snippet, source) in templates {
-        let mut line = format!(
-            "{:<width$}  {:<file_width$}",
-            short_name(&snippet.trigger),
-            snippet.output_file.as_deref().unwrap_or_default()
-        );
-        if snippet.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly {
-            line.push_str("  (generate only; never typed)");
+        .unwrap_or(0)
+        .clamp(12, 24);
+    let mut out = String::new();
+    for (heading, wanted) in [
+        ("Your templates:", Source::User),
+        ("Built-in templates:", Source::BuiltIn),
+    ] {
+        let mut group = templates
+            .iter()
+            .filter(|(_, source)| *source == wanted)
+            .peekable();
+        if group.peek().is_none() {
+            continue;
         }
-        if !snippet.description.is_empty() {
-            line.push_str(&format!("  {}", snippet.description));
+        if !out.is_empty() {
+            out.push('\n');
         }
-        if source == Source::User {
-            line.push_str("  (yours)");
+        out.push_str(&style.heading(heading));
+        out.push('\n');
+        for (snippet, _) in group {
+            let mut summary = snippet.description.trim().to_owned();
+            if let Some(file) = snippet.output_file.as_deref() {
+                if !summary.is_empty() {
+                    summary.push(' ');
+                }
+                // A word joiner keeps the arrow and the file on one line.
+                summary.push_str(&format!("→{WORD_JOINER}{}", display_path(file)));
+            }
+            if snippet.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly {
+                summary.push_str(" (generate only)");
+            }
+            out.push_str(
+                &crate::help::summary_row_at(&short_name(&snippet.trigger), summary.trim(), column)
+                    .replace(WORD_JOINER, " "),
+            );
         }
-        println!("{}", line.trim_end());
     }
-    println!();
-    println!("Run `wayexpand new <name>` to write a file, or `wayexpand new <name> --stdout` to print it; --set NAME=VALUE skips a question.");
-    println!("`wayexpand new --show <name>` prints one as a snippet you can copy and change.");
+    out.push('\n');
+    out.push_str(&style.heading("Use one:"));
+    out.push('\n');
+    for (command, meaning) in [
+        (
+            "wayexpand new <name>",
+            "Answer its questions and write the file",
+        ),
+        ("wayexpand new <name> --stdout", "Print the result instead"),
+        (
+            "wayexpand new <name> --set NAME=VALUE",
+            "Answer a question in advance",
+        ),
+        (
+            "wayexpand new --show <name>",
+            "Print it as a snippet to copy and change",
+        ),
+    ] {
+        out.push_str(&format!("  {command}\n"));
+        out.push_str(&crate::help::wrap(meaning, 6, crate::help::WIDTH));
+    }
+    out
+}
+
+const WORD_JOINER: char = '\u{2060}';
+
+/// An output path for display: each `{{field:NAME...}}` or
+/// `{{choice:NAME...}}` placeholder becomes `<NAME>`, and any other
+/// placeholder `<...>`, so a path such as
+/// `roles/{{field:role=nginx|required|max=128}}` reads `roles/<role>`.
+fn display_path(path: &str) -> String {
+    let mut out = String::new();
+    let mut rest = path;
+    while let Some(start) = rest.find("{{") {
+        let Some(end) = rest[start..].find("}}") else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+        let inner = &rest[start + 2..start + end];
+        let name = inner
+            .split_once(':')
+            .map(|(_, field)| field)
+            .unwrap_or(inner)
+            .split(['=', '|'])
+            .next()
+            .unwrap_or_default()
+            .trim();
+        out.push('<');
+        out.push_str(if name.is_empty() { "..." } else { name });
+        out.push('>');
+        rest = &rest[start + end + 2..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Match `--set` names to fields by label (`--set port=8080` fills
@@ -2046,6 +2115,60 @@ replacement = "#!/bin/sh\necho reviewed"
             wayexpand_core::ExpansionDelivery::GenerateOnly
         );
         assert_eq!(found.replacement, "#!/bin/sh\necho reviewed");
+    }
+
+    #[test]
+    fn template_list_groups_templates_and_fits_80_columns() {
+        let user = config(
+            "[[expansion]]\ntrigger = ';;readme'\noutput_file = 'README.md'\n\
+             delivery = 'generate_only'\ndescription = 'Project README'\n\
+             replacement = '# {{field:project}}'\n",
+        );
+        let builtins = builtin_templates();
+        let templates: Vec<(&ExpansionConfig, Source)> = user
+            .expansion
+            .iter()
+            .map(|snippet| (snippet, Source::User))
+            .chain(
+                builtins
+                    .expansion
+                    .iter()
+                    .filter(|snippet| snippet.output_file.is_some())
+                    .map(|snippet| (snippet, Source::BuiltIn)),
+            )
+            .collect();
+        let list = template_list(&crate::help::Style::plain(), &templates);
+        println!("{list}");
+        for line in list.lines() {
+            assert!(line.chars().count() <= crate::help::WIDTH, "{line:?}");
+        }
+        let yours = list.find("Your templates:").expect("user group");
+        let built_in = list.find("Built-in templates:").expect("built-in group");
+        assert!(yours < built_in);
+        assert!(list.contains("  readme             Project README → README.md (generate only)"));
+        assert!(list.contains("  dockerfile-python  Python application Dockerfile"));
+        // The arrow never ends a line without its file.
+        assert!(
+            !list.lines().any(|line| line.trim_end().ends_with('→')),
+            "{list}"
+        );
+        assert!(list.contains("→ roles/<role>"), "{list}");
+        assert!(!list.contains("{{"), "placeholders are shortened: {list}");
+        assert!(!list.contains("(yours)"));
+    }
+
+    #[test]
+    fn display_path_names_each_placeholder() {
+        assert_eq!(
+            display_path("roles/{{field:role=nginx|required|max=128|validate=ansible-role-name}}"),
+            "roles/<role>"
+        );
+        assert_eq!(
+            display_path("{{choice:env=dev|prod}}/{{date}}.yml"),
+            "<env>/<date>.yml"
+        );
+        assert_eq!(display_path("Dockerfile"), "Dockerfile");
+        assert_eq!(display_path("broken{{field:x"), "broken{{field:x");
     }
 
     #[test]
