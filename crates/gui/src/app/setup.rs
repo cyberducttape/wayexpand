@@ -311,6 +311,20 @@ impl GuiApp {
         }
     }
 
+    /// Give the Quick Picker the default global shortcut through
+    /// `wayexpand shortcut set`, which refuses a combination already in use.
+    pub(crate) fn set_picker_shortcut(&mut self) {
+        self.picker_shortcut_error = None;
+        self.start_cli_task(
+            vec!["shortcut".into(), "set".into()],
+            self.strings.shortcut_setting().into(),
+            self.strings.shortcut_set_done().into(),
+        );
+        if self.setup_task.is_some() {
+            self.cli_task_kind = Some("picker-shortcut".into());
+        }
+    }
+
     pub(crate) fn retry_gnome_source_activation(&mut self) {
         self.start_cli_task(
             vec!["repair".into(), "--gnome-input-source".into()],
@@ -349,13 +363,7 @@ impl GuiApp {
         let worker_is_setup = is_setup;
         let worker_is_setup_preflight = is_setup_preflight;
         let worker_config_path = self.path.clone();
-        // Prefer the CLI installed beside this binary (release archives and
-        // development builds), else whatever `wayexpand` is on PATH.
-        let cli = env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(|dir| dir.join("wayexpand")))
-            .filter(|path| path.is_file())
-            .unwrap_or_else(|| PathBuf::from("wayexpand"));
+        let cli = runtime::cli_executable();
         let spawned = thread::Builder::new()
             .name("wayexpand-cli-task".into())
             .spawn(move || {
@@ -700,6 +708,9 @@ impl GuiApp {
                         }
                         if task_kind.as_deref() == Some("setup-preflight") {
                             self.setup_preflight_result(&output)
+                        } else if task_kind.as_deref() == Some("picker-shortcut") {
+                            self.picker_shortcut_error = None;
+                            Status::success(success_message)
                         } else if task_kind.as_deref() == Some("gnome-source-repair") {
                             self.desktop_test_verified = false;
                             self.desktop_test_verified_application = None;
@@ -813,6 +824,13 @@ impl GuiApp {
                             self.setup_failure_report_open = true;
                             self.diagnostics_open = open_diagnostics;
                             outcome
+                        } else if task_kind.as_deref() == Some("picker-shortcut") {
+                            // Usually a combination already in use; the CLI
+                            // names it and suggests another.
+                            let reason =
+                                detail.trim().trim_start_matches("Error:").trim().to_owned();
+                            self.picker_shortcut_error = Some(reason.clone());
+                            Status::warning(reason)
                         } else if task_kind.as_deref() == Some("setup-preflight") {
                             self.diagnostics_open = true;
                             Status::error(self.strings.setup_could_not_check_stages(&detail))

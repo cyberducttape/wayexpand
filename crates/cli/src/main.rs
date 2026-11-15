@@ -177,6 +177,7 @@ fn run() -> Result<()> {
         Some("compatibility-report") => commands::compatibility::compatibility_report(args)?,
         Some("check") => commands::check::check_command(args)?,
         Some("service") => commands::service::service_command(args)?,
+        Some("shortcut") => commands::shortcut::shortcut_command(args)?,
         Some("config") => commands::config_inspect::config_command(args)?,
         Some("doctor") => doctor_command(args)?,
         Some("debug") => commands::debug::debug_command(args)?,
