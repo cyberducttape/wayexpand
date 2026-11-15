@@ -3653,3 +3653,32 @@ fn basic_editor_mode_opens_advanced_options_only_for_behavior_settings() {
     assert_eq!(app.editor_advanced, None, "no session choice yet");
     fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn creating_the_test_snippet_selects_it_and_leaves_the_desktop_test_enabled() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-test-snippet-selection-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    fs::write(
+        &path,
+        "[[expansion]]\ntrigger = \";one\"\nreplacement = \"first\"\n\n\
+         [[expansion]]\ntrigger = \";two\"\nreplacement = \"second\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.create_test_snippet();
+    assert_eq!(app.config.expansion.len(), 3, "{}", app.status.text());
+    assert_eq!(app.selected_index(), Some(2), "the new snippet is last");
+    assert_eq!(
+        app.draft.as_ref().map(|draft| draft.trigger.as_str()),
+        Some(":wayexpand-test")
+    );
+    assert!(
+        !app.desktop_test_blocked_by_draft(),
+        "a freshly saved test snippet must not block the desktop test"
+    );
+    fs::remove_file(path).unwrap();
+}
