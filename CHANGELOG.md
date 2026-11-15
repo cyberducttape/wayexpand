@@ -9,6 +9,9 @@ All notable changes to WayExpand are documented here.
   `X.Y.Z-1.N.gitSHA`, which upgrades the release, sorts before the next one,
   grows along `main` and names its commit. A checkout without the release
   tag is refused.
+
+## [1.3.6] - 2026-11-15
+
 - **Working** in the header now means a user-confirmed insertion in a real
   application, scoped to the current compositor session, WayExpand build,
   typing route and desktop:
@@ -5142,7 +5145,8 @@ This is the first stable release. WayExpand is now recommended for production us
 - Installer idempotence, workspace tests, Clippy, systemd verification, and
   systemd security analysis remain covered by the release checks.
 
-[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/1.3.5...HEAD
+[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/v1.3.6...HEAD
+[1.3.6]: https://github.com/cyberducttape/wayexpand/compare/v1.3.5...v1.3.6
 [1.3.5]: https://github.com/cyberducttape/wayexpand/compare/1.3.3...1.3.5
 [1.3.3]: https://github.com/cyberducttape/wayexpand/releases/tag/1.3.3
 - Require GTK and Qt acceptance clients to report stable active-field focus

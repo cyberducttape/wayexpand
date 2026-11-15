@@ -1,6 +1,6 @@
 # Maintainer: Stephan Loesevitz <stephan.loesevitz at gmail dot com>
 pkgname=wayexpand
-pkgver=1.3.5
+pkgver=1.3.6
 pkgrel=1
 pkgdesc="A privacy-first, Wayland-native text expander for Linux"
 arch=('x86_64' 'aarch64')
@@ -24,8 +24,8 @@ optdepends=(
     'wl-clipboard: for the certification harness clipboard scenarios'
     'polkit: for action-specific authorization of broker actions'
 )
-source=("https://github.com/cyberducttape/wayexpand/releases/download/1.3.5/wayexpand-1.3.5.tar.gz")
-sha256sums=('09b7c57e51a666c4d261721f8d15ef0003b5608b0a3f1ada4707d2e397dbeaee')
+source=("https://github.com/cyberducttape/wayexpand/releases/download/1.3.6/wayexpand-1.3.6.tar.gz")
+sha256sums=('6cd12421cbcb9952efa7916dcd2aa27bdac0d9fcf8eedc9a1ecd27491511b6d2')
 conflicts=('wayexpand-git')
 
 prepare() {
