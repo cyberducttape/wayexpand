@@ -1685,9 +1685,17 @@ impl GuiApp {
                 }
             });
         });
+        let mut save_error = None;
         if confirmed {
             self.desktop_test_verified = true;
             self.desktop_test_verified_application = Some(application_class.clone());
+            // Keep the confirmation, with what it covered, across restarts.
+            let record = crate::setup_record::SetupRecord::verified(
+                &application_class,
+                self.current_route_label(),
+            );
+            save_error = crate::setup_record::save(&record).err();
+            self.setup_record = Some(record);
             self.desktop_test_review = None;
             if self.desktop_test_dialog_required || self.onboarding_visible {
                 self.onboarding_visible = true;
@@ -1712,6 +1720,10 @@ impl GuiApp {
             self.desktop_test_verified_application = None;
             self.status = Status::warning(self.strings.dg_desktop_test_result_remains_unverified());
             self.desktop_test_review = None;
+        }
+        if let Some(error) = save_error {
+            // The confirmation still holds for this session.
+            self.status = self.status.clone().with_caveat(error);
         }
         if confirmed || rejected || dismissed {
             self.desktop_test_review_open = false;

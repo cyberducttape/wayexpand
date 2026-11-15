@@ -4,6 +4,28 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The header's status chip uses the same readiness model as the banner and
+  the first-run guide, so a live process is never shown as success:
+  - **Working** (green): an expansion was confirmed in a real application,
+    still valid for this typing route and desktop, or the output backend
+    acknowledged delivered text
+  - **Needs verification**: connected, with nothing wrong, but not yet
+    confirmed
+  - **Needs permission** or **Needs setup**: a step remains (permission,
+    GNOME input source, an older service build, replacement consent)
+  - **Limited**, **Copy-only** (the desktop cannot replace typed text) and
+    **Disconnected** (a route that worked failed)
+  Previously a running IBus engine showed Active before GNOME had selected
+  the input source or anything had expanded.
+- The outcome of first-run setup is saved in `gui-setup.toml`: a confirmed
+  real-application test, with application, typing route, build, desktop
+  session and date, or that the guide was skipped (which never overwrites a
+  confirmation). The status tooltip shows when and where expansion was last
+  confirmed. It says to test again once the typing route or desktop session
+  changes, so an earlier success is not presented as proof for the current
+  session.
+- GUI tests no longer write the user's real `gui-prefs.toml`. Running the
+  test suite could reset the "guide completed" flag.
 - When expansion is not working, the GUI says why in one sentence and offers
   one action, in a banner under the header, in the status chip's tooltip,
   and in the first-run guide. Each case has its action:

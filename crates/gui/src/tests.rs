@@ -4033,3 +4033,82 @@ fn the_banner_names_one_problem_and_one_action() {
     );
     let _ = fs::remove_file(path);
 }
+
+#[test]
+fn the_header_is_green_only_once_an_expansion_is_known_to_work() {
+    use crate::lang::HeaderState;
+    use wayexpand_backend_ibus::chain::{IbusChainReport, IbusCheck, IbusCheckState, IbusDesktop};
+
+    let mut app = header_test_app("header-readiness");
+    let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+    let state = |app: &GuiApp| {
+        let ibus_only = app.daemon_reachable != Some(true) && app.ibus_active;
+        app.header_state(ibus_only, false, &palette)
+    };
+
+    // A live IBus engine whose replacement consent was refused is a process
+    // that cannot expand, not "Active".
+    app.daemon_reachable = Some(false);
+    app.ibus_active = true;
+    app.ibus_route = Some(IbusChainReport {
+        desktop: IbusDesktop::KdeWayland,
+        checks: vec![IbusCheck {
+            id: "consent",
+            title: "",
+            state: IbusCheckState::Fail,
+            problem_id: None,
+            detail: String::new(),
+            fix: None,
+        }],
+        activity: None,
+    });
+    assert_eq!(state(&app), (HeaderState::NeedsSetup, palette.warning));
+
+    // Nothing wrong, but no expansion confirmed yet: running, not green.
+    app.ibus_route = None;
+    assert_eq!(
+        state(&app),
+        (HeaderState::NeedsVerification, palette.accent)
+    );
+
+    // The user confirmed a real-application test.
+    app.desktop_test_verified = true;
+    assert_eq!(state(&app), (HeaderState::Working, palette.success));
+
+    // The daemon route: green once its backend acknowledged delivered text.
+    app.desktop_test_verified = false;
+    app.ibus_active = false;
+    app.daemon_reachable = Some(true);
+    app.route_state = Some(runtime::RouteState::Connected);
+    app.daemon_capabilities = Some(runtime::DaemonCapabilities {
+        capture_sensitive_focus: Some(true),
+        capture_composition_aware: Some(true),
+        capture_key_passthrough: Some(true),
+        capture_layout_aware: Some(true),
+        window_identity_exact: Some(true),
+        inject_atomic_replace: Some(true),
+        inject_full_unicode: Some(true),
+        inject_key_passthrough: Some(true),
+        replacement_assurance: Some(runtime::ReplacementAssurance::Verified),
+        ..Default::default()
+    });
+    if build_identity_unverified() {
+        return;
+    }
+    let status = |acknowledged: u64| {
+        format!(
+            "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={} · \
+             expansion_output_acknowledgements_total={acknowledged}",
+            env!("WAYEXPAND_COMMIT"),
+            env!("WAYEXPAND_BUILD_VERSION")
+        )
+    };
+    app.daemon_status = status(0);
+    assert_eq!(
+        state(&app),
+        (HeaderState::NeedsVerification, palette.accent),
+        "nothing delivered yet"
+    );
+    app.daemon_status = status(3);
+    assert_eq!(state(&app), (HeaderState::Working, palette.success));
+}

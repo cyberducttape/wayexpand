@@ -87,3 +87,55 @@ impl Strings {
         }
     }
 }
+
+impl Strings {
+    pub fn last_confirmed(&self, application: &str, date: &str) -> String {
+        match self.lang {
+            Language::English => format!("Last confirmed working in {application} on {date}."),
+            Language::German => {
+                format!("Zuletzt am {date} in {application} als funktionierend bestätigt.")
+            }
+            Language::Indonesian => {
+                format!("Terakhir dipastikan berfungsi di {application} pada {date}.")
+            }
+        }
+    }
+
+    pub fn setup_changed_since_test(&self, change: &str) -> String {
+        match self.lang {
+            Language::English => format!(
+                "Your setup changed since the last confirmed test ({change}). Test it again from Getting started."
+            ),
+            Language::German => format!(
+                "Ihre Einrichtung hat sich seit dem letzten bestätigten Test geändert ({change}). Testen Sie erneut über „Erste Schritte“."
+            ),
+            Language::Indonesian => format!(
+                "Penyiapan Anda berubah sejak uji terakhir yang dipastikan ({change}). Uji lagi dari Memulai."
+            ),
+        }
+    }
+
+    pub fn setup_change(&self, change: &crate::setup_record::Staleness) -> String {
+        use crate::setup_record::Staleness;
+        match (change, self.lang) {
+            (Staleness::RouteChanged { was }, Language::English) => {
+                format!("the typing route was {was}")
+            }
+            (Staleness::RouteChanged { was }, Language::German) => {
+                format!("der Eingabeweg war {was}")
+            }
+            (Staleness::RouteChanged { was }, Language::Indonesian) => {
+                format!("jalur pengetikan sebelumnya {was}")
+            }
+            (Staleness::DesktopChanged { was }, Language::English) => {
+                format!("the desktop was {was}")
+            }
+            (Staleness::DesktopChanged { was }, Language::German) => {
+                format!("der Desktop war {was}")
+            }
+            (Staleness::DesktopChanged { was }, Language::Indonesian) => {
+                format!("desktop sebelumnya {was}")
+            }
+        }
+    }
+}

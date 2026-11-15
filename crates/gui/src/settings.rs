@@ -10,8 +10,6 @@ use std::os::unix::fs::OpenOptionsExt;
 
 use serde::{Deserialize, Serialize};
 
-use wayexpand_core::default_config_path;
-
 use crate::{colorpack::ColorPack, lang::Language};
 use wayexpand_core::FontScale;
 
@@ -42,7 +40,24 @@ struct StoredGuiPrefs {
 }
 
 fn gui_prefs_path() -> PathBuf {
-    default_config_path().with_file_name("gui-prefs.toml")
+    gui_state_dir().join("gui-prefs.toml")
+}
+
+/// Where the GUI keeps its own state files: beside the configuration.
+#[cfg(not(test))]
+pub(crate) fn gui_state_dir() -> PathBuf {
+    let config = wayexpand_core::default_config_path();
+    config
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default()
+}
+
+/// Tests never touch the user's real preferences: every GUI test process
+/// keeps its state in a private temporary directory.
+#[cfg(test)]
+pub(crate) fn gui_state_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("wayexpand-gui-test-state-{}", std::process::id()))
 }
 
 pub(crate) fn load_gui_prefs() -> GuiPrefs {
@@ -104,7 +119,7 @@ pub(crate) fn save_gui_prefs(
     })
 }
 
-fn write_gui_prefs_atomic(
+pub(crate) fn write_gui_prefs_atomic(
     path: &std::path::Path,
     contents: &str,
     sync_directory: impl FnOnce(&std::path::Path) -> io::Result<()>,

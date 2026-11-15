@@ -6,8 +6,10 @@ use crate::*;
 /// in diagnostics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeaderState {
-    Active,
-    Running,
+    /// Expansion confirmed in a real application on this route and desktop.
+    Working,
+    /// Connected with nothing wrong, but no expansion confirmed yet.
+    NeedsVerification,
     Limited,
     Paused,
     Off,
@@ -15,18 +17,22 @@ pub enum HeaderState {
     Checking,
     Starting,
     Reconnecting,
-    PermissionNeeded,
-    Unsupported,
+    NeedsPermission,
+    /// Automatic replacement is unavailable; the Quick Picker still works.
+    CopyOnly,
     Stopped,
-    Error,
+    /// A route that was available failed.
+    Disconnected,
+    /// Running, but a setup step remains (input source, restart, consent).
+    NeedsSetup,
 }
 
 impl Strings {
     pub fn header_state(&self, state: HeaderState) -> &'static str {
         use HeaderState as S;
         match (self.lang, state) {
-            (Language::English, S::Active) => "Active",
-            (Language::English, S::Running) => "Running",
+            (Language::English, S::Working) => "Working",
+            (Language::English, S::NeedsVerification) => "Needs verification",
             (Language::English, S::Limited) => "Limited",
             (Language::English, S::Paused) => "Paused",
             (Language::English, S::Off) => "Off",
@@ -34,12 +40,13 @@ impl Strings {
             (Language::English, S::Checking) => "Checking…",
             (Language::English, S::Starting) => "Starting…",
             (Language::English, S::Reconnecting) => "Reconnecting…",
-            (Language::English, S::PermissionNeeded) => "Permission needed",
-            (Language::English, S::Unsupported) => "Unsupported",
+            (Language::English, S::NeedsPermission) => "Needs permission",
+            (Language::English, S::CopyOnly) => "Copy-only",
             (Language::English, S::Stopped) => "Stopped",
-            (Language::English, S::Error) => "Error",
-            (Language::German, S::Active) => "Aktiv",
-            (Language::German, S::Running) => "Läuft",
+            (Language::English, S::Disconnected) => "Disconnected",
+            (Language::English, S::NeedsSetup) => "Needs setup",
+            (Language::German, S::Working) => "Funktioniert",
+            (Language::German, S::NeedsVerification) => "Prüfung nötig",
             (Language::German, S::Limited) => "Eingeschränkt",
             (Language::German, S::Paused) => "Pausiert",
             (Language::German, S::Off) => "Aus",
@@ -47,12 +54,13 @@ impl Strings {
             (Language::German, S::Checking) => "Wird geprüft…",
             (Language::German, S::Starting) => "Startet…",
             (Language::German, S::Reconnecting) => "Verbindet neu…",
-            (Language::German, S::PermissionNeeded) => "Berechtigung nötig",
-            (Language::German, S::Unsupported) => "Nicht unterstützt",
+            (Language::German, S::NeedsPermission) => "Berechtigung nötig",
+            (Language::German, S::CopyOnly) => "Nur Kopieren",
             (Language::German, S::Stopped) => "Gestoppt",
-            (Language::German, S::Error) => "Fehler",
-            (Language::Indonesian, S::Active) => "Aktif",
-            (Language::Indonesian, S::Running) => "Berjalan",
+            (Language::German, S::Disconnected) => "Getrennt",
+            (Language::German, S::NeedsSetup) => "Einrichtung nötig",
+            (Language::Indonesian, S::Working) => "Berfungsi",
+            (Language::Indonesian, S::NeedsVerification) => "Perlu verifikasi",
             (Language::Indonesian, S::Limited) => "Terbatas",
             (Language::Indonesian, S::Paused) => "Dijeda",
             (Language::Indonesian, S::Off) => "Mati",
@@ -60,10 +68,11 @@ impl Strings {
             (Language::Indonesian, S::Checking) => "Memeriksa…",
             (Language::Indonesian, S::Starting) => "Memulai…",
             (Language::Indonesian, S::Reconnecting) => "Menyambung ulang…",
-            (Language::Indonesian, S::PermissionNeeded) => "Perlu izin",
-            (Language::Indonesian, S::Unsupported) => "Tidak didukung",
+            (Language::Indonesian, S::NeedsPermission) => "Perlu izin",
+            (Language::Indonesian, S::CopyOnly) => "Salin saja",
             (Language::Indonesian, S::Stopped) => "Berhenti",
-            (Language::Indonesian, S::Error) => "Galat",
+            (Language::Indonesian, S::Disconnected) => "Terputus",
+            (Language::Indonesian, S::NeedsSetup) => "Perlu penyiapan",
         }
     }
 
