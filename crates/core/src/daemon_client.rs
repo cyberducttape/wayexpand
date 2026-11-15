@@ -112,6 +112,131 @@ impl DaemonFocus {
     }
 }
 
+/// Why a tracked insert did not reach the target window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsertFailure {
+    /// The target window lost focus or changed before the insert ran.
+    FocusChanged,
+    /// Organization policy blocked the snippet or the unverified insert.
+    PolicyRefused,
+    /// Keyboard input arrived first, so the insert was abandoned.
+    InputArrived,
+    /// No output backend was connected.
+    NoBackend,
+    /// The snippet could not be prepared (unknown, disabled or invalid).
+    Refused,
+    /// The output backend reported that nothing was typed.
+    NotApplied,
+    /// A newer insert request replaced this one before it ran.
+    Superseded,
+}
+
+impl InsertFailure {
+    const ALL: [Self; 7] = [
+        Self::FocusChanged,
+        Self::PolicyRefused,
+        Self::InputArrived,
+        Self::NoBackend,
+        Self::Refused,
+        Self::NotApplied,
+        Self::Superseded,
+    ];
+
+    /// The stable wire name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::FocusChanged => "focus_changed",
+            Self::PolicyRefused => "policy_refused",
+            Self::InputArrived => "input_arrived",
+            Self::NoBackend => "no_backend",
+            Self::Refused => "refused",
+            Self::NotApplied => "not_applied",
+            Self::Superseded => "superseded",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|failure| failure.as_str() == value)
+    }
+}
+
+/// The state of a tracked insert, as answered to `insert-result <id>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsertDelivery {
+    /// Accepted and not yet resolved.
+    Pending,
+    /// The output backend acknowledged the text.
+    Delivered,
+    /// The backend could not tell whether the text, or part of it, arrived.
+    Uncertain,
+    /// Nothing was typed.
+    Failed(InsertFailure),
+}
+
+impl InsertDelivery {
+    /// The daemon's reply line for this state.
+    pub fn response_line(self, id: u64) -> String {
+        match self {
+            Self::Pending => format!("insert-result id={id} state=pending\n"),
+            Self::Delivered => format!("insert-result id={id} state=delivered\n"),
+            Self::Uncertain => format!("insert-result id={id} state=uncertain\n"),
+            Self::Failed(reason) => format!(
+                "insert-result id={id} state=failed reason={}\n",
+                reason.as_str()
+            ),
+        }
+    }
+
+    /// The reply for an id the daemon no longer remembers.
+    pub fn unknown_response_line(id: u64) -> String {
+        format!("insert-result id={id} state=unknown\n")
+    }
+
+    /// Parse an `insert-result` reply for `id`. `Ok(None)` means the daemon
+    /// does not know the id; `Err(())` means the reply is not an
+    /// `insert-result` answer for `id`.
+    #[allow(clippy::result_unit_err)]
+    pub fn parse_response(response: &str, id: u64) -> Result<Option<Self>, ()> {
+        let mut fields = response.trim_end().split(' ');
+        if fields.next() != Some("insert-result") {
+            return Err(());
+        }
+        if fields.next() != Some(format!("id={id}").as_str()) {
+            return Err(());
+        }
+        let state = match fields.next().and_then(|field| field.strip_prefix("state=")) {
+            Some("pending") => Some(Self::Pending),
+            Some("delivered") => Some(Self::Delivered),
+            Some("uncertain") => Some(Self::Uncertain),
+            Some("unknown") => None,
+            Some("failed") => {
+                let reason = fields
+                    .next()
+                    .and_then(|field| field.strip_prefix("reason="))
+                    .and_then(InsertFailure::parse)
+                    .ok_or(())?;
+                Some(Self::Failed(reason))
+            }
+            _ => return Err(()),
+        };
+        if fields.next().is_some() {
+            return Err(());
+        }
+        Ok(state)
+    }
+}
+
+/// The id in an `insert scheduled id=<n>` reply to a tracked insert.
+pub fn parse_insert_scheduled_id(response: &str) -> Option<u64> {
+    response
+        .trim_end()
+        .strip_prefix("insert scheduled id=")?
+        .parse()
+        .ok()
+}
+
 /// Typed operations supported by the daemon control socket.
 ///
 /// Frontends should construct one of these operations instead of formatting
@@ -136,6 +261,18 @@ pub enum DaemonOperation {
         generation: u64,
         token: String,
         trigger: String,
+    },
+    /// [`DaemonOperation::InsertTarget`] whose outcome can be queried with
+    /// [`DaemonOperation::InsertResult`]. The daemon answers
+    /// `insert scheduled id=<n>`; see [`parse_insert_scheduled_id`].
+    InsertTargetTracked {
+        generation: u64,
+        token: String,
+        trigger: String,
+    },
+    /// What became of a tracked insert; see [`InsertDelivery::parse_response`].
+    InsertResult {
+        id: u64,
     },
     Explain {
         text: String,
@@ -271,6 +408,22 @@ fn encode_operation(operation: &DaemonOperation) -> Result<String, DaemonClientE
             validate_text(trigger, MAX_INSERT_TRIGGER_CHARS, "insert trigger")?;
             Ok(format!("insert-target {generation} {token} {trigger}"))
         }
+        DaemonOperation::InsertTargetTracked {
+            generation,
+            token,
+            trigger,
+        } => {
+            if token.is_empty() || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(DaemonClientError::InvalidOperation {
+                    reason: "insert target token must be hexadecimal",
+                });
+            }
+            validate_text(trigger, MAX_INSERT_TRIGGER_CHARS, "insert trigger")?;
+            Ok(format!(
+                "insert-target-tracked {generation} {token} {trigger}"
+            ))
+        }
+        DaemonOperation::InsertResult { id } => Ok(format!("insert-result {id}")),
         DaemonOperation::Explain { text, json } => {
             validate_text(text, MAX_EXPLAIN_TEXT_CHARS, "explain text")?;
             Ok(format!(
@@ -502,6 +655,27 @@ mod tests {
             "insert-target 7 deadbeef :wave"
         );
         assert_eq!(
+            encode_operation(&DaemonOperation::InsertTargetTracked {
+                generation: 7,
+                token: "deadbeef".into(),
+                trigger: ":wave".into(),
+            })
+            .unwrap(),
+            "insert-target-tracked 7 deadbeef :wave"
+        );
+        assert!(matches!(
+            encode_operation(&DaemonOperation::InsertTargetTracked {
+                generation: 7,
+                token: "not-hex".into(),
+                trigger: ":wave".into(),
+            }),
+            Err(DaemonClientError::InvalidOperation { .. })
+        ));
+        assert_eq!(
+            encode_operation(&DaemonOperation::InsertResult { id: 42 }).unwrap(),
+            "insert-result 42"
+        );
+        assert_eq!(
             encode_operation(&DaemonOperation::ClearUsageStats {
                 path: PathBuf::from("/tmp/wayexpand usage-stats.json"),
             })
@@ -529,5 +703,46 @@ mod tests {
             client.request("status\nstop"),
             Err(DaemonClientError::InvalidOperation { .. })
         ));
+    }
+
+    #[test]
+    fn insert_delivery_round_trips_and_rejects_other_replies() {
+        let mut states = vec![
+            InsertDelivery::Pending,
+            InsertDelivery::Delivered,
+            InsertDelivery::Uncertain,
+        ];
+        states.extend(InsertFailure::ALL.map(InsertDelivery::Failed));
+        for state in states {
+            assert_eq!(
+                InsertDelivery::parse_response(&state.response_line(9), 9),
+                Ok(Some(state))
+            );
+            assert_eq!(
+                InsertDelivery::parse_response(&state.response_line(9), 10),
+                Err(())
+            );
+        }
+        assert_eq!(
+            InsertDelivery::parse_response(&InsertDelivery::unknown_response_line(3), 3),
+            Ok(None)
+        );
+        for reply in [
+            "unknown command; expected status\n",
+            "insert-result id=3 state=failed\n",
+            "insert-result id=3 state=failed reason=mystery\n",
+            "insert-result id=3 state=delivered extra\n",
+        ] {
+            assert_eq!(
+                InsertDelivery::parse_response(reply, 3),
+                Err(()),
+                "{reply:?}"
+            );
+        }
+        assert_eq!(
+            parse_insert_scheduled_id("insert scheduled id=12\n"),
+            Some(12)
+        );
+        assert_eq!(parse_insert_scheduled_id("insert scheduled\n"), None);
     }
 }

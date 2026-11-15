@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The Quick Picker closes only after the daemon confirms that the snippet was
+  typed. It used to close as soon as the daemon accepted the request, so an
+  insert refused afterwards (focus moved, policy, typing started first, the
+  output backend reconnecting or rejecting the text) vanished silently. The
+  picker now stays open, says what happened, and offers Copy instead. The new
+  control lines `insert-target-tracked` and `insert-result` are documented in
+  `docs/COMPATIBILITY.md`.
 - Support GNOME Shell 48 (Debian 13) with the WayExpand extension, backed by
   a new containerized runtime gate that runs the full GNOME acceptance test.
   GNOME 49 (Fedora 43, RHEL 10.2) passes everything except the German and

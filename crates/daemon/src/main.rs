@@ -246,6 +246,9 @@ struct Daemon {
     /// A transaction in flight on the serialized output worker; see
     /// `pending_output`.
     pending_output: Option<pending_output::PendingOutput>,
+    /// The tracked insert being handled, resolved once its outcome is known
+    /// (immediately, or when its serialized output job completes).
+    insert_tracking: Option<u64>,
     /// Reused storage for match results; dispatch drains it before any later
     /// event can clear or overwrite the completed records.
     pending_results: Vec<wayexpand_core::PendingExpansionResult>,
@@ -684,6 +687,7 @@ fn main() -> Result<()> {
         output_worker,
         retiring_output_workers: Vec::new(),
         pending_output: None,
+        insert_tracking: None,
         pending_results: Vec::new(),
         ready_results: Vec::new(),
         evdev_quiet_since: None,

@@ -62,6 +62,8 @@ pub struct ControlServer {
     /// `wayexpand insert`). Only the latest request is kept: an insert is a one-shot
     /// user action and a stale queued one must never fire later.
     insert_requested: Arc<Mutex<Option<InsertRequest>>>,
+    /// What became of recent tracked inserts, for `insert-result <id>`.
+    insert_outcomes: Arc<Mutex<InsertOutcomes>>,
     focus_snapshot: Arc<Mutex<FocusSnapshot>>,
     explain_snapshot: Arc<Mutex<Option<ExplainSnapshot>>>,
     _explain_worker: Option<JoinHandle<()>>,
@@ -83,6 +85,59 @@ pub struct InsertRequest {
     pub trigger: String,
     pub focus_token: Option<String>,
     pub focus_generation: Option<u64>,
+    /// Set for `insert-target-tracked`; the reactor records the outcome
+    /// under this id.
+    pub tracking_id: Option<u64>,
+}
+
+/// Outcomes of the most recent tracked inserts. Bounded: a picker polls
+/// its own insert within seconds, so old entries are simply forgotten and
+/// answered as unknown.
+#[derive(Debug)]
+pub(crate) struct InsertOutcomes {
+    next_id: u64,
+    entries: std::collections::VecDeque<(u64, wayexpand_core::InsertDelivery)>,
+}
+
+const INSERT_OUTCOMES_KEPT: usize = 32;
+
+impl Default for InsertOutcomes {
+    fn default() -> Self {
+        Self {
+            next_id: 1,
+            entries: std::collections::VecDeque::with_capacity(INSERT_OUTCOMES_KEPT),
+        }
+    }
+}
+
+impl InsertOutcomes {
+    /// Allocate an id for a newly accepted insert, recorded as pending.
+    fn begin(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        if self.entries.len() == INSERT_OUTCOMES_KEPT {
+            self.entries.pop_front();
+        }
+        self.entries
+            .push_back((id, wayexpand_core::InsertDelivery::Pending));
+        id
+    }
+
+    /// Resolve a pending insert. A resolved outcome is final.
+    fn resolve(&mut self, id: u64, outcome: wayexpand_core::InsertDelivery) {
+        if let Some((_, state)) = self.entries.iter_mut().find(|(entry, _)| *entry == id) {
+            if *state == wayexpand_core::InsertDelivery::Pending {
+                *state = outcome;
+            }
+        }
+    }
+
+    fn get(&self, id: u64) -> Option<wayexpand_core::InsertDelivery> {
+        self.entries
+            .iter()
+            .find(|(entry, _)| *entry == id)
+            .map(|(_, state)| *state)
+    }
 }
 
 /// An `explain <text>` request waiting for the reactor.
@@ -144,6 +199,7 @@ impl ControlServer {
             admission: Arc::new(Mutex::new(ControlAdmissionState::default())),
             control_rejected_total: Arc::new(AtomicU64::new(0)),
             insert_requested: Arc::new(Mutex::new(None)),
+            insert_outcomes: Arc::default(),
             focus_snapshot: Arc::new(Mutex::new(FocusSnapshot::default())),
             explain_snapshot: Arc::new(Mutex::new(None)),
             _explain_worker: None,
@@ -245,6 +301,7 @@ impl ControlServer {
         let admission = Arc::new(Mutex::new(ControlAdmissionState::default()));
         let control_rejected_total = Arc::new(AtomicU64::new(0));
         let insert_requested = Arc::new(Mutex::new(None));
+        let insert_outcomes: Arc<Mutex<InsertOutcomes>> = Arc::default();
         let focus_snapshot = Arc::new(Mutex::new(FocusSnapshot::default()));
         let explain_snapshot = Arc::new(Mutex::new(None));
         let (explain_requests, explain_receiver) =
@@ -276,6 +333,7 @@ impl ControlServer {
         let admission_for_listener = Arc::clone(&admission);
         let pause_flag = Arc::clone(&pause_requested);
         let insert_slot = Arc::clone(&insert_requested);
+        let insert_outcomes_slot = Arc::clone(&insert_outcomes);
         let focus_slot = Arc::clone(&focus_snapshot);
         let status_flag = Arc::clone(&status);
         let session_context_flag = Arc::clone(&session_context);
@@ -326,6 +384,7 @@ impl ControlServer {
                         admission: Arc::clone(&admission_for_listener),
                         pause: Arc::clone(&pause_flag),
                         insert: Arc::clone(&insert_slot),
+                        insert_outcomes: Arc::clone(&insert_outcomes_slot),
                         require_verified_insert,
                         disable_control_socket_mutations,
                         focus: Arc::clone(&focus_slot),
@@ -397,6 +456,7 @@ impl ControlServer {
             admission,
             control_rejected_total,
             insert_requested,
+            insert_outcomes,
             focus_snapshot,
             explain_snapshot,
             _explain_worker: Some(explain_worker),
@@ -421,6 +481,28 @@ impl ControlServer {
         self.insert_requested
             .lock()
             .map_or(None, |mut slot| slot.take())
+    }
+
+    /// Queue `request` as the control socket does for
+    /// `insert-target-tracked`, returning its id.
+    #[cfg(test)]
+    pub(crate) fn schedule_tracked_insert(&self, mut request: InsertRequest) -> u64 {
+        let id = self.insert_outcomes.lock().unwrap().begin();
+        request.tracking_id = Some(id);
+        *self.insert_requested.lock().unwrap() = Some(request);
+        id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_outcome(&self, id: u64) -> Option<wayexpand_core::InsertDelivery> {
+        self.insert_outcomes.lock().unwrap().get(id)
+    }
+
+    /// Record what became of a tracked insert.
+    pub fn record_insert_outcome(&self, id: u64, outcome: wayexpand_core::InsertDelivery) {
+        if let Ok(mut outcomes) = self.insert_outcomes.lock() {
+            outcomes.resolve(id, outcome);
+        }
     }
 
     pub fn set_focus_snapshot(&self, snapshot: FocusSnapshot) {
@@ -589,6 +671,7 @@ struct Flags {
     admission: Arc<Mutex<ControlAdmissionState>>,
     pause: Arc<AtomicBool>,
     insert: Arc<Mutex<Option<InsertRequest>>>,
+    insert_outcomes: Arc<Mutex<InsertOutcomes>>,
     require_verified_insert: bool,
     disable_control_socket_mutations: bool,
     focus: Arc<Mutex<FocusSnapshot>>,
@@ -723,7 +806,10 @@ fn insert_request(line: &str) -> Option<Option<InsertRequest>> {
     if line == "insert" {
         return Some(None);
     }
-    if let Some(request) = line.strip_prefix("insert-target ") {
+    if let Some(request) = line
+        .strip_prefix("insert-target ")
+        .or_else(|| line.strip_prefix("insert-target-tracked "))
+    {
         let mut fields = request.splitn(3, ' ');
         let generation = fields.next()?.parse::<u64>().ok()?;
         let token = fields.next()?;
@@ -736,6 +822,7 @@ fn insert_request(line: &str) -> Option<Option<InsertRequest>> {
             trigger: trigger.to_owned(),
             focus_token: Some(token.to_owned()),
             focus_generation: Some(generation),
+            tracking_id: None,
         }));
     }
     let trigger = line.strip_prefix("insert ")?;
@@ -745,7 +832,18 @@ fn insert_request(line: &str) -> Option<Option<InsertRequest>> {
         trigger: trigger.to_owned(),
         focus_token: None,
         focus_generation: None,
+        tracking_id: None,
     }))
+}
+
+/// The id in an `insert-result <id>` request, `Some(None)` for a malformed
+/// id, `None` for any other command.
+fn insert_result_request(line: &str) -> Option<Option<u64>> {
+    let id = line.trim().strip_prefix("insert-result")?;
+    if id.is_empty() {
+        return Some(None);
+    }
+    Some(id.strip_prefix(' ')?.parse().ok())
 }
 
 fn valid_context_key(terminal_id: &str, session_id: &str) -> bool {
@@ -1157,6 +1255,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         admission,
         pause,
         insert,
+        insert_outcomes,
         require_verified_insert,
         disable_control_socket_mutations,
         focus,
@@ -1185,18 +1284,53 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         return Ok(());
     }
     if let Some(request) = insert_request(&command) {
+        let tracked = command.starts_with("insert-target-tracked ");
         let response = match request {
             Some(request) if require_verified_insert && request.focus_token.is_none() => {
-                UNVERIFIED_INSERT_REFUSED
+                UNVERIFIED_INSERT_REFUSED.to_owned()
             }
-            Some(request) => {
-                *insert
+            Some(mut request) => {
+                let mut outcomes = insert_outcomes
                     .lock()
-                    .map_err(|_| anyhow::anyhow!("insert lock poisoned"))? = Some(request);
+                    .map_err(|_| anyhow::anyhow!("insert outcome lock poisoned"))?;
+                let id = tracked.then(|| outcomes.begin());
+                request.tracking_id = id;
+                let replaced = insert
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("insert lock poisoned"))?
+                    .replace(request);
+                // Only the latest insert is kept; one it replaced never runs.
+                if let Some(replaced_id) = replaced.and_then(|replaced| replaced.tracking_id) {
+                    outcomes.resolve(
+                        replaced_id,
+                        wayexpand_core::InsertDelivery::Failed(
+                            wayexpand_core::InsertFailure::Superseded,
+                        ),
+                    );
+                }
+                drop(outcomes);
                 crate::waker::wake_slot(&waker);
-                "insert scheduled\n"
+                match id {
+                    Some(id) => format!("insert scheduled id={id}\n"),
+                    None => "insert scheduled\n".to_owned(),
+                }
             }
-            None => "invalid trigger\n",
+            None => "invalid trigger\n".to_owned(),
+        };
+        stream.write_all(response.as_bytes())?;
+        return Ok(());
+    }
+    if let Some(id) = insert_result_request(&command) {
+        let response = match id {
+            Some(id) => insert_outcomes
+                .lock()
+                .map_err(|_| anyhow::anyhow!("insert outcome lock poisoned"))?
+                .get(id)
+                .map_or_else(
+                    || wayexpand_core::InsertDelivery::unknown_response_line(id),
+                    |state| state.response_line(id),
+                ),
+            None => "invalid insert id\n".to_owned(),
         };
         stream.write_all(response.as_bytes())?;
         return Ok(());
@@ -1319,9 +1453,17 @@ fn is_mutating_request(command: &str) -> bool {
     let command = command.trim();
     matches!(
         command,
-        "insert" | "insert-target" | "reload" | "stop" | "pause" | "resume" | "stats-clear"
+        "insert"
+            | "insert-target"
+            | "insert-target-tracked"
+            | "reload"
+            | "stop"
+            | "pause"
+            | "resume"
+            | "stats-clear"
     ) || command.starts_with("insert ")
         || command.starts_with("insert-target ")
+        || command.starts_with("insert-target-tracked ")
         || command.starts_with("stats-clear ")
         || command.starts_with("context-set ")
         || command.starts_with("context-clear ")
@@ -1738,6 +1880,7 @@ mod tests {
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::clone(&insert),
             require_verified_insert: true,
+            insert_outcomes: Arc::default(),
             disable_control_socket_mutations: true,
             focus,
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
@@ -1795,6 +1938,7 @@ mod tests {
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::clone(&insert),
             require_verified_insert: true,
+            insert_outcomes: Arc::default(),
             disable_control_socket_mutations: false,
             focus: Arc::new(Mutex::new(FocusSnapshot {
                 generation: 9,
@@ -1960,6 +2104,7 @@ mod tests {
                     pause: pause_worker,
                     insert,
                     require_verified_insert: false,
+                    insert_outcomes: Arc::default(),
                     disable_control_socket_mutations: false,
                     focus,
                     explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
@@ -2034,6 +2179,7 @@ mod tests {
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::clone(&insert),
             require_verified_insert: true,
+            insert_outcomes: Arc::default(),
             disable_control_socket_mutations: false,
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
@@ -2064,6 +2210,108 @@ mod tests {
     }
 
     #[test]
+    fn tracked_inserts_report_their_outcome_and_supersede_older_ones() {
+        use wayexpand_core::{InsertDelivery, InsertFailure};
+        let insert = Arc::new(Mutex::new(None));
+        let outcomes: Arc<Mutex<InsertOutcomes>> = Arc::default();
+        let flags = Flags {
+            reload: Arc::new(AtomicBool::new(false)),
+            stop: Arc::new(AtomicBool::new(false)),
+            admission: Arc::new(Mutex::new(ControlAdmissionState::default())),
+            pause: Arc::new(AtomicBool::new(false)),
+            insert: Arc::clone(&insert),
+            require_verified_insert: false,
+            insert_outcomes: Arc::clone(&outcomes),
+            disable_control_socket_mutations: false,
+            focus: Arc::new(Mutex::new(FocusSnapshot::default())),
+            explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
+            usage_clear: Arc::new(Mutex::new(None)),
+            status: Arc::new(Mutex::new(String::new())),
+            session_context: Arc::new(Mutex::new(
+                crate::session_context::SessionContextStore::default(),
+            )),
+            waker: Arc::default(),
+        };
+        let send = |command: &str| {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            client.write_all(command.as_bytes()).unwrap();
+            client.shutdown(std::net::Shutdown::Write).unwrap();
+            handle_request(server, flags.clone()).unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            response
+        };
+
+        // The untracked form keeps its reply and allocates nothing.
+        assert_eq!(send("insert-target 4 abcd ;sig\n"), "insert scheduled\n");
+        assert_eq!(insert.lock().unwrap().take().unwrap().tracking_id, None);
+
+        assert_eq!(
+            send("insert-target-tracked 4 abcd ;sig\n"),
+            "insert scheduled id=1\n"
+        );
+        let queued = insert.lock().unwrap().clone().unwrap();
+        assert_eq!(queued.tracking_id, Some(1));
+        assert_eq!(queued.focus_token.as_deref(), Some("abcd"));
+        assert_eq!(queued.trigger, ";sig");
+        assert_eq!(
+            send("insert-result 1\n"),
+            InsertDelivery::Pending.response_line(1)
+        );
+
+        // A newer request replaces the queued one, which then never runs.
+        assert_eq!(
+            send("insert-target-tracked 5 abcd ;sig\n"),
+            "insert scheduled id=2\n"
+        );
+        assert_eq!(
+            send("insert-result 1\n"),
+            InsertDelivery::Failed(InsertFailure::Superseded).response_line(1)
+        );
+
+        outcomes
+            .lock()
+            .unwrap()
+            .resolve(2, InsertDelivery::Delivered);
+        // A resolved outcome is final.
+        outcomes
+            .lock()
+            .unwrap()
+            .resolve(2, InsertDelivery::Uncertain);
+        assert_eq!(
+            send("insert-result 2\n"),
+            InsertDelivery::Delivered.response_line(2)
+        );
+        assert_eq!(
+            send("insert-result 99\n"),
+            InsertDelivery::unknown_response_line(99)
+        );
+        assert_eq!(send("insert-result\n"), "invalid insert id\n");
+        assert_eq!(send("insert-result x\n"), "invalid insert id\n");
+        assert_eq!(
+            send("insert-target-tracked 4 xyz ;sig\n"),
+            "invalid trigger\n"
+        );
+    }
+
+    #[test]
+    fn insert_outcomes_forget_the_oldest_beyond_their_bound() {
+        let mut outcomes = InsertOutcomes::default();
+        let first = outcomes.begin();
+        for _ in 0..INSERT_OUTCOMES_KEPT {
+            outcomes.begin();
+        }
+        assert_eq!(outcomes.get(first), None);
+        assert_eq!(outcomes.entries.len(), INSERT_OUTCOMES_KEPT);
+    }
+
+    #[test]
+    fn tracked_inserts_count_as_mutations_and_results_do_not() {
+        assert!(is_mutating_request("insert-target-tracked 4 abcd ;sig"));
+        assert!(!is_mutating_request("insert-result 4"));
+    }
+
+    #[test]
     fn insert_takes_the_trigger_verbatim_and_refuses_control_characters() {
         let reload = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
@@ -2078,6 +2326,7 @@ mod tests {
             pause,
             insert: Arc::clone(&insert),
             require_verified_insert: false,
+            insert_outcomes: Arc::default(),
             disable_control_socket_mutations: false,
             focus: Arc::clone(&focus),
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
@@ -2481,6 +2730,7 @@ mod tests {
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::new(Mutex::new(None)),
             require_verified_insert: false,
+            insert_outcomes: Arc::default(),
             disable_control_socket_mutations: false,
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,

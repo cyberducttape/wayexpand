@@ -907,6 +907,28 @@ pub(crate) fn insert_target(generation: u64, token: &str, trigger: &str) -> anyh
         .map_err(Into::into)
 }
 
+/// `insert-target` whose outcome the daemon records under the returned
+/// reply's id (`insert scheduled id=<n>`).
+pub(crate) fn insert_target_tracked(
+    generation: u64,
+    token: &str,
+    trigger: &str,
+) -> anyhow::Result<String> {
+    wayexpand_core::DaemonClient::from_environment()?
+        .execute(wayexpand_core::DaemonOperation::InsertTargetTracked {
+            generation,
+            token: token.to_owned(),
+            trigger: trigger.to_owned(),
+        })
+        .map_err(Into::into)
+}
+
+pub(crate) fn insert_result(id: u64) -> anyhow::Result<String> {
+    wayexpand_core::DaemonClient::from_environment()?
+        .execute(wayexpand_core::DaemonOperation::InsertResult { id })
+        .map_err(Into::into)
+}
+
 #[cfg(test)]
 mod tests {
     fn current_schema_fixture(fixture: &str) -> String {

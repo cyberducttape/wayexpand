@@ -33,6 +33,10 @@ use crate::{
 /// unverified window after this deadline.
 const FOCUS_RETURN_TIMEOUT: Duration = Duration::from_secs(2);
 const FOCUS_POLL_INTERVAL: Duration = Duration::from_millis(20);
+/// How long the picker waits for the daemon to confirm a scheduled insert.
+/// Simulated-key backends type long snippets slowly, so this is generous.
+const DELIVERY_TIMEOUT: Duration = Duration::from_secs(15);
+const DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(30);
 const PREVIEW_CONTEXT_REFRESH: Duration = Duration::from_secs(1);
 const MAX_RESULTS: usize = 60;
 
@@ -712,6 +716,23 @@ fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result
             .and_then(|response| focus_target_from_response(&response));
         if let Some(current) = current.and_then(|info| info.target) {
             if focus_returned_to_target(&target_focus, &current) {
+                let response = crate::runtime::insert_target_tracked(
+                    current.generation,
+                    &current.token,
+                    trigger,
+                )
+                .map_err(|error| error.to_string())?;
+                if let Some(id) = wayexpand_core::parse_insert_scheduled_id(&response) {
+                    return wait_for_delivery(id);
+                }
+                if !response.starts_with("unknown command") {
+                    return Err(format!(
+                        "daemon refused the insert: {}",
+                        response.trim_end()
+                    ));
+                }
+                // A daemon older than this picker cannot report delivery;
+                // use the untracked request, whose outcome is unknown.
                 let response =
                     crate::runtime::insert_target(current.generation, &current.token, trigger)
                         .map_err(|error| error.to_string())?;
@@ -730,6 +751,74 @@ fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result
             );
         }
         thread::sleep(FOCUS_POLL_INTERVAL);
+    }
+}
+
+/// Poll the daemon until it reports what became of insert `id`.
+fn wait_for_delivery(id: u64) -> Result<(), String> {
+    let deadline = Instant::now() + DELIVERY_TIMEOUT;
+    loop {
+        let response = crate::runtime::insert_result(id).map_err(|error| {
+            format!("Lost contact with WayExpand before the insert was confirmed: {error}")
+        })?;
+        let state = wayexpand_core::InsertDelivery::parse_response(&response, id)
+            .map_err(|()| format!("Unexpected reply from WayExpand: {}", response.trim_end()))?;
+        if let Some(verdict) = delivery_verdict(state) {
+            return verdict;
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "WayExpand did not confirm the insert within {} seconds. Check the field \
+                 before copying, in case part of the snippet was typed.",
+                DELIVERY_TIMEOUT.as_secs()
+            ));
+        }
+        thread::sleep(DELIVERY_POLL_INTERVAL);
+    }
+}
+
+/// What the picker does with a reported insert state: `None` keeps waiting,
+/// `Ok` closes the picker, `Err` shows the failure with "Copy instead".
+fn delivery_verdict(state: Option<wayexpand_core::InsertDelivery>) -> Option<Result<(), String>> {
+    use wayexpand_core::{InsertDelivery, InsertFailure};
+    let nothing = "Nothing was inserted.";
+    let failure = |reason: &str| Some(Err(format!("{reason} {nothing}")));
+    let Some(state) = state else {
+        return Some(Err(
+            "WayExpand lost track of this insert, perhaps because it restarted. Check the \
+             field before copying."
+                .to_owned(),
+        ));
+    };
+    match state {
+        InsertDelivery::Pending => None,
+        InsertDelivery::Delivered => Some(Ok(())),
+        InsertDelivery::Uncertain => Some(Err(
+            "The desktop could not confirm the insert, so part of the snippet may have been \
+             typed. Check the field before copying."
+                .to_owned(),
+        )),
+        InsertDelivery::Failed(InsertFailure::FocusChanged) => {
+            failure("Focus moved to another window before the snippet was typed.")
+        }
+        InsertDelivery::Failed(InsertFailure::PolicyRefused) => {
+            failure("Your organization's policy blocks this snippet.")
+        }
+        InsertDelivery::Failed(InsertFailure::InputArrived) => {
+            failure("Typing started before the snippet could be inserted.")
+        }
+        InsertDelivery::Failed(InsertFailure::NoBackend) => {
+            failure("WayExpand is reconnecting to the desktop.")
+        }
+        InsertDelivery::Failed(InsertFailure::Refused) => {
+            failure("WayExpand could not use this snippet; it may be disabled or changed.")
+        }
+        InsertDelivery::Failed(InsertFailure::NotApplied) => {
+            failure("The desktop did not accept the text.")
+        }
+        InsertDelivery::Failed(InsertFailure::Superseded) => {
+            failure("A newer insert replaced this one.")
+        }
     }
 }
 
@@ -910,10 +999,10 @@ fn top_ranked_into(ranked: &mut Vec<(i64, usize)>, limit: usize, result: &mut Ve
 #[cfg(test)]
 mod tests {
     use super::{
-        clipboard_fallback_allowed_by_policy, copy_snippet, focus_returned_to_target,
-        focus_target_from_response, format_app_scope, picker_expansion_is_eligible,
-        picker_focus_state, picker_needs_daemon_focus, score, top_ranked, top_ranked_into,
-        FocusInfo, FocusTarget, SearchEntry, MAX_RESULTS,
+        clipboard_fallback_allowed_by_policy, copy_snippet, delivery_verdict,
+        focus_returned_to_target, focus_target_from_response, format_app_scope,
+        picker_expansion_is_eligible, picker_focus_state, picker_needs_daemon_focus, score,
+        top_ranked, top_ranked_into, FocusInfo, FocusTarget, SearchEntry, MAX_RESULTS,
     };
 
     #[test]
@@ -1275,5 +1364,37 @@ mod tests {
 
         assert!(!picker_expansion_is_eligible(&expansion, false));
         assert!(!picker_expansion_is_eligible(&expansion, true));
+    }
+
+    #[test]
+    fn the_picker_closes_only_after_a_confirmed_delivery() {
+        use wayexpand_core::{InsertDelivery, InsertFailure};
+        assert_eq!(delivery_verdict(Some(InsertDelivery::Pending)), None);
+        assert_eq!(
+            delivery_verdict(Some(InsertDelivery::Delivered)),
+            Some(Ok(()))
+        );
+        let Some(Err(uncertain)) = delivery_verdict(Some(InsertDelivery::Uncertain)) else {
+            panic!("an uncertain insert must be shown");
+        };
+        assert!(uncertain.contains("Check the field"), "{uncertain}");
+        let Some(Err(lost)) = delivery_verdict(None) else {
+            panic!("an id the daemon forgot must be shown");
+        };
+        assert!(lost.contains("Check the field"), "{lost}");
+        for failure in [
+            InsertFailure::FocusChanged,
+            InsertFailure::PolicyRefused,
+            InsertFailure::InputArrived,
+            InsertFailure::NoBackend,
+            InsertFailure::Refused,
+            InsertFailure::NotApplied,
+            InsertFailure::Superseded,
+        ] {
+            let Some(Err(message)) = delivery_verdict(Some(InsertDelivery::Failed(failure))) else {
+                panic!("{failure:?} must be shown");
+            };
+            assert!(message.ends_with("Nothing was inserted."), "{message}");
+        }
     }
 }
