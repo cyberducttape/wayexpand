@@ -42,6 +42,8 @@ const DELIVERY_TIMEOUT: Duration = Duration::from_secs(15);
 const DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(30);
 const PREVIEW_CONTEXT_REFRESH: Duration = Duration::from_secs(1);
 const MAX_RESULTS: usize = 60;
+/// Sinks an unusable snippet below every usable match.
+const UNAVAILABLE_PENALTY: i64 = 1_000_000;
 
 /// Rank `entry` against `query` (both compared case-insensitively). A
 /// trigger match beats a description match, an earlier match beats a later
@@ -96,7 +98,45 @@ struct SearchEntry {
     trigger: String,
     description: String,
     app_scope: String,
-    eligible: bool,
+    availability: Availability,
+}
+
+/// Whether the picker can insert or copy a snippet, and if not, why. A
+/// snippet the picker cannot use is listed with its reason rather than
+/// silently missing; only snippets the user turned off are left out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Availability {
+    Available,
+    /// Disabled, or generate-only: turned off on purpose.
+    Hidden,
+    /// Command-backed snippets run only when their trigger is typed.
+    RunsCommand,
+    /// Form fields need input the picker cannot ask for yet.
+    NeedsInput,
+    /// Copy-only mode cannot check which app receives the paste.
+    AppRestricted,
+    /// Copy-only mode would put clipboard or secret content on the clipboard.
+    ReadsClipboard,
+}
+
+fn picker_availability(expansion: &ExpansionConfig, safe_direct_insert: bool) -> Availability {
+    if !expansion.is_keyboard_matchable() {
+        Availability::Hidden
+    } else if expansion.command.is_some() {
+        Availability::RunsCommand
+    } else if !form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty()) {
+        Availability::NeedsInput
+    } else if !safe_direct_insert && !expansion.app_filter.is_empty() {
+        Availability::AppRestricted
+    } else if !safe_direct_insert
+        && template_variables(&expansion.replacement)
+            .iter()
+            .any(|variable| matches!(*variable, "clipboard" | "secret"))
+    {
+        Availability::ReadsClipboard
+    } else {
+        Availability::Available
+    }
 }
 
 impl SearchEntry {
@@ -108,8 +148,12 @@ impl SearchEntry {
             // Eligibility does not change while the picker is open. Parse
             // forms and template variables once here instead of repeating
             // that work for every search edit.
-            eligible: picker_expansion_is_eligible(expansion, safe_direct_insert),
+            availability: picker_availability(expansion, safe_direct_insert),
         }
+    }
+
+    fn eligible(&self) -> bool {
+        self.availability == Availability::Available
     }
 }
 
@@ -224,8 +268,9 @@ impl PickerApp {
         }
     }
 
-    /// Cache enabled plain-text snippet indices, best match first. Command
-    /// snippets are left out: they only run when their trigger is typed.
+    /// Cache matching snippet indices, best match first. Snippets the picker
+    /// cannot use rank after every usable one and show why; snippets the user
+    /// turned off are left out.
     fn refresh_results(&mut self) {
         let query = self.query.trim().to_lowercase();
         if self.cached_query.as_deref() == Some(query.as_str())
@@ -238,10 +283,15 @@ impl PickerApp {
         }
         self.ranked_scratch.clear();
         for (index, entry) in self.search_index.iter().enumerate() {
-            if !entry.eligible {
+            if entry.availability == Availability::Hidden {
                 continue;
             }
             if let Some(score) = score_normalized(&query, &entry.trigger, &entry.description) {
+                let score = if entry.eligible() {
+                    score
+                } else {
+                    score - UNAVAILABLE_PENALTY
+                };
                 self.ranked_scratch.push((score, index));
             }
         }
@@ -519,7 +569,12 @@ impl eframe::App for PickerApp {
             self.selected = self.selected.saturating_sub(1);
         }
         self.selected = self.selected.min(count.saturating_sub(1));
-        let mut chosen = (ready && enter && count > 0).then(|| result_indices[self.selected]);
+        // Enter and clicks pick only usable snippets; an unusable row shows
+        // why instead of doing something unexpected.
+        let usable = |index: usize| self.search_index[index].eligible();
+        let mut chosen = (ready && enter && count > 0)
+            .then(|| result_indices[self.selected])
+            .filter(|index| usable(*index));
 
         egui::CentralPanel::default()
             .frame(
@@ -546,18 +601,6 @@ impl eframe::App for PickerApp {
                     self.focus_requested = true;
                 }
                 ui.add_space(10.0);
-                                if !self.safe_direct_insert
-                                    && self.config.expansion.iter().any(|expansion| {
-                                        expansion.is_keyboard_matchable()
-                                            && !expansion.app_filter.is_empty()
-                                    })
-                {
-                    ui.label(
-                                        RichText::new("App-restricted snippets are hidden in copy-only mode because manual paste cannot verify the destination application.")
-                            .small()
-                            .color(palette.muted),
-                    );
-                }
 
                 let mut fallback_error = None;
                 // Copy what the cards show out of the state, so the failure
@@ -673,6 +716,7 @@ impl eframe::App for PickerApp {
                             let preview = self.preview_at(expansion_index);
                             let expansion = &self.config.expansion[expansion_index];
                             let selected = index == self.selected;
+                            let availability = self.search_index[expansion_index].availability;
                             let response = picker_row(
                                 ui,
                                 &palette,
@@ -681,6 +725,7 @@ impl eframe::App for PickerApp {
                                 &self.strings,
                                 expansion,
                                 selected,
+                                self.strings.picker_unavailable_reason(availability),
                             );
                             if selected && (up || down) {
                                 response.scroll_to_me(None);
@@ -688,7 +733,10 @@ impl eframe::App for PickerApp {
                             if response.hovered() && ui.input(|input| input.pointer.is_moving()) {
                                 self.selected = index;
                             }
-                            if ready && response.clicked() {
+                            if ready
+                                && response.clicked()
+                                && availability == Availability::Available
+                            {
                                 chosen = Some(expansion_index);
                             }
                         }
@@ -719,6 +767,7 @@ impl eframe::App for PickerApp {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn picker_row(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -727,6 +776,7 @@ fn picker_row(
     strings: &Strings,
     expansion: &ExpansionConfig,
     selected: bool,
+    unavailable: Option<&str>,
 ) -> egui::Response {
     // Show what will be typed, not template syntax: `{{date}}` becomes the
     // date and the `{{cursor}}` marker disappears.
@@ -747,7 +797,11 @@ fn picker_row(
                     RichText::new(&expansion.trigger)
                         .monospace()
                         .strong()
-                        .color(palette.accent),
+                        .color(if unavailable.is_some() {
+                            palette.muted
+                        } else {
+                            palette.accent
+                        }),
                 );
                 if !expansion.description.is_empty() {
                     ui.label(&expansion.description);
@@ -767,6 +821,10 @@ fn picker_row(
                     });
                 }
             });
+            if let Some(reason) = unavailable {
+                ui.label(RichText::new(reason).small().color(palette.warning));
+                return;
+            }
             ui.add(
                 egui::Label::new(RichText::new(first_line).small().color(palette.muted)).truncate(),
             );
@@ -1188,14 +1246,7 @@ fn clipboard_fallback_allowed_by_policy(policy: &wayexpand_core::OrganizationPol
 }
 
 fn picker_expansion_is_eligible(expansion: &ExpansionConfig, safe_direct_insert: bool) -> bool {
-    expansion.is_keyboard_matchable()
-        && expansion.command.is_none()
-        && form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
-        && (safe_direct_insert || expansion.app_filter.is_empty())
-        && (safe_direct_insert
-            || !template_variables(&expansion.replacement)
-                .iter()
-                .any(|variable| matches!(*variable, "clipboard" | "secret")))
+    picker_availability(expansion, safe_direct_insert) == Availability::Available
 }
 
 fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
@@ -1518,14 +1569,14 @@ mod tests {
             output_file: None,
         };
 
-        assert!(SearchEntry::from_expansion(&expansion, false).eligible);
+        assert!(SearchEntry::from_expansion(&expansion, false).eligible());
 
         let mut app_scoped = expansion;
         app_scoped
             .app_filter
             .push("app_id_exact:org.example.Terminal".into());
-        assert!(!SearchEntry::from_expansion(&app_scoped, false).eligible);
-        assert!(SearchEntry::from_expansion(&app_scoped, true).eligible);
+        assert!(!SearchEntry::from_expansion(&app_scoped, false).eligible());
+        assert!(SearchEntry::from_expansion(&app_scoped, true).eligible());
     }
 
     #[test]
@@ -1813,6 +1864,85 @@ mod tests {
                     "{trigger}: rendered text does not bypass the rules"
                 );
             }
+        }
+    }
+
+    mod availability {
+        use super::super::{picker_availability, Availability, PickerApp};
+
+        fn picker(toml: &str, safe_direct_insert: bool) -> PickerApp {
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "wayexpand-picker-availability-{}-{}.toml",
+                std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            std::fs::write(&path, toml).unwrap();
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+                .unwrap();
+            let loaded = wayexpand_core::Config::load_versioned(&path).unwrap();
+            let _ = std::fs::remove_file(&path);
+            PickerApp::new(
+                loaded.config,
+                loaded.revision,
+                crate::lang::Language::English,
+                crate::colorpack::ColorPack::Default,
+                true,
+                safe_direct_insert,
+                true,
+                None,
+            )
+        }
+
+        const LIBRARY: &str =
+            "[[expansion]]\ntrigger = ';form'\nreplacement = 'Hi {{field:name}}'\n\n\
+             [[expansion]]\ntrigger = ';cmd'\nreplacement = ''\n\
+             [expansion.command]\nprogram = '/usr/bin/true'\n\n\
+             [[expansion]]\ntrigger = ';scoped'\nreplacement = 'scoped'\n\
+             app_filter = ['org.example.Editor']\n\n\
+             [[expansion]]\ntrigger = ';off'\nreplacement = 'off'\nenabled = false\n\n\
+             [[expansion]]\ntrigger = ';sig'\nreplacement = 'Best regards'\n";
+
+        #[test]
+        fn unusable_snippets_are_listed_after_usable_ones_with_a_reason() {
+            let mut app = picker(LIBRARY, false);
+            app.refresh_results();
+            let listed: Vec<&str> = app
+                .result_indices
+                .iter()
+                .map(|index| app.config.expansion[*index].trigger.as_str())
+                .collect();
+            assert_eq!(listed.first(), Some(&";sig"), "{listed:?}");
+            assert!(!listed.contains(&";off"), "turned-off snippets stay out");
+            for trigger in [";form", ";cmd", ";scoped"] {
+                assert!(listed.contains(&trigger), "{trigger} is listed: {listed:?}");
+            }
+            for index in &app.result_indices {
+                let availability = app.search_index[*index].availability;
+                let reason = app.strings.picker_unavailable_reason(availability);
+                assert_eq!(
+                    reason.is_some(),
+                    availability != Availability::Available,
+                    "{availability:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn the_reason_depends_on_how_the_picker_delivers() {
+            let copy_only = picker(LIBRARY, false);
+            let direct = picker(LIBRARY, true);
+            let scoped = |app: &PickerApp| {
+                let index = app
+                    .config
+                    .expansion
+                    .iter()
+                    .position(|expansion| expansion.trigger == ";scoped")
+                    .unwrap();
+                picker_availability(&app.config.expansion[index], app.safe_direct_insert)
+            };
+            assert_eq!(scoped(&copy_only), Availability::AppRestricted);
+            assert_eq!(scoped(&direct), Availability::Available);
         }
     }
 }

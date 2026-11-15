@@ -1262,3 +1262,52 @@ impl Strings {
         }
     }
 }
+
+impl Strings {
+    /// Why the Quick Picker cannot use a listed snippet, or `None` if it can.
+    pub(crate) fn picker_unavailable_reason(
+        &self,
+        availability: crate::picker::Availability,
+    ) -> Option<&'static str> {
+        use crate::picker::Availability as A;
+        Some(match (availability, self.lang) {
+            (A::Available | A::Hidden, _) => return None,
+            (A::RunsCommand, Language::English) => {
+                "Runs a command, so it works only when you type its trigger."
+            }
+            (A::RunsCommand, Language::German) => {
+                "Führt einen Befehl aus und funktioniert daher nur, wenn Sie den Auslöser tippen."
+            }
+            (A::RunsCommand, Language::Indonesian) => {
+                "Menjalankan perintah, jadi hanya berfungsi saat Anda mengetik pemicunya."
+            }
+            (A::NeedsInput, Language::English) => {
+                "Needs input the picker cannot ask for yet. Type its trigger, or use it from the editor."
+            }
+            (A::NeedsInput, Language::German) => {
+                "Braucht Eingaben, die der Schnellwähler noch nicht abfragen kann. Tippen Sie den Auslöser oder nutzen Sie den Editor."
+            }
+            (A::NeedsInput, Language::Indonesian) => {
+                "Memerlukan masukan yang belum bisa ditanyakan picker. Ketik pemicunya, atau gunakan dari editor."
+            }
+            (A::AppRestricted, Language::English) => {
+                "Limited to specific apps. Copying cannot check where it is pasted, so type its trigger in that app."
+            }
+            (A::AppRestricted, Language::German) => {
+                "Auf bestimmte Apps beschränkt. Beim Kopieren lässt sich das Ziel nicht prüfen; tippen Sie den Auslöser in dieser App."
+            }
+            (A::AppRestricted, Language::Indonesian) => {
+                "Terbatas untuk aplikasi tertentu. Menyalin tidak bisa memeriksa tujuan tempel, jadi ketik pemicunya di aplikasi itu."
+            }
+            (A::ReadsClipboard, Language::English) => {
+                "Reads the clipboard, so it is not copied for pasting. Type its trigger instead."
+            }
+            (A::ReadsClipboard, Language::German) => {
+                "Liest die Zwischenablage und wird deshalb nicht zum Einfügen kopiert. Tippen Sie stattdessen den Auslöser."
+            }
+            (A::ReadsClipboard, Language::Indonesian) => {
+                "Membaca papan klip, jadi tidak disalin untuk ditempel. Ketik pemicunya saja."
+            }
+        })
+    }
+}
