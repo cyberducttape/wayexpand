@@ -364,9 +364,19 @@ allowed_backends = ["input-method-v2", "libei"]
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("policy.toml");
         std::fs::write(&path, "[organization]\ndisable_commands = true\n").unwrap();
+        // World-writable, so the file is untrusted whoever runs the test:
+        // not owned by root for a normal user, and writable by others for a
+        // package build that runs %check as root.
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o666))
+            .unwrap();
 
         let error = load_policy_from_path(&path, &root).unwrap_err();
-        assert!(error.contains("owned by root") || error.contains("accessible"));
+        assert!(
+            error.contains("owned by root")
+                || error.contains("accessible")
+                || error.contains("writable by group or world"),
+            "{error}"
+        );
 
         std::fs::remove_file(path).unwrap();
         std::fs::remove_dir(root).unwrap();

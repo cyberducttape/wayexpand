@@ -24,7 +24,7 @@ optdepends=(
     'wl-clipboard: for the certification harness clipboard scenarios'
     'polkit: for action-specific authorization of broker actions'
 )
-source=("https://github.com/cyberducttape/wayexpand/releases/download/v1.3.5/wayexpand-1.3.5.tar.gz")
+source=("https://github.com/cyberducttape/wayexpand/releases/download/1.3.5/wayexpand-1.3.5.tar.gz")
 sha256sums=('09b7c57e51a666c4d261721f8d15ef0003b5608b0a3f1ada4707d2e397dbeaee')
 conflicts=('wayexpand-git')
 
