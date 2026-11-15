@@ -124,18 +124,21 @@ the guide offers a copy-only Quick Picker for manual paste.
 
 ## Your first minute
 
-![WayExpand's first-run screen in the Terminal Blue color pack with four steps: Turn on WayExpand, Verify this desktop session, Add your first snippet, Check the Matcher preview](docs/images/wayexpand-first-run.png)
+![WayExpand's first-run screen in the Terminal Blue color pack with three steps: Connect your desktop, Create a snippet, Test it](docs/images/wayexpand-first-run.png)
 
-1. **Turn on WayExpand** — one click in the GUI, or `wayexpand setup` in a
-   terminal. Setup configures the supported input route without requiring
-   manual IBus commands.
-2. **Verify this desktop session** — setup guides you through a harmless real
-   application insertion and ends as Working, Configured awaiting test, or
-   Action required. The GUI's *Open diagnostics* shows route capabilities and
-   certification separately.
-3. **Add a snippet** — *Create test snippet*, write your own, or import Espanso.
-4. **Try it** — type the trigger in *Matcher preview*, then in a normal text
-   field in an app you use.
+1. **Connect your desktop** — *Turn on WayExpand* in the GUI, or run
+   `wayexpand setup` in a terminal. Setup configures the supported input route
+   without manual IBus commands, and says what is missing if it cannot.
+2. **Create a snippet** — *Create test snippet*, write your own, or import
+   Espanso.
+3. **Test it** — open a plain text field in another app, press *Test in a real
+   application*, switch to that field and type the trigger once within 30
+   seconds. WayExpand asks whether the text appeared correctly and records
+   setup as working only when you confirm it. Until then, *Open Quick Picker*
+   copies snippets for you to paste.
+
+*Troubleshooting details* under the steps holds the route, permission and
+certification notes, with *Open diagnostics* for the full report.
 
 Set up the picker by adding a desktop shortcut (for example <kbd>Super</kbd> +
 <kbd>.</kbd>) that runs `wayexpand-gui --picker`. Scripts can do the same with

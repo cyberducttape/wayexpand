@@ -76,9 +76,7 @@ impl GuiApp {
                                 self.start_setup();
                             }
                         } else {
-                            self.status = Status::warning(
-                                "No compatible input route is available yet. Review Diagnostics for the missing prerequisite, then try guided setup again.",
-                            );
+                            self.status = Status::warning(self.strings.setup_no_route_available());
                             self.diagnostics_open = true;
                         }
                     }

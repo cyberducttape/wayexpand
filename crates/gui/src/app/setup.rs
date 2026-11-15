@@ -860,9 +860,7 @@ impl GuiApp {
                     self.status = Status::error(self.strings.status_setup_failed(&summary));
                 } else if task_kind.as_deref() == Some("setup-preflight") {
                     self.diagnostics_open = true;
-                    self.status = Status::error(
-                        "IBus setup preflight stopped unexpectedly. Open Diagnostics and retry.",
-                    );
+                    self.status = Status::error(self.strings.setup_preflight_stopped());
                 } else {
                     self.status = Status::error(self.strings.status_setup_failed("worker stopped"));
                 }

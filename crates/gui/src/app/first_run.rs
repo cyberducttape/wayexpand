@@ -34,22 +34,6 @@ fn first_run_outcome_label(strings: &Strings, outcome: FirstRunOutcome) -> &'sta
     }
 }
 
-fn verification_scope_label(
-    strings: &Strings,
-    outcome: FirstRunOutcome,
-    application: Option<&str>,
-) -> String {
-    match (outcome, application) {
-        (FirstRunOutcome::WorkingInTestedApplication, Some(application)) => {
-            strings.verification_in_application(application)
-        }
-        (FirstRunOutcome::WorkingInTestedApplication, None) => {
-            strings.verification_unnamed_application().to_owned()
-        }
-        _ => strings.verification_not_tested().to_owned(),
-    }
-}
-
 fn replacement_test_is_admitted(
     route_ready: bool,
     atomic_replace: Option<bool>,
@@ -255,6 +239,9 @@ impl GuiApp {
         // The IBus route needs no background service; a live engine means
         // WayExpand is already on.
         let ibus_only = !daemon_running && self.ibus_active;
+        // Until the first status answer arrives, "not running" would be a
+        // guess, and offering Turn on could start setup for a running service.
+        let checking = self.daemon_reachable.is_none() && !self.ibus_active;
         let route_connected = daemon_running
             && !self.paused
             && self.route_state == Some(runtime::RouteState::Connected);
@@ -292,7 +279,6 @@ impl GuiApp {
             .as_ref()
             .map(|(trigger, _)| trigger.clone())
             .unwrap_or_else(|| ONBOARDING_TRIGGER.to_owned());
-        let sample_exists = onboarding_snippet(&self.config).is_some();
         let matcher_passed = test_snippet.is_some()
             && self.playground.last_trigger.as_deref() == Some(sample_trigger.as_str())
             && test_snippet
@@ -306,14 +292,14 @@ impl GuiApp {
                 .or_else(|| runtime::status_field(&self.daemon_status, key))
         };
         let source = status_value("source").unwrap_or_else(|| "unknown capture".into());
-        let restart_command = match source.as_str() {
-            "evdev" => Some("systemctl --user restart wayexpand-evdev.service"),
-            "input-method" | "input-method-v2" => {
-                Some("systemctl --user restart wayexpand-input-method.service")
-            }
-            "stdin" => Some("systemctl --user restart wayexpand-control.service"),
+        let restart_unit = match source.as_str() {
+            "evdev" => Some("wayexpand-evdev.service"),
+            "input-method" | "input-method-v2" => Some("wayexpand-input-method.service"),
+            "stdin" => Some("wayexpand-control.service"),
             _ => None,
         };
+        let restart_command = restart_unit.map(|unit| format!("systemctl --user restart {unit}"));
+        let restart_command = restart_command.as_deref();
         let injection = self
             .daemon_capabilities
             .as_ref()
@@ -385,11 +371,7 @@ impl GuiApp {
             .id_salt("first_run_guide")
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.add_space(12.0);
-
-                    // Progress is shown by the numbered steps below; a raw
-                    // "Installed / Configured / Verified" line repeated it.
-                    ui.add_space(8.0);
+                    ui.add_space(20.0);
                     theme::brand_mark(ui, 36.0, palette.accent);
                     ui.label(
                         RichText::new(self.strings.welcome_title())
@@ -415,126 +397,14 @@ impl GuiApp {
                 }
                 theme::card(ui, palette, |ui| {
                     ui.set_width(ui.available_width());
-                    match outcome {
-                        FirstRunOutcome::WorkingInTestedApplication => {
-                            ui.colored_label(
-                                palette.success,
-                                first_run_outcome_label(&self.strings, outcome),
-                            );
-                            let application = self
-                                .desktop_test_verified_application
-                                .as_deref()
-                                .unwrap_or(self.strings.the_tested_application());
-                            ui.label(self.strings.confirmed_in_application(application));
-                            ui.label(
-                                RichText::new(verification_scope_label(
-                                    &self.strings,
-                                    outcome,
-                                    self.desktop_test_verified_application.as_deref(),
-                                ))
-                                .small()
-                                .color(palette.muted),
-                            );
-                        }
-                        FirstRunOutcome::SafeFallback => {
-                            ui.colored_label(palette.warning, self.strings.outcome_safe_fallback());
-                            ui.label(
-                                RichText::new(verification_scope_label(
-                                    &self.strings,
-                                    outcome,
-                                    None,
-                                ))
-                                .small()
-                                .color(palette.muted),
-                            );
-                            if matcher_passed {
-                                ui.label(self.strings.safe_fallback_matcher_passed());
-                            } else {
-                                ui.label(self.strings.safe_fallback_nothing_verified());
-                            }
-                            if let Some(assurance) = &route_assurance {
-                                ui.label(RichText::new(*assurance).small().color(palette.muted));
-                            }
-                            ui.horizontal_wrapped(|ui| {
-                                if replacement_test_admitted
-                                    && test_snippet.is_some()
-                                    && theme::primary_button(
-                                        ui,
-                                        palette,
-                                        self.strings.test_in_real_application(),
-                                    )
-                                    .clicked()
-                                {
-                                    self.begin_onboarding_desktop_test();
-                                }
-                                if !replacement_test_admitted
-                                    && theme::primary_button(
-                                        ui,
-                                        palette,
-                                        self.strings.review_setup_and_consent(),
-                                    )
-                                    .clicked()
-                                {
-                                    self.start_guided_setup();
-                                }
-                                if theme::secondary_button(
-                                    ui,
-                                    palette,
-                                    self.strings.open_quick_picker_copy(),
-                                )
-                                .clicked()
-                                {
-                                    self.open_copy_only_picker();
-                                }
-                            });
-                        }
-                        // Not an error on a first run: an amber note that
-                        // points at the steps. Its one primary action only
-                        // appears once step 1 no longer offers the same one,
-                        // and checks are refreshed from step 2.
-                        FirstRunOutcome::SetupIncomplete => {
-                            ui.label(
-                                RichText::new(self.strings.first_run_setup_incomplete())
-                                    .strong()
-                                    .color(palette.warning),
-                            );
-                            ui.label(self.strings.first_run_route_not_ready(&route_state_detail));
-                            // Never leave it implied that a real application
-                            // was verified.
-                            ui.label(
-                                RichText::new(verification_scope_label(
-                                    &self.strings,
-                                    outcome,
-                                    None,
-                                ))
-                                .small()
-                                .color(palette.muted),
-                            );
-                            ui.horizontal_wrapped(|ui| {
-                                if (daemon_running || ibus_only)
-                                    && theme::primary_button(
-                                        ui,
-                                        palette,
-                                        self.strings.first_run_continue_setup(),
-                                    )
-                                    .clicked()
-                                {
-                                    self.start_guided_setup();
-                                }
-                                if ui.link(self.strings.first_run_quick_picker()).clicked() {
-                                    self.open_copy_only_picker();
-                                }
-                            });
-                        }
-                    }
-                });
-                ui.add_space(10.0);
-                theme::card(ui, palette, |ui| {
-                    ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
                         ui.label(
-                            RichText::new(self.strings.onboarding_desktop(&desktop, is_wayland))
-                                .strong(),
+                            RichText::new(first_run_outcome_label(&self.strings, outcome))
+                                .strong()
+                                .color(match outcome {
+                                    FirstRunOutcome::WorkingInTestedApplication => palette.success,
+                                    _ => palette.warning,
+                                }),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.small_button(self.strings.onboarding_defer()).clicked() {
@@ -550,28 +420,26 @@ impl GuiApp {
                             }
                         });
                     });
-                    ui.label(
-                        RichText::new(
-                            self.strings
-                                .onboarding_install_summary(env!("CARGO_PKG_VERSION")),
-                        )
-                        .color(palette.muted),
-                    );
-                    ui.add_space(12.0);
+                    ui.add_space(10.0);
 
+                    // 1. Connect your desktop.
                     onboarding_step(
                         ui,
                         palette,
                         1,
-                        self.strings.onboarding_turn_on_title(),
-                        daemon_running || ibus_only,
+                        self.strings.step_connect_title(),
+                        route_ready,
                     );
-                    ui.indent("first_run_service", |ui| {
-                        if ibus_only {
-                            ui.colored_label(palette.success, self.strings.ibus_active_status());
-                        } else if daemon_running {
-                            ui.colored_label(palette.success, self.strings.running_status());
-                        } else {
+                    ui.indent("first_run_connect", |ui| {
+                        if checking {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(
+                                    RichText::new(self.strings.first_run_checking())
+                                        .color(palette.muted),
+                                );
+                            });
+                        } else if !(daemon_running || ibus_only) {
                             ui.label(
                                 RichText::new(self.strings.onboarding_turn_on_help())
                                     .color(palette.muted),
@@ -585,57 +453,66 @@ impl GuiApp {
                                         .color(palette.muted),
                                 );
                             }
-                            if ui.link(self.strings.onboarding_evdev_setup()).clicked() {
-                                self.evdev_setup_acknowledged = false;
-                                self.evdev_setup_open = true;
-                            }
-                        }
-                    });
-                    ui.add_space(10.0);
-
-                    onboarding_step(
-                        ui,
-                        palette,
-                        2,
-                        self.strings.onboarding_backend_title(),
-                        route_ready,
-                    );
-                    ui.indent("first_run_backend", |ui| {
-                        ui.label(
-                            RichText::new(self.strings.onboarding_session_state(
-                                route_ready,
-                                &route_state_detail,
-                                daemon_build,
-                                restart_command,
-                            ))
-                            .color(if route_ready {
-                                palette.success
-                            } else {
-                                palette.warning
-                            }),
-                        );
-                        if let Some(assurance) = route_assurance {
-                            ui.label(RichText::new(assurance).small().color(palette.muted));
-                        }
-                        ui.horizontal_wrapped(|ui| {
-                            if theme::secondary_button(
-                                ui,
-                                palette,
-                                self.strings.onboarding_refresh_checks(),
-                            )
-                            .clicked()
-                            {
-                                self.refresh_diagnostics(true);
-                            }
-                            if ui
-                                .button(self.strings.onboarding_open_diagnostics())
+                        } else if route_ready {
+                            ui.colored_label(
+                                palette.success,
+                                crate::lang::fill(
+                                    self.strings.first_run_connected(),
+                                    &[&route_state_detail],
+                                ),
+                            );
+                        } else {
+                            ui.colored_label(
+                                palette.warning,
+                                self.strings.onboarding_session_state(
+                                    false,
+                                    &route_state_detail,
+                                    daemon_build,
+                                    restart_command,
+                                ),
+                            );
+                            ui.horizontal_wrapped(|ui| {
+                                if daemon_build == Some(runtime::DaemonBuildState::RestartRequired)
+                                {
+                                    if let Some(unit) = restart_unit {
+                                        if ui
+                                            .add_enabled(
+                                                self.setup_task.is_none(),
+                                                egui::Button::new(
+                                                    self.strings.first_run_restart_service(),
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.service_restart_unit = Some(unit.to_owned());
+                                            self.service_restart_confirm_open = true;
+                                        }
+                                    }
+                                }
+                                if !gnome_ibus
+                                    && !replacement_test_admitted
+                                    && daemon_build == Some(runtime::DaemonBuildState::Current)
+                                    && theme::primary_button(
+                                        ui,
+                                        palette,
+                                        self.strings.first_run_continue_setup(),
+                                    )
+                                    .clicked()
+                                {
+                                    self.start_guided_setup();
+                                }
+                                if theme::secondary_button(
+                                    ui,
+                                    palette,
+                                    self.strings.first_run_check_again(),
+                                )
                                 .clicked()
-                            {
-                                self.diagnostics_open = true;
-                                self.refresh_diagnostics(false);
-                            }
-                        });
-                        if gnome_ibus {
+                                {
+                                    self.refresh_diagnostics(true);
+                                }
+                            });
+                        }
+                        if gnome_ibus && !checking {
                             ui.add_space(4.0);
                             ui.label(RichText::new(self.strings.gnome_input_source()).strong());
                             ui.label(self.strings.gnome_source_state(
@@ -685,33 +562,25 @@ impl GuiApp {
                                 });
                             }
                         }
-                        if !route_ready {
-                            ui.label(
-                                RichText::new(self.strings.onboarding_probe_caveat())
-                                    .small()
-                                    .color(palette.muted),
-                            );
-                        }
                     });
-                    ui.add_space(10.0);
+                    ui.add_space(12.0);
 
+                    // 2. Create a snippet.
                     onboarding_step(
                         ui,
                         palette,
-                        3,
-                        self.strings.onboarding_snippet_title(),
-                        sample_exists || test_snippet.is_some(),
+                        2,
+                        self.strings.step_create_title(),
+                        test_snippet.is_some(),
                     );
                     ui.indent("first_run_snippet", |ui| {
-                        if sample_exists {
+                        if let Some((trigger, replacement)) = &test_snippet {
                             ui.colored_label(
                                 palette.success,
-                                self.strings.onboarding_sample_saved(),
-                            );
-                        } else if test_snippet.is_some() {
-                            ui.colored_label(
-                                palette.success,
-                                self.strings.static_test_expansion_available(),
+                                crate::lang::fill(
+                                    self.strings.first_run_snippet_ready(),
+                                    &[&trigger, &replacement],
+                                ),
                             );
                         } else {
                             ui.label(
@@ -728,10 +597,12 @@ impl GuiApp {
                                 {
                                     self.create_test_snippet();
                                 }
+                                // The editor shows a new draft over the guide,
+                                // which returns once the snippet is saved or
+                                // discarded, with this step checked.
                                 if theme::secondary_button(ui, palette, self.strings.new_button())
                                     .clicked()
                                 {
-                                    self.onboarding_visible = false;
                                     self.request_action(PendingAction::New);
                                 }
                                 if theme::secondary_button(
@@ -741,88 +612,88 @@ impl GuiApp {
                                 )
                                 .clicked()
                                 {
-                                    self.onboarding_visible = false;
                                     self.import_open = true;
                                     self.import_preview = None;
                                 }
                             });
                         }
                     });
-                    ui.add_space(10.0);
+                    ui.add_space(12.0);
 
+                    // 3. Test it, or fall back to copy and paste.
                     onboarding_step(
                         ui,
                         palette,
-                        4,
-                        self.strings.onboarding_matcher_title(),
-                        matcher_passed,
-                    );
-                    ui.indent("first_run_matcher", |ui| {
-                        ui.label(
-                            RichText::new(self.strings.onboarding_matcher_help())
-                                .color(palette.muted),
-                        );
-                        ui.label(
-                            RichText::new(self.strings.onboarding_trigger(&sample_trigger))
-                                .monospace()
-                                .strong(),
-                        );
-                        ui.colored_label(
-                            palette.accent,
-                            test_snippet.as_ref().map_or_else(
-                                || self.strings.onboarding_expected_result().to_owned(),
-                                |(_, replacement)| self.strings.expected_result(replacement),
-                            ),
-                        );
-                        if test_snippet.is_none() {
-                            ui.label(
-                                RichText::new(self.strings.onboarding_create_sample_first())
-                                    .small()
-                                    .color(palette.warning),
-                            );
-                        }
-                    });
-                    ui.add_space(10.0);
-
-                    onboarding_step(
-                        ui,
-                        palette,
-                        5,
-                        self.strings.onboarding_real_app_title(),
+                        3,
+                        self.strings.step_test_title(),
                         outcome == FirstRunOutcome::WorkingInTestedApplication,
                     );
-                    ui.indent("first_run_real_app", |ui| {
-                        ui.label(
-                            RichText::new(self.strings.onboarding_real_app_help())
-                                .color(palette.muted),
-                        );
-                        let has_static_test = test_snippet.is_some();
-                        if !has_static_test {
-                            ui.label(
-                                RichText::new(self.strings.onboarding_create_sample_first())
-                                    .color(palette.warning),
+                    ui.indent("first_run_test", |ui| {
+                        let mut offer_picker = true;
+                        if outcome == FirstRunOutcome::WorkingInTestedApplication {
+                            offer_picker = false;
+                            let application = self
+                                .desktop_test_verified_application
+                                .as_deref()
+                                .unwrap_or(self.strings.the_tested_application());
+                            ui.colored_label(
+                                palette.success,
+                                self.strings.confirmed_in_application(application),
                             );
-                        } else if outcome == FirstRunOutcome::SetupIncomplete
-                            && daemon_build == Some(runtime::DaemonBuildState::RestartRequired)
-                        {
+                        } else if !route_ready {
                             ui.label(
-                                RichText::new(
-                                    self.strings.onboarding_stale_daemon_state(restart_command),
-                                )
-                                .color(palette.warning),
-                            );
-                        } else if outcome == FirstRunOutcome::SafeFallback
-                            && !replacement_test_admitted
-                        {
-                            ui.label(
-                                RichText::new(self.strings.authorize_or_use_picker())
-                                    .color(palette.warning),
-                            );
-                        } else if outcome == FirstRunOutcome::SafeFallback {
-                            ui.label(
-                                RichText::new(self.strings.use_test_action_above())
+                                RichText::new(self.strings.first_run_test_needs_connection())
                                     .color(palette.muted),
                             );
+                        } else if test_snippet.is_none() {
+                            ui.label(
+                                RichText::new(self.strings.first_run_test_needs_snippet())
+                                    .color(palette.muted),
+                            );
+                        } else if !replacement_test_admitted {
+                            ui.colored_label(
+                                palette.warning,
+                                self.strings.authorize_or_use_picker(),
+                            );
+                            if theme::primary_button(
+                                ui,
+                                palette,
+                                self.strings.review_setup_and_consent(),
+                            )
+                            .clicked()
+                            {
+                                self.start_guided_setup();
+                            }
+                        } else {
+                            ui.label(
+                                RichText::new(self.strings.first_run_test_help())
+                                    .color(palette.muted),
+                            );
+                            if theme::primary_button(
+                                ui,
+                                palette,
+                                self.strings.test_in_real_application(),
+                            )
+                            .clicked()
+                            {
+                                self.begin_onboarding_desktop_test();
+                            }
+                        }
+                        if test_snippet.is_some()
+                            && outcome != FirstRunOutcome::WorkingInTestedApplication
+                        {
+                            if matcher_passed {
+                                ui.colored_label(
+                                    palette.success,
+                                    self.strings.first_run_trigger_works_inside(),
+                                );
+                            } else if ui.link(self.strings.first_run_try_inside()).clicked() {
+                                self.try_live_open = true;
+                            }
+                        }
+                        if offer_picker && ui.link(self.strings.open_quick_picker_copy()).clicked()
+                        {
+                            self.open_copy_only_picker();
                         }
                         if self.onboarding_show_troubleshooting {
                             ui.add_space(8.0);
@@ -834,67 +705,83 @@ impl GuiApp {
                                 RichText::new(self.strings.onboarding_troubleshooting_steps())
                                     .small(),
                             );
-                            ui.horizontal_wrapped(|ui| {
-                                if theme::secondary_button(
-                                    ui,
-                                    palette,
-                                    self.strings.onboarding_refresh_checks(),
-                                )
-                                .clicked()
-                                {
-                                    self.refresh_diagnostics(true);
-                                }
-                                if ui
-                                    .button(self.strings.onboarding_open_diagnostics())
-                                    .clicked()
-                                {
-                                    self.diagnostics_open = true;
-                                    self.refresh_diagnostics(false);
-                                }
-                            });
                         }
                     });
-                    ui.add_space(10.0);
-                    ui.label(
-                        RichText::new(self.strings.onboarding_certification_note())
-                            .small()
-                            .color(palette.warning),
-                    );
-                    if let Some(route) = recommendation {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} · {}",
-                                recommended_route, recommended_route_detail
-                            ))
-                            .small()
+                    ui.add_space(12.0);
+
+                    // Everything a new user does not need to act on, kept
+                    // for anyone diagnosing a problem.
+                    egui::CollapsingHeader::new(
+                        RichText::new(self.strings.first_run_troubleshooting_details())
                             .color(palette.muted),
-                        );
-                        ui.label(
-                            RichText::new(format!(
-                                "{} · {}",
-                                route.capture_label, route.injection_label
-                            ))
-                            .small()
-                            .monospace()
-                            .color(palette.muted),
-                        );
-                    } else {
-                        ui.label(
-                            RichText::new(recommended_route)
+                    )
+                    .id_salt("first_run_troubleshooting_details")
+                    .default_open(self.onboarding_show_troubleshooting)
+                    .show(ui, |ui| {
+                        let note = |text: &str| {
+                            RichText::new(text.to_owned()).small().color(palette.muted)
+                        };
+                        ui.label(note(&self.strings.onboarding_desktop(&desktop, is_wayland)));
+                        ui.label(note(
+                            &self
+                                .strings
+                                .onboarding_install_summary(env!("CARGO_PKG_VERSION")),
+                        ));
+                        if daemon_running || ibus_only {
+                            ui.label(note(&self.strings.onboarding_session_state(
+                                route_ready,
+                                &route_state_detail,
+                                daemon_build,
+                                restart_command,
+                            )));
+                        }
+                        if let Some(assurance) = route_assurance {
+                            ui.label(note(assurance));
+                        }
+                        if let Some(route) = recommendation {
+                            ui.label(note(&format!(
+                                "{recommended_route} · {recommended_route_detail}"
+                            )));
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} · {}",
+                                    route.capture_label, route.injection_label
+                                ))
                                 .small()
+                                .monospace()
                                 .color(palette.muted),
-                        );
-                    }
-                    ui.label(
-                        RichText::new(self.strings.onboarding_detection(app_context_available))
-                            .small()
-                            .color(palette.muted),
-                    );
-                    ui.label(
-                        RichText::new(self.strings.onboarding_app_caveat())
-                            .small()
-                            .color(palette.muted),
-                    );
+                            );
+                        } else {
+                            ui.label(note(&recommended_route));
+                        }
+                        ui.label(note(
+                            self.strings.onboarding_detection(app_context_available),
+                        ));
+                        ui.label(note(self.strings.onboarding_app_caveat()));
+                        ui.label(note(self.strings.onboarding_probe_caveat()));
+                        ui.label(note(self.strings.onboarding_certification_note()));
+                        ui.horizontal_wrapped(|ui| {
+                            if ui
+                                .button(self.strings.onboarding_refresh_checks())
+                                .clicked()
+                            {
+                                self.refresh_diagnostics(true);
+                            }
+                            if ui
+                                .button(self.strings.onboarding_open_diagnostics())
+                                .clicked()
+                            {
+                                self.diagnostics_open = true;
+                                self.refresh_diagnostics(false);
+                            }
+                        });
+                        if !(daemon_running || ibus_only)
+                            && ui.link(self.strings.onboarding_evdev_setup()).clicked()
+                        {
+                            self.evdev_setup_acknowledged = false;
+                            self.evdev_setup_open = true;
+                        }
+                    });
                 });
                 ui.add_space(16.0);
             });
@@ -905,8 +792,7 @@ impl GuiApp {
 mod guided_setup_tests {
     use super::{
         first_run_outcome, first_run_outcome_label, gnome_ibus_is_configured,
-        replacement_test_is_admitted, uses_gnome_ibus_route, verification_scope_label,
-        FirstRunOutcome,
+        replacement_test_is_admitted, uses_gnome_ibus_route, FirstRunOutcome,
     };
     use crate::runtime::ReplacementAssurance;
     use wayexpand_backend_ibus::chain::IbusCheckState;
@@ -944,27 +830,19 @@ mod guided_setup_tests {
     }
 
     #[test]
-    fn first_run_success_is_scoped_to_the_application_that_was_tested() {
-        let outcome = FirstRunOutcome::WorkingInTestedApplication;
+    fn first_run_states_have_distinct_labels_and_only_one_claims_success() {
+        let strings = crate::lang::Strings::new(crate::lang::Language::English);
         assert_eq!(
-            first_run_outcome_label(
-                &crate::lang::Strings::new(crate::lang::Language::English),
-                outcome
-            ),
+            first_run_outcome_label(&strings, FirstRunOutcome::WorkingInTestedApplication),
             "Working in tested application"
         );
         assert_eq!(
-            verification_scope_label(
-                &crate::lang::Strings::new(crate::lang::Language::English),
-                outcome,
-                Some("GTK 4 Text Editor")
-            ),
-            "Verified in tested application: GTK 4 Text Editor"
+            first_run_outcome_label(&strings, FirstRunOutcome::SafeFallback),
+            "Connected, not tested yet"
         );
         assert_eq!(
-            verification_scope_label(&crate::lang::Strings::new(crate::lang::Language::English), FirstRunOutcome::SafeFallback, Some("GTK 4 Text Editor")),
-            "Verified in tested application: not tested",
-            "a test in another app cannot be shown as a current verification after the route is blocked"
+            first_run_outcome_label(&strings, FirstRunOutcome::SetupIncomplete),
+            "Setup incomplete"
         );
     }
 

@@ -183,14 +183,6 @@ impl Strings {
         }
     }
 
-    pub fn running_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "● Running",
-            Language::Indonesian => "● Berjalan",
-            Language::German => "● Aktiv",
-        }
-    }
-
     pub fn daemon_running_status(&self) -> &'static str {
         match self.lang {
             Language::English => "Service: Running",
@@ -586,14 +578,6 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_backend_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Verify this desktop session",
-            Language::Indonesian => "Periksa sesi desktop ini",
-            Language::German => "Diese Desktop-Sitzung prüfen",
-        }
-    }
-
     /// Short, localized descriptions of the typing route's live state, used
     /// inside the first-run session sentence.
     pub fn onboarding_route_detail(&self, key: &str) -> &'static str {
@@ -697,41 +681,11 @@ impl Strings {
         }
     }
 
-    pub fn first_run_setup_incomplete(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Almost there",
-            Language::Indonesian => "Hampir selesai",
-            Language::German => "Fast geschafft",
-        }
-    }
-
-    pub fn first_run_route_not_ready(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Expansion is not active yet: {detail}. Finish the steps below.")
-            }
-            Language::Indonesian => {
-                format!("Ekspansi belum aktif: {detail}. Selesaikan langkah di bawah.")
-            }
-            Language::German => {
-                format!("Die Erweiterung ist noch nicht aktiv: {detail}. Schließen Sie die Schritte unten ab.")
-            }
-        }
-    }
-
     pub fn first_run_continue_setup(&self) -> &'static str {
         match self.lang {
             Language::English => "Continue guided setup",
             Language::Indonesian => "Lanjutkan penyiapan terpandu",
             Language::German => "Geführte Einrichtung fortsetzen",
-        }
-    }
-
-    pub fn first_run_quick_picker(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Use Quick Picker meanwhile (copy and paste)",
-            Language::Indonesian => "Pakai Quick Picker sementara (salin dan tempel)",
-            Language::German => "Solange den Schnellwähler nutzen (kopieren und einfügen)",
         }
     }
 
@@ -751,75 +705,11 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_sample_saved(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Test snippet saved and ready to preview.",
-            Language::Indonesian => "Cuplikan uji tersimpan dan siap dipratinjau.",
-            Language::German => "Test-Snippet gespeichert und bereit für die Vorschau.",
-        }
-    }
-
-    pub fn onboarding_create_sample_first(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Create and save the test snippet first.",
-            Language::Indonesian => "Buat dan simpan cuplikan uji terlebih dahulu.",
-            Language::German => "Erstellen und speichern Sie zuerst das Test-Snippet.",
-        }
-    }
-
     pub fn onboarding_open_diagnostics(&self) -> &'static str {
         match self.lang {
             Language::English => "Open diagnostics",
             Language::Indonesian => "Buka diagnostik",
             Language::German => "Diagnose öffnen",
-        }
-    }
-
-    pub fn onboarding_matcher_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Check the Matcher preview",
-            Language::Indonesian => "Periksa pratinjau pencocok",
-            Language::German => "Matcher-Vorschau prüfen",
-        }
-    }
-
-    pub fn onboarding_matcher_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Use the Matcher preview at the bottom of this window. Type the trigger exactly; it should become the expected text below. This checks your saved snippet and matcher locally, not keyboard capture or insertion.",
-            Language::Indonesian => "Gunakan Pratinjau pencocok di bagian bawah jendela ini. Ketik pemicu persis; hasilnya harus menjadi teks yang diharapkan. Ini memeriksa cuplikan dan pencocok secara lokal, bukan tangkapan atau penyisipan papan ketik.",
-            Language::German => "Verwenden Sie die Matcher-Vorschau unten im Fenster. Geben Sie den Auslöser genau ein; er sollte durch den erwarteten Text ersetzt werden. Das prüft Snippet und Matcher lokal, nicht Tastaturerfassung oder Einfügen.",
-        }
-    }
-
-    pub fn onboarding_real_app_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Try it in a real app",
-            Language::Indonesian => "Coba di aplikasi nyata",
-            Language::German => "In einer echten App testen",
-        }
-    }
-
-    pub fn onboarding_real_app_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Open a plain text field in an app you use (for example, a text editor). Type the trigger followed by a space. Confirm that only the trigger is replaced by the expected text. Never test in a password, terminal-credential, or other sensitive field.",
-            Language::Indonesian => "Buka kolom teks biasa di aplikasi yang Anda gunakan (misalnya editor teks). Ketik pemicu lalu spasi. Pastikan hanya pemicu yang diganti dengan teks yang diharapkan. Jangan pernah menguji di kolom kata sandi, kredensial terminal, atau kolom sensitif lainnya.",
-            Language::German => "Öffnen Sie ein normales Textfeld in einer App, etwa einem Texteditor. Geben Sie den Auslöser plus Leerzeichen ein. Prüfen Sie, ob nur der Auslöser durch den erwarteten Text ersetzt wird. Testen Sie nie in Passwort-, Terminal-Zugangsdaten- oder anderen sensiblen Feldern.",
-        }
-    }
-
-    pub fn onboarding_expected_result(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Expected result: WayExpand is working!",
-            Language::Indonesian => "Hasil yang diharapkan: WayExpand is working!",
-            Language::German => "Erwartetes Ergebnis: WayExpand is working!",
-        }
-    }
-
-    pub fn onboarding_trigger(&self, trigger: &str) -> String {
-        match self.lang {
-            Language::English => format!("Trigger: {trigger}"),
-            Language::Indonesian => format!("Pemicu: {trigger}"),
-            Language::German => format!("Auslöser: {trigger}"),
         }
     }
 

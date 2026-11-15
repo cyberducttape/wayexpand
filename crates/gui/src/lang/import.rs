@@ -1246,27 +1246,11 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_turn_on_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Turn on WayExpand",
-            Language::Indonesian => "Aktifkan WayExpand",
-            Language::German => "WayExpand einschalten",
-        }
-    }
-
     pub fn onboarding_turn_on_help(&self) -> &'static str {
         match self.lang {
             Language::English => "Enables the safest input path WayExpand detects on this desktop. Your desktop may ask for permission.",
             Language::Indonesian => "Mengaktifkan jalur masukan teraman yang dideteksi WayExpand di desktop ini. Desktop Anda mungkin meminta izin.",
             Language::German => "Aktiviert den sichersten Eingabeweg, den WayExpand auf diesem Desktop erkennt. Der Desktop fragt eventuell nach Erlaubnis.",
-        }
-    }
-
-    pub fn onboarding_snippet_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Add your first snippet",
-            Language::Indonesian => "Tambahkan cuplikan pertama Anda",
-            Language::German => "Erstes Snippet anlegen",
         }
     }
 

@@ -4,6 +4,28 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The first-run guide has three steps: *Connect your desktop*, *Create a
+  snippet* and *Test it*. Route, permission and certification notes moved
+  into a collapsed *Troubleshooting details* section. Removed: the separate
+  Matcher-preview step (it pointed at a panel that was hidden or collapsed
+  and did not affect setup), and the status lines repeated in the banner and
+  in two steps.
+- First-run fixes:
+  - Until the first status check returns, the guide shows "Checking this
+    desktop…" instead of offering *Turn on* for a service that may already be
+    running.
+  - A daemon from an older build gets a *Restart WayExpand* button next to
+    the restart command.
+  - Saving a first snippet written with *+ New*, or importing an Espanso
+    library, returns to the guide instead of closing it until the next
+    launch.
+  - The real-application test now says to switch to another app and type the
+    trigger within 30 seconds. Its checkbox claimed the user was already
+    focused on the test field, while they were still in WayExpand.
+  - The first-run version of the test dialog drops the matcher test, the
+    copied command and the route advice, which stay in Diagnostics.
+  - "Safe fallback" now reads "Connected, not tested yet", and two setup
+    messages that were English in every language are translated.
 - The Quick Picker closes only after the daemon confirms that the snippet was
   typed. It used to close as soon as the daemon accepted the request, so an
   insert refused afterwards (focus moved, policy, typing started first, the
