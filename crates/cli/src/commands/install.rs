@@ -860,11 +860,7 @@ fn print_report(title: &str, json: bool) -> Result<bool> {
         for r in &rows {
             print!(
                 "{}",
-                check_row(
-                    r.status,
-                    r.component,
-                    &format!("{} — {}", r.path, r.detail)
-                )
+                check_row(r.status, r.component, &format!("{} — {}", r.path, r.detail))
             );
         }
     }
