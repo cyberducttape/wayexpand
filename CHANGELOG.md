@@ -4,6 +4,16 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The Quick Picker lists snippets it cannot use, after the usable ones and
+  greyed out, with the reason, instead of leaving them out so they seemed
+  to have disappeared:
+  - a snippet that runs a command works only when its trigger is typed
+  - a snippet with input fields needs the editor or its trigger
+  - in copy-only mode, an app-restricted snippet cannot be copied (the
+    paste target cannot be checked)
+  - in copy-only mode, a snippet that reads the clipboard is not copied
+  Enter and clicks never act on these rows. Disabled and generate-only
+  snippets stay out, since the user turned them off.
 - When expansion is not working, the GUI says why in one sentence and offers
   one action, in a banner under the header, in the status chip's tooltip,
   and in the first-run guide. Each case has its action:
