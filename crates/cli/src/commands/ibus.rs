@@ -1,5 +1,6 @@
-//! `wayexpand ibus status|watch`: check the IBus route link by link and
-//! explain, per focused field, why triggers do or do not expand.
+//! `wayexpand ibus status|watch|restart`: check the IBus route link by link,
+//! explain, per focused field, why triggers do or do not expand, and restart
+//! IBus the way the desktop that owns it expects.
 
 use super::Args;
 use crate::args::take_flag;
@@ -13,13 +14,67 @@ use wayexpand_backend_ibus::{
     IbusFieldVerdict,
 };
 
-const USAGE: &str = "usage: wayexpand ibus [status [--json] | watch [--seconds N]]";
+const USAGE: &str = "usage: wayexpand ibus [status [--json] | watch [--seconds N] | restart]";
 
 pub(crate) fn ibus_command(mut args: Args) -> Result<()> {
     match args.next().as_deref() {
         None | Some("status") => status_command(args),
         Some("watch") => watch_command(args),
+        Some("restart") => restart_command(args),
         Some(_) => usage_bail!("{USAGE}"),
+    }
+}
+
+/// Restart IBus so it reloads components and engines. On KDE Plasma, KWin
+/// owns IBus and plain `ibus restart` hangs, so KWin's input method is
+/// switched off and on instead.
+fn restart_command(mut args: Args) -> Result<()> {
+    if args.next().is_some() {
+        usage_bail!("{USAGE}");
+    }
+    use wayexpand_backend_ibus::restart::{
+        restart_method, restart_through_kwin, IbusRestartMethod,
+    };
+    match restart_method() {
+        IbusRestartMethod::NotRunning => Err(classified_error(
+            CliErrorKind::Operational,
+            "IBus is not running for this user; select it as the input method in your desktop settings",
+        )),
+        IbusRestartMethod::KwinInputMethod => {
+            let was_selected = wayexpand_backend_ibus::global_engine_selected();
+            println!("Restarting IBus through KWin's input method (input pauses briefly)…");
+            let pid = restart_through_kwin(Duration::from_secs(30))
+                .map_err(|error| classified_error(CliErrorKind::Operational, error))?;
+            println!("IBus restarted (ibus-daemon PID {pid}).");
+            // A new daemon restores its global engine a moment after it
+            // starts; report the restart done only once WayExpand is back.
+            if was_selected {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while !wayexpand_backend_ibus::global_engine_selected() {
+                    if Instant::now() >= deadline {
+                        println!(
+                            "WayExpand is not the selected input method yet; select it from the desktop's input-method menu."
+                        );
+                        return Ok(());
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+                println!("WayExpand is the selected input method again.");
+            }
+            Ok(())
+        }
+        IbusRestartMethod::IbusCommand => {
+            println!("Restarting IBus (input pauses briefly)…");
+            let status = crate::setup::run_setup_command("ibus", &["restart"])?;
+            if !status.success() {
+                return Err(classified_error(
+                    CliErrorKind::Operational,
+                    format!("`ibus restart` exited with {status}"),
+                ));
+            }
+            println!("IBus restarted.");
+            Ok(())
+        }
     }
 }
 
