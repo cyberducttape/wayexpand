@@ -3627,6 +3627,34 @@ fn a_clean_draft_of_a_saved_snippet_does_not_block_the_desktop_test() {
 }
 
 #[test]
+fn basic_editor_mode_opens_advanced_options_only_for_behavior_settings() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-basic-editor-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    fs::write(
+        &path,
+        "[[expansion]]\ntrigger = \";hi\"\nreplacement = \"Hello\"\ndescription = \"Greeting\"\ncategory = \"Email\"\ntags = [\"greeting\"]\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let app = GuiApp::load(path.clone()).unwrap();
+    let mut draft = app.draft.clone().unwrap();
+    assert!(
+        !draft.uses_advanced_fields(),
+        "description, tags and category alone keep basic mode"
+    );
+    draft.app_filter.push("org.example.Editor".into());
+    assert!(draft.uses_advanced_fields(), "app targeting opens advanced");
+    let mut draft = app.draft.clone().unwrap();
+    draft.replacement = "Today is {{date:%A}}".into();
+    assert!(draft.uses_advanced_fields(), "templates open advanced");
+    assert_eq!(app.editor_advanced, None, "no session choice yet");
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn creating_the_test_snippet_selects_it_and_leaves_the_desktop_test_enabled() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-test-snippet-selection-{}.toml",
