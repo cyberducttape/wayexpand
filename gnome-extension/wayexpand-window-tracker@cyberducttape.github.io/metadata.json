@@ -4,6 +4,7 @@
   "description": "Tells the WayExpand text expander which application has keyboard focus, so snippets limited to certain apps work on GNOME. Window details are sent only to processes that subscribe; nothing is stored.",
   "shell-version": [
     "46",
+    "48",
     "50",
     "51"
   ],

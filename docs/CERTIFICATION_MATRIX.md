@@ -30,7 +30,7 @@ availability claims, and no target is certified without reviewed evidence.
 | Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | Production certification |
 | --- | --- | --- | --- | --- | --- | --- |
 | `kde` | KDE Plasma / KWin (wayland) | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
-| `gnome` | GNOME Shell / Mutter (wayland) | ibus, evdev+libei | WayExpand GNOME Shell extension (headless runtime gates: GNOME 46, 50, 51) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
+| `gnome` | GNOME Shell / Mutter (wayland) | ibus, evdev+libei | WayExpand GNOME Shell extension (headless runtime gates: GNOME 46, 48, 50, 51) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
 | `sway` | Sway / wlroots (wayland) | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 | `hyprland` | Hyprland / wlroots (wayland) | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
@@ -77,7 +77,7 @@ passes by a green CI run.
 ### GNOME IBus install and application coverage
 
 GNOME Shell extension compatibility is also checked separately from desktop
-route certification. The extension advertises only GNOME Shell 46, 50, and 51,
+route certification. The extension advertises only GNOME Shell 46, 48, 50, and 51,
 the majors with version-pinned headless integration jobs. Each job checks the
 actual Shell major and exercises IBus source registration and selection,
 active-layout tracking, focus tracking, extension reload, and source persistence
@@ -100,8 +100,12 @@ reports without accepting missing or unsupported cells as passes. Each
 application result is a separate scenario × keyboard-profile cell and links to
 reviewable evidence. Report validation rejects headless sessions and requires
 a physical keyboard and reviewer identity. CI runs the headless GNOME IBus
-acceptance test on Ubuntu 24.04/GNOME 46, Ubuntu 26.04/GNOME 50, and
-Fedora 45/GNOME 51. The headless test covers GTK 3 and GTK 4 text
+acceptance test on Ubuntu 24.04/GNOME 46, Debian 13/GNOME 48,
+Ubuntu 26.04/GNOME 50, and Fedora 45/GNOME 51. GNOME 49 (Fedora 43, RHEL 10.2)
+passes everything except the German and French layout cases, where its
+RemoteDesktop virtual keyboard delivers US keysyms after a layout switch; it
+is not declared compatible until layout tracking is confirmed on a real
+GNOME 49 session. The headless test covers GTK 3 and GTK 4 text
 replacement, Unicode, password-purpose pass-through, source switching between
 US, German, and French layouts, and Shell restart/extension upgrade behavior.
 It exercises Chromium's safe pass-through behavior. These hosted jobs validate

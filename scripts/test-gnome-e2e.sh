@@ -399,9 +399,12 @@ type_gnome_remote_input() {
     focus_marker=$4
     ready_marker=$5
     keycode_probe=${6:-false}
+    keycode_layout=${7:-}
     set --
     if [ "$keycode_probe" = true ]; then
         set -- --keycode-probe
+    elif [ -n "$keycode_layout" ]; then
+        set -- --keycode-layout "$keycode_layout"
     fi
     python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gnome_remote_input.py" \
         --delay-ms 60 --text "$input_text" --app-id "$app_id" \
@@ -680,11 +683,14 @@ run_gtk_ibus_case() {
     fi
     input_status=0
     keycode_probe=false
-    if [ "$case_name" = wayland-baseline ]; then
-        keycode_probe=true
-    fi
+    keycode_layout=
+    case "$case_name" in
+        wayland-baseline) keycode_probe=true ;;
+        # Layout cases type physical keys, as a real keyboard does.
+        layout-de | layout-fr) keycode_layout=${case_name#layout-} ;;
+    esac
     type_gnome_remote_input "$case_name" "$trigger" "$app_id" \
-        "$marker" "$ready_marker" "$keycode_probe" || input_status=$?
+        "$marker" "$ready_marker" "$keycode_probe" "$keycode_layout" || input_status=$?
     if [ "$input_status" -ne 0 ]; then
         if [ -f "$status_file" ]; then
             cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"
