@@ -138,8 +138,25 @@ if [ "$status" -eq 0 ]; then
         "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" \
         --expect-active --single-expansion || status=$?
 fi
+engine_pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' \
+    "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" 2>/dev/null)
 kill "$daemon_pid" 2>/dev/null || true
 wait "$daemon_pid" 2>/dev/null || true
+# An engine must not outlive its ibus-daemon: a restarted daemon starts a
+# fresh engine, and the old one used to stay behind forever.
+if [ "$status" -eq 0 ] && [ -n "$engine_pid" ]; then
+    waited=0
+    while kill -0 "$engine_pid" 2>/dev/null && [ "$waited" -lt 300 ]; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$engine_pid" 2>/dev/null; then
+        printf '%s\n' "fail engine-exit wayexpand-ibus kept running 30 s after ibus-daemon exited"
+        status=1
+    else
+        printf '%s\n' "pass engine-exit wayexpand-ibus exited after ibus-daemon exited"
+    fi
+fi
 exit "$status"
 EOF
 chmod 0755 "$work/session.sh"

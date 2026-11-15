@@ -821,8 +821,42 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(connection.clone());
     connection.request_name(BUS_NAME)?;
+    watch_ibus_connection(&connection);
+    Ok(())
+}
+
+/// Block until this engine should exit: its IBus connection is gone, or
+/// another WayExpand engine owns the engine name. A restarted ibus-daemon
+/// launches a fresh engine, so an engine that outlives its daemon serves
+/// nothing; it used to stay parked forever, one more stale process per IBus
+/// restart. A single failed check can be a busy daemon, so the connection
+/// is treated as gone only after several in a row.
+fn watch_ibus_connection(connection: &Connection) {
+    const CHECK_INTERVAL: Duration = Duration::from_secs(5);
+    const FAILURES_BEFORE_EXIT: u32 = 3;
+    let own_name = connection.unique_name().map(ToString::to_string);
+    let mut failures = 0;
     loop {
-        std::thread::park();
+        std::thread::sleep(CHECK_INTERVAL);
+        let owner = zbus::blocking::fdo::DBusProxy::new(connection).and_then(|proxy| {
+            proxy
+                .get_name_owner(BUS_NAME.try_into()?)
+                .map_err(zbus::Error::from)
+        });
+        match owner {
+            Ok(owner) if own_name.as_deref() == Some(owner.as_str()) => failures = 0,
+            Ok(_) => {
+                info!("another WayExpand engine owns the IBus engine name; exiting");
+                return;
+            }
+            Err(error) => {
+                failures += 1;
+                if failures >= FAILURES_BEFORE_EXIT {
+                    info!(error = %error, "IBus connection closed; exiting");
+                    return;
+                }
+            }
+        }
     }
 }
 

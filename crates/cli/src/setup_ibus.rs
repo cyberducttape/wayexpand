@@ -2281,6 +2281,15 @@ fn refresh_ibus_component_registry(desktop: IbusDesktop) -> Result<()> {
                 "Refreshing IBus component registry through {unit}"
             ));
             run_setup_command("systemctl", &["--user", "restart", &unit])
+        } else if wayexpand_backend_ibus::restart::restart_method()
+            == wayexpand_backend_ibus::restart::IbusRestartMethod::KwinInputMethod
+        {
+            // KWin owns this IBus; `ibus restart` would hang waiting for a
+            // daemon KWin never relaunches.
+            step("Refreshing the IBus component registry through KWin's input method (input pauses briefly)");
+            wayexpand_backend_ibus::restart::restart_through_kwin(Duration::from_secs(30))
+                .map(|_| std::os::unix::process::ExitStatusExt::from_raw(0))
+                .map_err(anyhow::Error::msg)
         } else {
             step("Refreshing the IBus component registry (the desktop-managed IBus session may pause briefly)");
             run_setup_command("ibus", &["restart"])
