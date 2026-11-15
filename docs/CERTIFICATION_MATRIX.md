@@ -1,6 +1,6 @@
 # WayExpand Compositor Certification Matrix
 
-**WayExpand version scope:** 1.3.3 release line
+**WayExpand version scope:** 1.3.5 release line
 **Matrix revision:** 2026-11-02.1
 **Last Updated:** 2026-11-02
 **Status:** No compositor route is production-certified
@@ -35,7 +35,7 @@ availability claims, and no target is certified without reviewed evidence.
 | `hyprland` | Hyprland / wlroots (wayland) | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
 
-## Release certification record — 1.3.3 line, revision 2026-11-02.1
+## Release certification record — revision 2026-11-02.1
 
 This is the published release-facing record for KDE, GNOME, Sway, and
 Hyprland. Update the revision and retain its previous version in Git whenever
@@ -284,7 +284,7 @@ current support claim and must not be used to infer password-field protection.
 **Test Date:** 2026-09-26  
 **Configuration:**
 - Desktop: KDE Plasma 6.6.x
-- WayExpand: 1.3.5
+- WayExpand: 1.2.0
 - Capture: evdev (active-seat logind/uaccess ACL)
 - Injection: libei
 - Window Tracking: KWin D-Bus

@@ -359,7 +359,8 @@ impl GuiApp {
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.rebuild_search_index();
                 self.remember_undo(previous);
-                self.select(0);
+                // The test snippet is appended, so it is the last item.
+                self.select(self.config.expansion.len() - 1);
                 self.set_saved_status(Status::success(self.strings.status_created()));
             }
             SaveIntent::Duplicated => {
