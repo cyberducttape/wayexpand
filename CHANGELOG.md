@@ -4,6 +4,18 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- New `wayexpand shortcut [status|set [KEYS]|remove]` gives the Quick Picker
+  a global keyboard shortcut on KDE Plasma (through KDE's global shortcut
+  service, as System Settings does) and on GNOME (as a custom keybinding).
+  The default is Ctrl+Alt+Space; Super+Period is Plasma's emoji selector. A
+  combination another action already uses is refused, and its owner named,
+  never taken over. Other desktops get the command to bind by hand.
+- The first-run guide has an optional fourth step, *Open snippets from any
+  app*, that sets this shortcut with one click and shows it afterwards. The
+  Quick Picker is also how to insert in fields where a typed trigger cannot
+  expand.
+- `set-enabled` moved to the full command list (`wayexpand help --all`) to
+  keep `wayexpand help` on one screen.
 - The recovery screen validates backups until it finds the five newest valid
   ones. Previously it took the five newest files and validated only those, so
   five damaged recent backups hid an older good one. A broken configuration

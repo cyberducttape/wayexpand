@@ -20,8 +20,9 @@ local, offline, no account, no telemetry.
   engine — no daemon, permission, or desktop integration needed — and counts
   the keystrokes you saved. It does not exercise desktop capture or insertion;
   `wayexpand doctor` covers that.
-- **Quick-insert picker.** Bind `wayexpand-gui --picker` to a keyboard
-  shortcut. Type a few letters, press Enter, and the running WayExpand service
+- **Quick-insert picker.** Press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> +
+  <kbd>Space</kbd> (set up by the first-run guide or `wayexpand shortcut set`
+  on KDE Plasma and GNOME). Type a few letters, press Enter, and the running WayExpand service
   types the snippet into the app you were using. Typing needs focused-window
   tracking (currently KDE Plasma); elsewhere, or without the service, Enter
   copies it to the clipboard. No trigger to remember.
@@ -124,7 +125,7 @@ the guide offers a copy-only Quick Picker for manual paste.
 
 ## Your first minute
 
-![WayExpand's first-run screen in the Terminal Blue color pack with three steps: Connect your desktop, Create a snippet, Test it](docs/images/wayexpand-first-run.png)
+![WayExpand's first-run screen in the Terminal Blue color pack with the steps Connect your desktop, Create a snippet, Test it, and an optional Quick Picker shortcut](docs/images/wayexpand-first-run.png)
 
 1. **Connect your desktop** — *Turn on WayExpand* in the GUI, or run
    `wayexpand setup` in a terminal. Setup configures the supported input route
@@ -136,13 +137,14 @@ the guide offers a copy-only Quick Picker for manual paste.
    seconds. WayExpand asks whether the text appeared correctly and records
    setup as working only when you confirm it. Until then, *Open Quick Picker*
    copies snippets for you to paste.
+4. **Open snippets from any app** (optional) — the guide gives the Quick
+   Picker a shortcut, <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> unless
+   that is taken. From a terminal: `wayexpand shortcut set [KEYS]`. On desktops
+   other than KDE Plasma and GNOME, bind `wayexpand-gui --picker` in the
+   keyboard settings. Scripts can insert directly with `wayexpand insert ';sig'`.
 
 *Troubleshooting details* under the steps holds the route, permission and
 certification notes, with *Open diagnostics* for the full report.
-
-Set up the picker by adding a desktop shortcut (for example <kbd>Super</kbd> +
-<kbd>.</kbd>) that runs `wayexpand-gui --picker`. Scripts can do the same with
-`wayexpand insert ';sig'`.
 
 Useful commands:
 

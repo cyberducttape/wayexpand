@@ -15,6 +15,8 @@
 #                                  screens are captured with it completed
 #   WAYEXPAND_GUI_SCREENSHOT_PICKER=1  capture the quick-insert picker
 #                                  (wayexpand-gui --picker) instead
+#   WAYEXPAND_GUI_SCREENSHOT_DESKTOP  desktop name the GUI sees (default KDE,
+#                                  as the sandbox is KWin)
 #   WAYEXPAND_GUI_SCREENSHOT_DAEMON=1  also run a sandboxed daemon that reads
 #                                  stdin and types nothing, so the header
 #                                  shows a running service
@@ -105,6 +107,7 @@ env -i \
     WAYEXPAND_GUI_SCREENSHOT_VIEW="${WAYEXPAND_GUI_SCREENSHOT_VIEW:-}" \
     WAYEXPAND_GUI_SCREENSHOT_DAEMON="${WAYEXPAND_GUI_SCREENSHOT_DAEMON:-}" \
     WAYEXPAND_GUI_SCREENSHOT_PICKER="${WAYEXPAND_GUI_SCREENSHOT_PICKER:-}" \
+    XDG_CURRENT_DESKTOP="${WAYEXPAND_GUI_SCREENSHOT_DESKTOP:-KDE}" \
     QT_QPA_PLATFORM=offscreen \
     timeout 90 dbus-run-session -- \
     kwin_wayland --virtual --no-lockscreen --no-global-shortcuts \

@@ -60,6 +60,7 @@ impl GuiApp {
                     self.route_state = snapshot.route_state;
                     self.ibus_active = runtime::ibus_engine_active();
                     self.ibus_route = Some(snapshot.ibus_route);
+                    self.picker_shortcut = snapshot.picker_shortcut;
                     self.diagnostics_checked_at = Some(Instant::now());
                     let continuing_guided_setup = self.guided_setup_waiting_for_route;
                     if let Some(paused) = snapshot.paused {

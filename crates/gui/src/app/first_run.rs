@@ -3,6 +3,8 @@ use crate::*;
 
 const ONBOARDING_TRIGGER: &str = ":wayexpand-test";
 const ONBOARDING_REPLACEMENT: &str = "WayExpand is working!";
+/// What `wayexpand shortcut set` assigns without an argument.
+const DEFAULT_PICKER_SHORTCUT: &str = "Ctrl+Alt+Space";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FirstRunOutcome {
@@ -705,6 +707,64 @@ impl GuiApp {
                                 RichText::new(self.strings.onboarding_troubleshooting_steps())
                                     .small(),
                             );
+                        }
+                    });
+                    ui.add_space(12.0);
+
+                    // 4. Optional: a shortcut for the Quick Picker, the way
+                    // to insert where typing a trigger cannot expand.
+                    let shortcut_keys = self
+                        .picker_shortcut
+                        .as_ref()
+                        .and_then(|shortcut| shortcut.keys.clone());
+                    onboarding_step(
+                        ui,
+                        palette,
+                        4,
+                        self.strings.step_shortcut_title(),
+                        shortcut_keys.is_some(),
+                    );
+                    ui.indent("first_run_shortcut", |ui| {
+                        match (&self.picker_shortcut, &shortcut_keys) {
+                            (_, Some(keys)) => {
+                                ui.colored_label(
+                                    palette.success,
+                                    crate::lang::fill(self.strings.shortcut_ready(), &[keys]),
+                                );
+                                ui.label(
+                                    RichText::new(self.strings.shortcut_change_hint())
+                                        .small()
+                                        .color(palette.muted),
+                                );
+                            }
+                            (Some(shortcut), None) if !shortcut.supported => {
+                                ui.label(
+                                    RichText::new(self.strings.shortcut_manual())
+                                        .color(palette.muted),
+                                );
+                            }
+                            _ => {
+                                ui.label(
+                                    RichText::new(self.strings.shortcut_help())
+                                        .color(palette.muted),
+                                );
+                                let running = self.setup_task.is_some();
+                                if ui
+                                    .add_enabled(
+                                        !running,
+                                        egui::Button::new(crate::lang::fill(
+                                            self.strings.shortcut_use_keys(),
+                                            &[&DEFAULT_PICKER_SHORTCUT],
+                                        )),
+                                    )
+                                    .clicked()
+                                {
+                                    self.set_picker_shortcut();
+                                }
+                                if let Some(error) = &self.picker_shortcut_error {
+                                    ui.colored_label(palette.warning, error);
+                                }
+                            }
                         }
                     });
                     ui.add_space(12.0);

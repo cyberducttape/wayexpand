@@ -3825,6 +3825,89 @@ fn writing_a_first_snippet_returns_to_the_guide() {
 }
 
 #[test]
+fn first_run_offers_a_picker_shortcut_until_one_is_set() {
+    assert_eq!(
+        runtime::parse_picker_shortcut(
+            br#"{"command":"wayexpand-gui --picker","desktop":"GNOME","shortcut":"Ctrl+Alt+Space","supported":true}"#
+        ),
+        Some(runtime::PickerShortcut {
+            supported: true,
+            keys: Some("Ctrl+Alt+Space".into())
+        })
+    );
+    assert_eq!(runtime::parse_picker_shortcut(b"not json"), None);
+
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-first-run-shortcut-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.onboarding_completed = false;
+    app.onboarding_visible = true;
+    app.language = Language::English;
+    app.strings.set_language(Language::English);
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let render = |app: &mut GuiApp| {
+        let frame = run_gui_test_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 1400.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                app.render_editor(ui, &palette);
+            },
+        );
+        format!(
+            "{:?}",
+            frame
+                .platform_output
+                .accesskit_update
+                .expect("accessible")
+                .nodes
+        )
+    };
+
+    app.picker_shortcut = Some(runtime::PickerShortcut {
+        supported: true,
+        keys: None,
+    });
+    let unset = render(&mut app);
+    assert!(
+        unset.contains("Open snippets from any app (optional)"),
+        "{unset}"
+    );
+    assert!(unset.contains("Use Ctrl+Alt+Space"), "{unset}");
+
+    app.picker_shortcut_error = Some("Ctrl+Alt+Space is already used by “Terminal”.".into());
+    let conflict = render(&mut app);
+    assert!(conflict.contains("already used by"), "{conflict}");
+
+    app.picker_shortcut = Some(runtime::PickerShortcut {
+        supported: true,
+        keys: Some("Ctrl+Alt+Period".into()),
+    });
+    let set = render(&mut app);
+    assert!(set.contains("Press Ctrl+Alt+Period in any app"), "{set}");
+    assert!(!set.contains("Use Ctrl+Alt+Space"), "{set}");
+
+    app.picker_shortcut = Some(runtime::PickerShortcut {
+        supported: false,
+        keys: None,
+    });
+    let manual = render(&mut app);
+    assert!(manual.contains("wayexpand-gui --picker"), "{manual}");
+    assert!(!manual.contains("Use Ctrl+Alt+Space"), "{manual}");
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn desktop_test_candidates_follow_library_changes_including_reloads() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-desktop-test-cache-{}.toml",

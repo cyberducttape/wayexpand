@@ -125,6 +125,16 @@ pub(crate) const COMMANDS: &[Command] = &[
     command("insert", Snippets, "Type a snippet at the cursor", &["insert [--verified] <trigger>"])
         .details("Asks the running service to type the snippet for <trigger> into the focused application, as if you had typed the trigger. Bind it to a desktop shortcut for quick insertion. --verified ties the insert to the window focused now; the service refuses to type if focus has moved.")
         .examples(&[("wayexpand insert ';sig'", "Type your signature where the cursor is")]),
+    command("shortcut", Snippets, "Give the Quick Picker a keyboard shortcut", &[
+        "shortcut [status] [--json]",
+        "shortcut set [KEYS]",
+        "shortcut remove",
+    ])
+    .details("On KDE Plasma and GNOME, assigns a global shortcut that opens the Quick Picker (wayexpand-gui --picker) in any application; KEYS defaults to Ctrl+Alt+Space. A combination another action already uses is refused, never taken over. On other desktops, prints the command to bind in your keyboard settings.")
+    .examples(&[
+        ("wayexpand shortcut set", "Open the Quick Picker with Ctrl+Alt+Space"),
+        ("wayexpand shortcut set Super+Period", "Use a different combination"),
+    ]),
     command("new", Snippets, "Fill in a file template and write it", &[
         "new [--json] [--config FILE]",
         "new <name> [--set NAME=VALUE]... [-o PATH|--stdout] [--gui] [--force] [--validate] [--review] [--config FILE]",
@@ -141,7 +151,7 @@ pub(crate) const COMMANDS: &[Command] = &[
     .details("Converts another expander's library to WayExpand's TOML and prints it. --add merges it into your library after smoke-testing the imported triggers; --strict stops at the first item that cannot be converted exactly.")
     .examples(&[("wayexpand import espanso ~/.config/espanso --add", "Merge your Espanso library")]),
     command("stats", Snippets, "Your usage: expansions, keystrokes saved, unused snippets", &["stats [--json] [--days N] [--clear] [config]"]),
-    command("set-enabled", Snippets, "Turn a snippet on or off", &["set-enabled <trigger> <on|off> [config]"]),
+    command("set-enabled", Snippets, "Turn a snippet on or off", &["set-enabled <trigger> <on|off> [config]"]).advanced(),
     command("set-mode", Snippets, "Expand immediately or only at a word boundary", &["set-mode <trigger> <immediate|word-boundary> [config]"]).advanced(),
     command("test", Snippets, "Show what typed text would expand to", &["test <text> [--json] [config]"]).advanced(),
     command("preview", Snippets, "Preview a snippet's replacement", &["preview <trigger> [--preview-app APP] [--json] [config]"]).advanced(),

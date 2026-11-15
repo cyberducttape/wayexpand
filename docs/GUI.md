@@ -567,7 +567,7 @@ WAYEXPAND_GUI_SCREENSHOT_DAEMON=1 WAYEXPAND_GUI_SCREENSHOT_PICKER=1 \
 scripts/make-social-preview.sh
 ```
 
-![WayExpand's first-run screen with three steps: Connect your desktop, Create a snippet, Test it](images/wayexpand-first-run.png)
+![WayExpand's first-run screen with the steps Connect your desktop, Create a snippet, Test it, and an optional Quick Picker shortcut](images/wayexpand-first-run.png)
 
 ![WayExpand's editor with the Matcher preview expanding a support reply](images/wayexpand-editor-try-it-live.png)
 
