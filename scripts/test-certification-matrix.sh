@@ -348,5 +348,7 @@ grep -F -- "checkout_ref: \${{ inputs.release_ref || github.ref }}" "$release_wo
 grep -F -- "if: \${{ !cancelled() && needs.ci.result == 'success' }}" "$release_workflow" >/dev/null
 grep -F -- "needs.certification.result == 'success' && env.CERTIFIED_NOTE || env.UNCERTIFIED_NOTE" "$release_workflow" >/dev/null
 grep -F -- 'Not compositor-certified.' "$release_workflow" >/dev/null
+# Certification that cannot run is skipped, not failed.
+grep -F -- "if: \${{ needs.certification-available.outputs.available == 'true' }}" "$release_workflow" >/dev/null
 
 printf '%s\n' 'certification matrix contract passed'

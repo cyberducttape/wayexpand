@@ -64,9 +64,45 @@ jobs:
   # No compositor route is production-certified yet, so gating the binaries
   # on it published releases without any downloads. The release notes state
   # the certification result instead.
+  # Certification needs a production-eligible route and the runner token.
+  # Without either it can only fail, which marked every release run red;
+  # skip it instead and let the notes say the release is not certified.
+  certification-available:
+    name: Check whether certification can run
+    needs: release-ref
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      available: ${{ steps.check.outputs.available }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_ref || github.ref }}
+      - name: Check for eligible routes and the runner token
+        id: check
+        env:
+          HAS_RUNNER_TOKEN: ${{ secrets.CERTIFICATION_RUNNER_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          targets=$(jq '[.targets[] | select(.production_certification_required)] | length' \
+            tests/certification/compositor-matrix.json)
+          if [ "$targets" -gt 0 ] && [ "$HAS_RUNNER_TOKEN" = true ]; then
+            echo available=true >>"$GITHUB_OUTPUT"
+          else
+            echo available=false >>"$GITHUB_OUTPUT"
+            {
+              echo '## Compositor certification skipped'
+              echo "Production-required routes: $targets; runner token configured: $HAS_RUNNER_TOKEN."
+              echo 'This release is published as not compositor-certified.'
+            } >>"$GITHUB_STEP_SUMMARY"
+          fi
+
   certification:
     name: Real compositor certification
-    needs: release-ref
+    needs: [release-ref, certification-available]
+    if: ${{ needs.certification-available.outputs.available == 'true' }}
     uses: ./.github/workflows/certification.yml
     secrets: inherit
     with:
