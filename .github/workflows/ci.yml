@@ -80,6 +80,11 @@ jobs:
           spec_version=$(sed -n 's/^Version: *//p' wayexpand.spec)
           ibus_version=$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' desktop/wayexpand-ibus.xml | head -n1)
           appstream_version=$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' io.github.cyberducttape.WayExpand.metainfo.xml | head -n1)
+          gnome_metadata=gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json
+          gnome_version_name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version-name"])' "$gnome_metadata")
+          gnome_version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$gnome_metadata")
+          IFS=. read -r major minor patch <<<"$cargo_version"
+          expected_gnome_version=$((major * 10000 + minor * 100 + patch))
 
           echo "Version check:"
           echo "  Cargo.toml:            $cargo_version"
@@ -88,6 +93,7 @@ jobs:
           echo "  wayexpand.spec:        $spec_version"
           echo "  IBus XML:              $ibus_version"
           echo "  AppStream metadata:    $appstream_version"
+          echo "  GNOME extension:       $gnome_version_name ($gnome_version)"
 
           # Verify all match
           test "$cargo_version" = "$pkgbuild_version" || exit 1
@@ -95,6 +101,8 @@ jobs:
           test "$cargo_version" = "$spec_version" || exit 1
           test "$cargo_version" = "$ibus_version" || exit 1
           test "$cargo_version" = "$appstream_version" || exit 1
+          test "$cargo_version" = "$gnome_version_name" || exit 1
+          test "$expected_gnome_version" = "$gnome_version" || exit 1
 
           echo "✓ All versions consistent"
 
