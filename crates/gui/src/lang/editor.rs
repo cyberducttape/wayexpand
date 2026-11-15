@@ -591,3 +591,14 @@ impl Strings {
         }
     }
 }
+
+crate::texts! {
+    advanced_options =>
+        "Advanced options",
+        "Erweiterte Optionen",
+        "Opsi lanjutan";
+    advanced_options_in_use =>
+        "Advanced options (in use)",
+        "Erweiterte Optionen (verwendet)",
+        "Opsi lanjutan (digunakan)";
+}

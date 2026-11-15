@@ -362,6 +362,15 @@ impl GuiApp {
     ) {
         let mut detect_app_clicked = false;
         let mut variable_inserted = false;
+        // Basic mode shows trigger, replacement, description and Enabled.
+        // `editor_advanced` is the user's choice this session; without one,
+        // advanced options open for a snippet that already uses them.
+        let advanced_in_use = self
+            .draft
+            .as_ref()
+            .is_some_and(crate::editor::Draft::uses_advanced_fields);
+        let show_advanced = self.editor_advanced.unwrap_or(advanced_in_use);
+        let mut toggle_advanced = false;
         let daemon_capabilities = self.daemon_capabilities.clone();
         // The pane itself is the surface: a card inside the pane inside the
         // window added a frame without adding meaning.
@@ -509,101 +518,89 @@ impl GuiApp {
                             .desired_rows(7)
                             .desired_width(field_width),
                     );
-                    egui::CollapsingHeader::new(
-                        RichText::new(strings.template_variables()).small(),
-                    )
-                    .id_salt("template_variables")
-                    .show(ui, |ui| {
-                        hint(
-                            ui,
-                            RichText::new(strings.template_help())
-                                .small()
-                                .color(palette.muted),
-                        );
-                        for (group, variables) in TEMPLATE_VARIABLE_GROUPS {
-                            ui.add_space(4.0);
-                            ui.label(
-                                RichText::new(strings.template_variable_group(*group))
+                    if show_advanced {
+                        egui::CollapsingHeader::new(
+                            RichText::new(strings.template_variables()).small(),
+                        )
+                        .id_salt("template_variables")
+                        .show(ui, |ui| {
+                            hint(
+                                ui,
+                                RichText::new(strings.template_help())
                                     .small()
-                                    .strong(),
+                                    .color(palette.muted),
                             );
-                            ui.horizontal_wrapped(|ui| {
-                                for variable in *variables {
-                                    if theme::secondary_button(ui, palette, variable)
-                                        .on_hover_text(
-                                            strings.template_variable_description(variable),
-                                        )
-                                        .clicked()
-                                    {
-                                        insert_into_replacement_editor(
-                                            ui.ctx(),
-                                            &mut draft.replacement,
-                                            variable,
-                                        );
-                                        variable_inserted = true;
-                                    }
-                                }
-                            });
-                        }
-                        if !reusable_snippets.is_empty()
-                            || !self.reusable_snippet_filter.trim().is_empty()
-                        {
-                            ui.add_space(4.0);
-                            ui.label(RichText::new(strings.reusable_snippets()).small().strong());
-                            ui.add(
-                                TextEdit::singleline(&mut self.reusable_snippet_filter)
-                                    .hint_text(strings.reusable_snippet_search_hint())
-                                    .desired_width(field_width),
-                            );
-                            if reusable_snippets.is_empty() {
+                            for (group, variables) in TEMPLATE_VARIABLE_GROUPS {
+                                ui.add_space(4.0);
                                 ui.label(
-                                    RichText::new(strings.no_reusable_snippet_matches())
+                                    RichText::new(strings.template_variable_group(*group))
                                         .small()
-                                        .color(palette.muted),
+                                        .strong(),
                                 );
-                            } else {
                                 ui.horizontal_wrapped(|ui| {
-                                    for (trigger, description) in &reusable_snippets {
-                                        let variable = format!("{{{{snippet:{trigger}}}}}");
-                                        if theme::secondary_button(ui, palette, &variable)
-                                            .on_hover_text(if description.is_empty() {
-                                                strings.reusable_snippet_tooltip(trigger)
-                                            } else {
-                                                strings.reusable_snippet_description(
-                                                    trigger,
-                                                    description,
-                                                )
-                                            })
+                                    for variable in *variables {
+                                        if theme::secondary_button(ui, palette, variable)
+                                            .on_hover_text(
+                                                strings.template_variable_description(variable),
+                                            )
                                             .clicked()
                                         {
                                             insert_into_replacement_editor(
                                                 ui.ctx(),
                                                 &mut draft.replacement,
-                                                &variable,
+                                                variable,
                                             );
                                             variable_inserted = true;
                                         }
                                     }
                                 });
                             }
-                        }
-                    });
-                });
-
-                form_row(ui, strings.aliases(), columns, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        theme::token_editor(
-                            ui,
-                            palette,
-                            &mut draft.aliases,
-                            &mut draft.pending_alias,
-                            theme::TokenEditorText {
-                                add_hint: strings.add_alias(),
-                                remove_hint: strings.remove_alias(),
-                            },
-                            160.0,
-                        );
-                    });
+                            if !reusable_snippets.is_empty()
+                                || !self.reusable_snippet_filter.trim().is_empty()
+                            {
+                                ui.add_space(4.0);
+                                ui.label(
+                                    RichText::new(strings.reusable_snippets()).small().strong(),
+                                );
+                                ui.add(
+                                    TextEdit::singleline(&mut self.reusable_snippet_filter)
+                                        .hint_text(strings.reusable_snippet_search_hint())
+                                        .desired_width(field_width),
+                                );
+                                if reusable_snippets.is_empty() {
+                                    ui.label(
+                                        RichText::new(strings.no_reusable_snippet_matches())
+                                            .small()
+                                            .color(palette.muted),
+                                    );
+                                } else {
+                                    ui.horizontal_wrapped(|ui| {
+                                        for (trigger, description) in &reusable_snippets {
+                                            let variable = format!("{{{{snippet:{trigger}}}}}");
+                                            if theme::secondary_button(ui, palette, &variable)
+                                                .on_hover_text(if description.is_empty() {
+                                                    strings.reusable_snippet_tooltip(trigger)
+                                                } else {
+                                                    strings.reusable_snippet_description(
+                                                        trigger,
+                                                        description,
+                                                    )
+                                                })
+                                                .clicked()
+                                            {
+                                                insert_into_replacement_editor(
+                                                    ui.ctx(),
+                                                    &mut draft.replacement,
+                                                    &variable,
+                                                );
+                                                variable_inserted = true;
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    }
                 });
 
                 form_row(ui, strings.description(), columns, |ui| {
@@ -615,164 +612,206 @@ impl GuiApp {
                     );
                 });
 
-                form_row(ui, strings.tags(), columns, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        theme::token_editor(
-                            ui,
-                            palette,
-                            &mut draft.tags,
-                            &mut draft.pending_tag,
-                            theme::TokenEditorText {
-                                add_hint: strings.add_tag(),
-                                remove_hint: strings.remove_tag(),
+                form_row(ui, "", columns.with_label_offset(0.0), |ui| {
+                    ui.checkbox(&mut draft.enabled, strings.enabled());
+                });
+
+                // Everything below is for advanced use. It opens on its own
+                // for a snippet that already uses any of it.
+                ui.add_space(4.0);
+                let header = if advanced_in_use && !show_advanced {
+                    strings.advanced_options_in_use()
+                } else {
+                    strings.advanced_options()
+                };
+                let arrow = if show_advanced { "⏷" } else { "⏵" };
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new(format!("{arrow}  {header}")).strong())
+                            .frame(false),
+                    )
+                    .clicked()
+                {
+                    toggle_advanced = true;
+                }
+                if show_advanced {
+                    form_row(ui, strings.aliases(), columns, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            theme::token_editor(
+                                ui,
+                                palette,
+                                &mut draft.aliases,
+                                &mut draft.pending_alias,
+                                theme::TokenEditorText {
+                                    add_hint: strings.add_alias(),
+                                    remove_hint: strings.remove_alias(),
+                                },
+                                160.0,
+                            );
+                        });
+                    });
+
+                    form_row(ui, strings.tags(), columns, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            theme::token_editor(
+                                ui,
+                                palette,
+                                &mut draft.tags,
+                                &mut draft.pending_tag,
+                                theme::TokenEditorText {
+                                    add_hint: strings.add_tag(),
+                                    remove_hint: strings.remove_tag(),
+                                },
+                                160.0,
+                            );
+                        });
+                    });
+
+                    form_row(ui, strings.category(), columns, |ui| {
+                        // Right to left so the text field takes exactly the
+                        // width the picker leaves; the shared top and padding
+                        // give both the same height.
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(field_width, 0.0),
+                            egui::Layout::right_to_left(egui::Align::Min),
+                            |ui| {
+                                ui.spacing_mut().button_padding.y =
+                                    f32::from(theme::FIELD_MARGIN.top);
+                                if !categories.is_empty() {
+                                    ui.menu_button(format!("{}  ⏷", strings.existing()), |ui| {
+                                        for category in categories {
+                                            if ui
+                                                .selectable_label(
+                                                    draft.category == category,
+                                                    &category,
+                                                )
+                                                .clicked()
+                                            {
+                                                draft.category = category.clone();
+                                                ui.close();
+                                            }
+                                        }
+                                    });
+                                }
+                                ui.add(
+                                    TextEdit::singleline(&mut draft.category)
+                                        .margin(theme::FIELD_MARGIN)
+                                        .hint_text(strings.category_hint())
+                                        .desired_width(ui.available_width().max(120.0)),
+                                );
                             },
-                            160.0,
                         );
                     });
-                });
 
-                form_row(ui, strings.category(), columns, |ui| {
-                    // Right to left so the text field takes exactly the
-                    // width the picker leaves; the shared top and padding
-                    // give both the same height.
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(field_width, 0.0),
-                        egui::Layout::right_to_left(egui::Align::Min),
-                        |ui| {
-                            ui.spacing_mut().button_padding.y = f32::from(theme::FIELD_MARGIN.top);
-                            if !categories.is_empty() {
-                                ui.menu_button(format!("{}  ⏷", strings.existing()), |ui| {
-                                    for category in categories {
-                                        if ui
-                                            .selectable_label(draft.category == category, &category)
-                                            .clicked()
-                                        {
-                                            draft.category = category.clone();
-                                            ui.close();
-                                        }
-                                    }
-                                });
-                            }
-                            ui.add(
-                                TextEdit::singleline(&mut draft.category)
-                                    .margin(theme::FIELD_MARGIN)
-                                    .hint_text(strings.category_hint())
-                                    .desired_width(ui.available_width().max(120.0)),
-                            );
-                        },
-                    );
-                });
-
-                form_row(ui, strings.output_file(), columns, |ui| {
-                    ui.add(
-                        TextEdit::singleline(&mut draft.output_file)
-                            .margin(theme::FIELD_MARGIN)
-                            .hint_text(strings.output_file_hint())
-                            .desired_width(field_width),
-                    )
-                    .on_hover_text(strings.output_file_tooltip());
-                    let mut generate_only =
-                        draft.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly;
-                    if ui
-                        .checkbox(&mut generate_only, strings.generate_only())
-                        .on_hover_text(strings.generate_only_hint())
-                        .changed()
-                    {
-                        draft.delivery = if generate_only {
-                            wayexpand_core::ExpansionDelivery::GenerateOnly
-                        } else {
-                            wayexpand_core::ExpansionDelivery::Insert
-                        };
-                    }
-                    if generate_only {
-                        hint(
-                            ui,
-                            RichText::new(strings.generate_only_hint())
-                                .small()
-                                .color(palette.muted),
-                        );
-                    }
-                });
-
-                form_row(ui, strings.app_filter(), columns, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        theme::token_editor(
-                            ui,
-                            palette,
-                            &mut draft.app_filter,
-                            &mut draft.pending_app,
-                            theme::TokenEditorText {
-                                add_hint: strings.add_app(),
-                                remove_hint: strings.remove_app(),
-                            },
-                            180.0,
-                        );
-                        if app_detecting {
-                            ui.spinner();
-                            ui.label(strings.detecting_app())
-                                .on_hover_text(strings.detect_app_tooltip());
-                            if ui.small_button(strings.cancel()).clicked() {
-                                // The spawned thread is not joined/cancelled --
-                                // it may itself be stuck in a hung D-Bus call --
-                                // just stop waiting on it and discard whatever
-                                // it eventually sends.
-                                cancel_detection = true;
-                            }
-                        } else if app_detection_busy {
-                            ui.spinner();
-                            ui.label(strings.stopping_app_detection())
-                                .on_hover_text(strings.detect_app_tooltip());
-                        } else if ui
-                            .button(strings.detect_app())
-                            .on_hover_text(strings.detect_app_tooltip())
-                            .clicked()
+                    form_row(ui, strings.output_file(), columns, |ui| {
+                        ui.add(
+                            TextEdit::singleline(&mut draft.output_file)
+                                .margin(theme::FIELD_MARGIN)
+                                .hint_text(strings.output_file_hint())
+                                .desired_width(field_width),
+                        )
+                        .on_hover_text(strings.output_file_tooltip());
+                        let mut generate_only =
+                            draft.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly;
+                        if ui
+                            .checkbox(&mut generate_only, strings.generate_only())
+                            .on_hover_text(strings.generate_only_hint())
+                            .changed()
                         {
-                            detect_app_clicked = true;
+                            draft.delivery = if generate_only {
+                                wayexpand_core::ExpansionDelivery::GenerateOnly
+                            } else {
+                                wayexpand_core::ExpansionDelivery::Insert
+                            };
+                        }
+                        if generate_only {
+                            hint(
+                                ui,
+                                RichText::new(strings.generate_only_hint())
+                                    .small()
+                                    .color(palette.muted),
+                            );
                         }
                     });
-                    hint(
-                        ui,
-                        RichText::new(if draft.app_filter.is_empty() {
-                            strings.app_filter_help()
-                        } else {
-                            strings.window_tracking_warning()
-                        })
-                        .small()
-                        .color(palette.muted),
-                    );
-                    ui.collapsing(strings.app_filter_advanced(), |ui| {
-                        ui.label(
-                            RichText::new(strings.app_filter_advanced_help())
-                                .small()
-                                .color(palette.muted),
-                        );
-                    });
-                });
 
-                form_row(
-                    ui,
-                    strings.matching(),
-                    columns.with_label_offset(0.0),
-                    |ui| {
+                    form_row(ui, strings.app_filter(), columns, |ui| {
                         ui.horizontal_wrapped(|ui| {
-                            ui.checkbox(&mut draft.enabled, strings.enabled());
-                            ui.separator();
-                            ui.radio_value(
-                                &mut draft.match_mode,
-                                MatchMode::Immediate,
-                                strings.immediate(),
+                            theme::token_editor(
+                                ui,
+                                palette,
+                                &mut draft.app_filter,
+                                &mut draft.pending_app,
+                                theme::TokenEditorText {
+                                    add_hint: strings.add_app(),
+                                    remove_hint: strings.remove_app(),
+                                },
+                                180.0,
                             );
-                            ui.radio_value(
-                                &mut draft.match_mode,
-                                MatchMode::WordBoundary,
-                                strings.word_boundary(),
-                            );
-                            ui.separator();
-                            ui.checkbox(&mut draft.propagate_case, strings.propagate_case())
-                                .on_hover_text(strings.propagate_case_tooltip());
+                            if app_detecting {
+                                ui.spinner();
+                                ui.label(strings.detecting_app())
+                                    .on_hover_text(strings.detect_app_tooltip());
+                                if ui.small_button(strings.cancel()).clicked() {
+                                    // The spawned thread is not joined/cancelled --
+                                    // it may itself be stuck in a hung D-Bus call --
+                                    // just stop waiting on it and discard whatever
+                                    // it eventually sends.
+                                    cancel_detection = true;
+                                }
+                            } else if app_detection_busy {
+                                ui.spinner();
+                                ui.label(strings.stopping_app_detection())
+                                    .on_hover_text(strings.detect_app_tooltip());
+                            } else if ui
+                                .button(strings.detect_app())
+                                .on_hover_text(strings.detect_app_tooltip())
+                                .clicked()
+                            {
+                                detect_app_clicked = true;
+                            }
                         });
-                    },
-                );
+                        hint(
+                            ui,
+                            RichText::new(if draft.app_filter.is_empty() {
+                                strings.app_filter_help()
+                            } else {
+                                strings.window_tracking_warning()
+                            })
+                            .small()
+                            .color(palette.muted),
+                        );
+                        ui.collapsing(strings.app_filter_advanced(), |ui| {
+                            ui.label(
+                                RichText::new(strings.app_filter_advanced_help())
+                                    .small()
+                                    .color(palette.muted),
+                            );
+                        });
+                    });
+
+                    form_row(
+                        ui,
+                        strings.matching(),
+                        columns.with_label_offset(0.0),
+                        |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.radio_value(
+                                    &mut draft.match_mode,
+                                    MatchMode::Immediate,
+                                    strings.immediate(),
+                                );
+                                ui.radio_value(
+                                    &mut draft.match_mode,
+                                    MatchMode::WordBoundary,
+                                    strings.word_boundary(),
+                                );
+                                ui.separator();
+                                ui.checkbox(&mut draft.propagate_case, strings.propagate_case())
+                                    .on_hover_text(strings.propagate_case_tooltip());
+                            });
+                        },
+                    );
+                }
                 if cancel_detection {
                     if let Some(task) = self.app_detection.as_mut() {
                         task.cancelled.store(true, Ordering::Release);
@@ -783,30 +822,39 @@ impl GuiApp {
         if variable_inserted {
             self.invalidate_preview();
         }
-        // An optional helper for the replacement above, so it follows the
-        // details card instead of pushing the snippet's own fields down.
-        ui.add_space(8.0);
-        ui.collapsing(self.strings.form_builder_title(), |ui| {
-            self.render_form_field_builder(ui, palette);
-        });
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.label(self.strings.preview_app());
-            ui.add(
-                TextEdit::singleline(&mut self.preview_app)
-                    .margin(theme::FIELD_MARGIN)
-                    .hint_text(self.strings.preview_app_hint())
-                    .desired_width(300.0),
-            );
-        });
-        ui.add_space(4.0);
-        self.render_command_editor(ui, palette);
+        if toggle_advanced {
+            self.editor_advanced = Some(!show_advanced);
+        }
+        if show_advanced {
+            // An optional helper for the replacement above, so it follows the
+            // details card instead of pushing the snippet's own fields down.
+            ui.add_space(8.0);
+            ui.collapsing(self.strings.form_builder_title(), |ui| {
+                self.render_form_field_builder(ui, palette);
+            });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(self.strings.preview_app());
+                ui.add(
+                    TextEdit::singleline(&mut self.preview_app)
+                        .margin(theme::FIELD_MARGIN)
+                        .hint_text(self.strings.preview_app_hint())
+                        .desired_width(300.0),
+                );
+            });
+            ui.add_space(4.0);
+            self.render_command_editor(ui, palette);
+        }
         // Save and Delete are a pinned action bar under this
         // scroll area (`render_editor_actions`): with a long
         // replacement open they used to scroll out of reach,
         // so the primary action of the window depended on
         // where the user happened to be scrolled to.
-        self.render_preview_section(ui, palette);
+        // The Matcher preview below the editor is the simple preview; this
+        // route-level insertion plan is for advanced use.
+        if show_advanced {
+            self.render_preview_section(ui, palette);
+        }
         // The status line is a persistent bottom panel
         // (`render_status_bar`) rather than the tail of this
         // scroll area: a message about a failed save was

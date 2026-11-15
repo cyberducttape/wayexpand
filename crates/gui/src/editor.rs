@@ -41,6 +41,21 @@ pub(crate) struct Draft {
 }
 
 impl Draft {
+    /// Whether this snippet uses a setting that changes how it behaves and
+    /// that the editor's basic mode hides, so opening it shows the advanced
+    /// options. Tags and category only organize the library (the category is
+    /// shown in the list), so they alone do not open it.
+    pub(crate) fn uses_advanced_fields(&self) -> bool {
+        !self.aliases.is_empty()
+            || !self.app_filter.is_empty()
+            || !self.output_file.trim().is_empty()
+            || self.delivery != ExpansionDelivery::Insert
+            || self.match_mode != MatchMode::Immediate
+            || self.propagate_case
+            || self.command_enabled
+            || self.replacement.contains("{{")
+    }
+
     pub(crate) fn from_expansion(expansion: &ExpansionConfig) -> Self {
         let (
             command_enabled,

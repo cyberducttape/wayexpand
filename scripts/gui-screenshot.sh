@@ -11,6 +11,8 @@
 #   WAYEXPAND_GUI_SCREENSHOT_VIEW  screen to open first (see screenshot.rs)
 #   WAYEXPAND_GUI_SCREENSHOT_PACK  color pack code, for example retro_80s_neon
 #   WAYEXPAND_GUI_SCREENSHOT_LANGUAGE  interface language: en, de or id
+#   WAYEXPAND_GUI_SCREENSHOT_ONBOARDING=1  show the first-run guide; other
+#                                  screens are captured with it completed
 #   WAYEXPAND_GUI_SCREENSHOT_PICKER=1  capture the quick-insert picker
 #                                  (wayexpand-gui --picker) instead
 #   WAYEXPAND_GUI_SCREENSHOT_DAEMON=1  also run a sandboxed daemon that reads
@@ -64,12 +66,17 @@ config_home="$work/home/.config"
 mkdir -m 700 "$work/home" "$config_home" "$config_home/wayexpand"
 cp -- "$config" "$config_home/wayexpand/expansions.toml"
 chmod 600 "$config_home/wayexpand/expansions.toml"
-if [ -n "${WAYEXPAND_GUI_SCREENSHOT_PACK:-}${WAYEXPAND_GUI_SCREENSHOT_LANGUAGE:-}" ]; then
-    printf 'language = "%s"\ncolorpack = "%s"\n' \
-        "${WAYEXPAND_GUI_SCREENSHOT_LANGUAGE:-en}" "${WAYEXPAND_GUI_SCREENSHOT_PACK:-default}" \
-        >"$config_home/wayexpand/gui-prefs.toml"
-    chmod 600 "$config_home/wayexpand/gui-prefs.toml"
+# The first-run guide shows until it is completed, so capture other screens
+# with it completed unless the guide itself is wanted.
+onboarding_completed=true
+if [ "${WAYEXPAND_GUI_SCREENSHOT_ONBOARDING:-}" = 1 ]; then
+    onboarding_completed=false
 fi
+printf 'language = "%s"\ncolorpack = "%s"\nonboarding_completed = %s\n' \
+    "${WAYEXPAND_GUI_SCREENSHOT_LANGUAGE:-en}" "${WAYEXPAND_GUI_SCREENSHOT_PACK:-default}" \
+    "$onboarding_completed" \
+    >"$config_home/wayexpand/gui-prefs.toml"
+chmod 600 "$config_home/wayexpand/gui-prefs.toml"
 
 # kwin_wayland --exit-with-session takes one program; this wrapper starts
 # the optional daemon and then the GUI.

@@ -159,6 +159,19 @@ enum InsertState {
     },
 }
 
+/// The parts of `InsertState` the picker shows, copied for one frame.
+enum ShownInsertState {
+    Waiting {
+        trigger: String,
+    },
+    Failed {
+        trigger: String,
+        error: String,
+        text: String,
+    },
+    Ready,
+}
+
 impl PickerApp {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
@@ -272,14 +285,13 @@ impl PickerApp {
         // Refresh this at selection time so date/time values do not reflect
         // when the picker happened to open. Clipboard fallback has no daemon
         // reader, so it renders with the values available to this process.
-        let context = self.config.template_context(None);
-        let text = match render_template_with_cursor(&expansion.replacement, &context) {
-            Ok((text, _)) => text,
+        let text = match self.clipboard_text(expansion) {
+            Ok(text) => text,
             Err(error) => {
                 self.insert_state = InsertState::Failed {
                     trigger: expansion.trigger.clone(),
                     text: String::new(),
-                    error: format!("Could not render this snippet: {error}"),
+                    error,
                 };
                 return;
             }
@@ -290,7 +302,19 @@ impl PickerApp {
         self.copied = Some(copy_snippet(ctx, text, &expansion.trigger));
     }
 
-    fn preview_for(&mut self, expansion: &ExpansionConfig) -> String {
+    /// Render a snippet for the clipboard with the values available to this
+    /// process; the clipboard has no daemon to render it.
+    fn clipboard_text(&self, expansion: &ExpansionConfig) -> Result<String, String> {
+        let context = self.config.template_context(None);
+        render_template_with_cursor(&expansion.replacement, &context)
+            .map(|(text, _)| text)
+            .map_err(|error| format!("Could not render this snippet: {error}"))
+    }
+
+    /// The cached one-line preview of the snippet at `index`. Takes an index
+    /// rather than a snippet so the result list can borrow each snippet
+    /// instead of cloning it on every repaint.
+    fn preview_at(&mut self, index: usize) -> String {
         if self.last_preview_context_refresh.elapsed() >= PREVIEW_CONTEXT_REFRESH {
             let context = self.config.template_context(None);
             if context.unix_timestamp != self.template_context.unix_timestamp {
@@ -299,6 +323,7 @@ impl PickerApp {
             }
             self.last_preview_context_refresh = Instant::now();
         }
+        let expansion = &self.config.expansion[index];
         if let Some(preview) = self.preview_cache.get(&expansion.id) {
             return preview.clone();
         }
@@ -430,8 +455,26 @@ impl eframe::App for PickerApp {
                     );
                 }
 
-                match &self.insert_state {
-                    InsertState::Waiting { trigger, .. } => {
+                let mut fallback_error = None;
+                // Copy what the cards show out of the state, so the failure
+                // card's buttons can update the picker while it renders.
+                let shown_state = match &self.insert_state {
+                    InsertState::Waiting { trigger, .. } => ShownInsertState::Waiting {
+                        trigger: trigger.clone(),
+                    },
+                    InsertState::Failed {
+                        trigger,
+                        error,
+                        text,
+                    } => ShownInsertState::Failed {
+                        trigger: trigger.clone(),
+                        error: error.clone(),
+                        text: text.clone(),
+                    },
+                    InsertState::Ready => ShownInsertState::Ready,
+                };
+                match &shown_state {
+                    ShownInsertState::Waiting { trigger } => {
                         theme::card(ui, &palette, |ui| {
                             ui.set_width(ui.available_width());
                             ui.label(
@@ -441,7 +484,7 @@ impl eframe::App for PickerApp {
                         });
                         ui.add_space(10.0);
                     }
-                    InsertState::Failed {
+                    ShownInsertState::Failed {
                         trigger,
                         error,
                         text,
@@ -455,11 +498,32 @@ impl eframe::App for PickerApp {
                             );
                             ui.label(error);
                             ui.horizontal(|ui| {
+                                // A failed direct insert keeps no rendered text
+                                // (the daemon renders for itself), so render
+                                // the clipboard copy now when policy allows it.
                                 if self.clipboard_fallback_allowed
-                                    && !text.is_empty()
                                     && ui.button(self.strings.picker_copy_instead()).clicked()
                                 {
-                                    self.copied = Some(copy_snippet(&ctx, text.clone(), trigger));
+                                    let rendered = if text.is_empty() {
+                                        self.config
+                                            .expansion
+                                            .iter()
+                                            .find(|expansion| &expansion.trigger == trigger)
+                                            .ok_or_else(|| {
+                                                "This snippet is no longer in the library."
+                                                    .to_owned()
+                                            })
+                                            .and_then(|expansion| self.clipboard_text(expansion))
+                                    } else {
+                                        Ok(text.clone())
+                                    };
+                                    match rendered {
+                                        Ok(rendered) => {
+                                            self.copied =
+                                                Some(copy_snippet(&ctx, rendered, trigger));
+                                        }
+                                        Err(message) => fallback_error = Some(message),
+                                    }
                                 }
                                 if ui.button(self.strings.picker_cancel()).clicked() {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -468,7 +532,12 @@ impl eframe::App for PickerApp {
                         });
                         ui.add_space(10.0);
                     }
-                    InsertState::Ready => {}
+                    ShownInsertState::Ready => {}
+                }
+                if let Some(error) = fallback_error {
+                    if let InsertState::Failed { error: shown, .. } = &mut self.insert_state {
+                        *shown = error;
+                    }
                 }
 
                 let footer_height = 30.0;
@@ -486,8 +555,8 @@ impl eframe::App for PickerApp {
                             });
                         }
                         for (index, expansion_index) in result_indices.iter().copied().enumerate() {
-                            let expansion = self.config.expansion[expansion_index].clone();
-                            let preview = self.preview_for(&expansion);
+                            let preview = self.preview_at(expansion_index);
+                            let expansion = &self.config.expansion[expansion_index];
                             let selected = index == self.selected;
                             let response = picker_row(
                                 ui,
@@ -495,7 +564,7 @@ impl eframe::App for PickerApp {
                                 &preview,
                                 &self.search_index[expansion_index].app_scope,
                                 &self.strings,
-                                &expansion,
+                                expansion,
                                 selected,
                             );
                             if selected && (up || down) {

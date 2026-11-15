@@ -12,6 +12,7 @@ mod persistence;
 mod picker;
 mod playground;
 mod preview;
+mod recovery;
 mod runtime;
 mod screenshot;
 mod settings;
@@ -393,6 +394,9 @@ struct GuiApp {
     /// Form values used only by the editor's local template playground.
     form_preview_values: std::collections::HashMap<String, String>,
     try_live_open: bool,
+    /// The user's basic/advanced editor choice this session; `None` follows
+    /// the snippet (advanced options open when it uses them).
+    editor_advanced: Option<bool>,
     /// Whether the diagnostics overview shows its technical evidence grid.
     diagnostics_details_open: bool,
     /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
@@ -598,13 +602,10 @@ impl GuiApp {
         let settings_terminal_paste = config.settings.terminal_paste;
         let prefs = load_gui_prefs();
         let onboarding_completed = prefs.onboarding_completed;
-        let onboarding_visible = gnome_setup_resume_pending
-            || !onboarding_completed
-                && (config.expansion.is_empty()
-                    || config.expansion.iter().any(|expansion| {
-                        expansion.replacement == "WayExpand is working!"
-                            && expansion.tags.iter().any(|tag| tag == "tutorial")
-                    }));
+        // Show the guide until setup is completed or explicitly skipped. It
+        // used to depend on the library being empty, so a migrated library
+        // (Espanso import, another machine) never saw it.
+        let onboarding_visible = gnome_setup_resume_pending || !onboarding_completed;
         let settings_font_scale = prefs.font_scale;
         let strings = Strings::new(prefs.language);
         Ok(Self {
@@ -766,6 +767,7 @@ impl GuiApp {
             // Collapsed by default so the snippet form gets the window's
             // height; its header stays visible as a one-line bar.
             try_live_open: false,
+            editor_advanced: None,
             diagnostics_details_open: false,
             setup_task: None,
             sync_task: None,
@@ -954,6 +956,32 @@ pub(crate) fn app_icon() -> egui::IconData {
 /// Resolve the optional CONFIG argument. An unrecognized option is an error
 /// rather than a path: treating `--version` as a config file would create it
 /// in the working directory on the first save.
+fn run_recovery(path: PathBuf, error: String) -> Result<()> {
+    let prefs = load_gui_prefs();
+    let strings = Strings::new(prefs.language);
+    let recovery = recovery::RecoveryApp::new(path, error, strings);
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([760.0, 560.0])
+            .with_icon(app_icon()),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "WayExpand",
+        options,
+        Box::new(move |creation_context| {
+            fonts::install(&creation_context.egui_ctx);
+            theme::install_pack(
+                &creation_context.egui_ctx,
+                prefs.colorpack,
+                prefs.font_scale,
+            );
+            Ok(Box::new(recovery))
+        }),
+    )
+    .map_err(|error| anyhow::anyhow!("GUI failed: {error}"))
+}
+
 fn config_path_argument(argument: Option<String>) -> Result<PathBuf> {
     match argument {
         Some(option) if option.starts_with('-') => {
@@ -995,7 +1023,12 @@ fn main() -> Result<()> {
         return picker::run(path, copy_only);
     }
     let path = config_path_argument(env::args().nth(1))?;
-    let mut app = GuiApp::load(path)?;
+    // A library that fails to load opens a recovery screen instead of
+    // stopping the GUI before its window appears.
+    let mut app = match GuiApp::load(path.clone()) {
+        Ok(app) => app,
+        Err(error) => return run_recovery(path, error.to_string()),
+    };
     app.start_runtime()?;
     let saved_dark_mode = load_gui_prefs().dark_mode;
     let colorpack = app.colorpack;

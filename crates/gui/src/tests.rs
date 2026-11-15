@@ -3590,3 +3590,66 @@ fn toolbar_leaves_room_for_the_editor_and_never_overlaps_its_brand() {
     }
     let _ = fs::remove_file(path);
 }
+
+#[test]
+fn a_clean_draft_of_a_saved_snippet_does_not_block_the_desktop_test() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-desktop-test-draft-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    fs::write(
+        &path,
+        "[[expansion]]\ntrigger = \";dt\"\nreplacement = \"desktop test\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    // Loading selects the first snippet and creates a clean draft of it, as
+    // selecting a snippet in the list does.
+    assert!(app.draft.is_some());
+    assert!(!app.desktop_test_blocked_by_draft());
+
+    app.draft.as_mut().unwrap().replacement.push_str(" edited");
+    assert!(
+        app.desktop_test_blocked_by_draft(),
+        "unsaved edits must block it"
+    );
+
+    app.draft = None;
+    app.new_draft = true;
+    app.draft = Some(Draft::from_expansion(&app.config.expansion[0]));
+    assert!(
+        app.desktop_test_blocked_by_draft(),
+        "a new snippet is unsaved"
+    );
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn basic_editor_mode_opens_advanced_options_only_for_behavior_settings() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-basic-editor-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    fs::write(
+        &path,
+        "[[expansion]]\ntrigger = \";hi\"\nreplacement = \"Hello\"\ndescription = \"Greeting\"\ncategory = \"Email\"\ntags = [\"greeting\"]\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let app = GuiApp::load(path.clone()).unwrap();
+    let mut draft = app.draft.clone().unwrap();
+    assert!(
+        !draft.uses_advanced_fields(),
+        "description, tags and category alone keep basic mode"
+    );
+    draft.app_filter.push("org.example.Editor".into());
+    assert!(draft.uses_advanced_fields(), "app targeting opens advanced");
+    let mut draft = app.draft.clone().unwrap();
+    draft.replacement = "Today is {{date:%A}}".into();
+    assert!(draft.uses_advanced_fields(), "templates open advanced");
+    assert_eq!(app.editor_advanced, None, "no session choice yet");
+    fs::remove_file(path).unwrap();
+}

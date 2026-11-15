@@ -5,12 +5,7 @@ use crate::*;
 fn desktop_test_options(expansions: &[ExpansionConfig]) -> Vec<(String, String)> {
     expansions
         .iter()
-        .filter(|expansion| {
-            expansion.is_keyboard_matchable()
-                && expansion.app_filter.is_empty()
-                && expansion.command.is_none()
-                && !expansion.replacement.contains("{{")
-        })
+        .filter(|expansion| super::first_run::desktop_testable(expansion))
         .map(|expansion| (expansion.trigger.clone(), expansion.replacement.clone()))
         .collect()
 }
@@ -1372,6 +1367,12 @@ impl GuiApp {
         self.backend_test_help_open = open;
     }
 
+    /// Whether unsaved editor changes block the desktop test, which runs the
+    /// saved configuration. A clean draft of a saved snippet does not.
+    pub(crate) fn desktop_test_blocked_by_draft(&self) -> bool {
+        self.new_draft || self.draft_is_dirty()
+    }
+
     fn render_test_expansion_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
         if !self.test_expansion_dialog_open {
             return;
@@ -1379,13 +1380,15 @@ impl GuiApp {
         let mut open = self.test_expansion_dialog_open;
         let mut close = false;
         let first_run_verification = self.desktop_test_dialog_required;
-        let desktop_tests = if first_run_verification {
-            super::first_run::onboarding_test_snippet(&self.config)
-                .map(|expansion| vec![(expansion.trigger.clone(), expansion.replacement.clone())])
-                .unwrap_or_default()
-        } else {
-            desktop_test_options(&self.config.expansion)
-        };
+        // First-run offers every testable snippet, with the tutorial snippet
+        // first when it exists; it is a default, not a requirement.
+        let mut desktop_tests = desktop_test_options(&self.config.expansion);
+        if first_run_verification {
+            if let Some(default) = super::first_run::onboarding_test_snippet(&self.config) {
+                desktop_tests.retain(|(trigger, _)| trigger != &default.trigger);
+                desktop_tests.insert(0, (default.trigger.clone(), default.replacement.clone()));
+            }
+        }
         if !desktop_tests
             .iter()
             .any(|(trigger, _)| trigger == &self.desktop_test_trigger)
@@ -1502,11 +1505,14 @@ impl GuiApp {
                     &mut self.desktop_test_target_acknowledged,
                     self.strings.dg_i_am_focused_on_a_disposable(),
                 );
+                // The desktop test runs the saved configuration, so only
+                // unsaved edits block it. Showing a saved snippet always
+                // creates a clean draft; requiring no draft at all disabled
+                // the test whenever the editor showed a snippet.
                 let can_run_test = desktop_test.is_some()
                     && application_class_valid
                     && self.desktop_test_target_acknowledged
-                    && self.draft.is_none()
-                    && !self.new_draft
+                    && !self.desktop_test_blocked_by_draft()
                     && self.setup_task.is_none();
                 if ui
                     .add_enabled(
@@ -1525,7 +1531,7 @@ impl GuiApp {
                         close = true;
                     }
                 }
-                if self.draft.is_some() || self.new_draft {
+                if self.desktop_test_blocked_by_draft() {
                     ui.colored_label(
                         palette.warning,
                         self.strings.dg_save_or_discard_the_current_snippet(),

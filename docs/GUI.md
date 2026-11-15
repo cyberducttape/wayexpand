@@ -157,6 +157,18 @@ hover, while there is nothing for them to act on.
 The preview input is editable, allowing a trigger to be tested inside larger
 text and making word-boundary behavior visible before saving.
 
+### Basic and advanced editing
+
+The snippet editor opens in basic mode: trigger, replacement, description, and
+Enabled. **Advanced options** holds aliases, tags, category, file output and
+generate-only delivery, application targeting, matching options, template
+variables, the form builder, the preview application, command settings, and
+the route insertion plan. It opens by itself for a snippet that uses a
+setting that changes its behavior (aliases, application targeting, file
+output, matching or case options, a command, or a template); tags and category
+alone keep basic mode. Opening or closing it applies for the rest of the
+session.
+
 ### Matcher preview
 
 A panel pinned under the editor provides an in-process preview of the library
