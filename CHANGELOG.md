@@ -21,6 +21,17 @@ All notable changes to WayExpand are documented here.
     delivery, the picker no longer sends an untracked insert and closes as if
     it had worked. It inserts nothing, explains why, and names
     `wayexpand service restart --yes`.
+- `wayexpand new` lists templates in the 80-column layout of `wayexpand help`:
+  your templates and the built-in ones under separate headings, each as
+  `name  description → file`. Previously one long output path set the width
+  of the whole file column and pushed every description far to the right.
+  Placeholders in output paths are shortened (`roles/<role>`), and the usage
+  notes at the end are a short list of commands.
+- `wayexpand setup --check` and `wayexpand install-check` print every check
+  with the same status column ("NOT TESTED", not "NOT_TESTED"). A row stays
+  on one line when it fits in 80 columns; otherwise its detail wraps under
+  the check name instead of running to several hundred characters. The
+  closing summary aligns its values.
 - The first-run guide has three steps: *Connect your desktop*, *Create a
   snippet* and *Test it*. Route, permission and certification notes moved
   into a collapsed *Troubleshooting details* section. Removed: the separate

@@ -314,21 +314,21 @@ fn edit_distance(left: &str, right: &str) -> usize {
     table[left.len()][right.len()]
 }
 
-struct Style {
+pub(crate) struct Style {
     color: bool,
 }
 
 impl Style {
-    fn stdout() -> Self {
+    pub(crate) fn stdout() -> Self {
         Self {
             color: std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none(),
         }
     }
     #[cfg(test)]
-    fn plain() -> Self {
+    pub(crate) fn plain() -> Self {
         Self { color: false }
     }
-    fn heading(&self, text: &str) -> String {
+    pub(crate) fn heading(&self, text: &str) -> String {
         if self.color {
             format!("\x1b[1m{text}\x1b[0m")
         } else {
@@ -338,7 +338,7 @@ impl Style {
 }
 
 /// Wrap `text` at `width` columns, indenting every line by `indent`.
-fn wrap(text: &str, indent: usize, width: usize) -> String {
+pub(crate) fn wrap(text: &str, indent: usize, width: usize) -> String {
     let mut out = String::new();
     let mut line = String::new();
     for word in text.split_whitespace() {
@@ -361,18 +361,30 @@ fn wrap(text: &str, indent: usize, width: usize) -> String {
     out
 }
 
-const WIDTH: usize = 80;
+pub(crate) const WIDTH: usize = 80;
 const SERVICE_CONTROLS: [&str; 5] = ["status", "pause", "resume", "reload", "stop"];
 const NAME_COLUMN: usize = 18;
 
-fn summary_row(name: &str, summary: &str) -> String {
+/// One `name  summary` row, the summary wrapped under its own column. A name
+/// too long for the column gets a line of its own rather than pushing the
+/// summary out of line with the rows around it.
+pub(crate) fn summary_row(name: &str, summary: &str) -> String {
+    summary_row_at(name, summary, NAME_COLUMN)
+}
+
+/// [`summary_row`] with the name column `column` characters wide; at least
+/// two spaces always separate a name from its summary.
+pub(crate) fn summary_row_at(name: &str, summary: &str, column: usize) -> String {
     if summary.is_empty() {
         return format!("  {name}\n");
     }
-    let name = format!("  {name:<width$}", width = NAME_COLUMN);
-    let wrapped = wrap(summary, NAME_COLUMN + 2, WIDTH);
+    let wrapped = wrap(summary, column + 2, WIDTH);
+    if name.chars().count() + 2 > column {
+        return format!("  {name}\n{wrapped}");
+    }
+    let name = format!("  {name:<column$}");
     // The first wrapped line replaces the indentation with the name.
-    format!("{name}{}", &wrapped[NAME_COLUMN + 2..])
+    format!("{name}{}", &wrapped[column + 2..])
 }
 
 fn main_help(style: &Style, version: &str, all: bool) -> String {

@@ -858,12 +858,9 @@ fn print_report(title: &str, json: bool) -> Result<bool> {
             println!("WARNING: CLI and running daemon belong to different installation roots.");
         }
         for r in &rows {
-            println!(
-                "{:4} {:<22} {} — {}",
-                r.status.to_uppercase(),
-                r.component,
-                r.path,
-                r.detail
+            print!(
+                "{}",
+                check_row(r.status, r.component, &format!("{} — {}", r.path, r.detail))
             );
         }
     }
@@ -965,50 +962,43 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     } else {
         println!("WayExpand Setup Check\n\nInstalled artifacts:");
         for r in &rows {
-            println!(
-                "  {:4} {} — {}",
-                r.status.to_uppercase(),
-                r.component,
-                r.path
-            );
+            print!("{}", check_row(r.status, r.component, &r.path));
         }
         println!("\nIntegration:");
         for check in &integration {
-            println!(
-                "  {:<12} {} — {}",
-                check.status.to_uppercase(),
-                check.component,
-                check.detail
+            print!(
+                "{}",
+                check_row(&check.status, &check.component, &check.detail)
             );
             if check.component == "installation_path_identity" {
                 println!(
-                    "    CLI installation method: {}",
+                    "                 CLI installation method: {}",
                     check.evidence["cli_method"].as_str().unwrap_or("unknown")
                 );
                 println!(
-                    "    PATH installation method: {}",
+                    "                 PATH installation method: {}",
                     check.evidence["path_method"].as_str().unwrap_or("unknown")
                 );
                 println!(
-                    "    Daemon installation method: {}",
+                    "                 Daemon installation method: {}",
                     check.evidence["daemon_method"]
                         .as_str()
                         .unwrap_or("unknown")
                 );
                 println!(
-                    "    CLI: {}",
+                    "                 CLI: {}",
                     check.evidence["cli_executable"]
                         .as_str()
                         .unwrap_or("unknown")
                 );
                 println!(
-                    "    PATH: {}",
+                    "                 PATH: {}",
                     check.evidence["path_executable"]
                         .as_str()
                         .unwrap_or("not found")
                 );
                 println!(
-                    "    Daemon: {}",
+                    "                 Daemon: {}",
                     check.evidence["daemon_executable"]
                         .as_str()
                         .unwrap_or("not running")
@@ -1017,30 +1007,94 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
         }
         println!("\nOperational:");
         for check in &operational {
-            println!(
-                "  {:<12} {} — {}",
-                check.status.to_uppercase(),
-                check.component,
-                check.detail
+            print!(
+                "{}",
+                check_row(&check.status, &check.component, &check.detail)
             );
         }
         println!("\nTerminal matching self-test:");
-        println!(
-            "  {} — {}",
-            terminal_match["status"]
-                .as_str()
-                .unwrap_or("unknown")
-                .to_uppercase(),
-            terminal_match["detail"]
-                .as_str()
-                .unwrap_or("could not evaluate terminal matching")
+        print!(
+            "{}",
+            check_row(
+                terminal_match["status"].as_str().unwrap_or("unknown"),
+                "terminal_matching",
+                terminal_match["detail"]
+                    .as_str()
+                    .unwrap_or("could not evaluate terminal matching"),
+            )
         );
-        println!("\nDesktop: {}\nRecommended: {} ({})\nSetup preflight: {}\nTarget insertion: NOT TESTED\nFirst-run test: {}\n\nNext: wayexpand setup --apply\n\nPreflight does not grant raw-input/portal consent or verify target-app insertion.", crate::doctor::backends::session_description(), recommendation.label, recommendation.detail, if ready {"ready to configure"} else {"prerequisites incomplete"}, if first_run_test_available {"`wayexpand setup --apply` can offer a real-app test using an enabled static snippet (requires confirmation)"} else {"no enabled static snippet is configured; add a harmless one for an optional test"});
+        println!();
+        for (label, value) in [
+            ("Desktop:", crate::doctor::backends::session_description().to_string()),
+            (
+                "Recommended:",
+                format!("{} ({})", recommendation.label, recommendation.detail),
+            ),
+            (
+                "Preflight:",
+                if ready {
+                    "ready to configure"
+                } else {
+                    "prerequisites incomplete"
+                }
+                .to_owned(),
+            ),
+            ("Insertion:", "NOT TESTED".to_owned()),
+            (
+                "First run:",
+                if first_run_test_available {
+                    "`wayexpand setup --apply` can offer a real-app test using an enabled static snippet (requires confirmation)"
+                } else {
+                    "no enabled static snippet is configured; add a harmless one for an optional test"
+                }
+                .to_owned(),
+            ),
+        ] {
+            print!("{}", labelled_row(label, &value));
+        }
+        println!("\nNext: wayexpand setup --apply\n");
+        print!(
+            "{}",
+            crate::help::wrap(
+                "Preflight does not grant raw-input/portal consent or verify target-app insertion.",
+                0,
+                crate::help::WIDTH,
+            )
+        );
     }
     if !ready {
         bail!("setup prerequisites are incomplete; see the failed checks")
     }
     Ok(())
+}
+
+/// Width of the status column in `setup --check` rows: "UNAVAILABLE" and a
+/// space.
+const CHECK_STATUS_COLUMN: usize = 13;
+
+/// One `setup --check` row: status, check name and detail on one line when
+/// it fits in 80 columns, otherwise the detail wrapped under the name.
+fn check_row(status: &str, component: &str, detail: &str) -> String {
+    let status = status.to_uppercase().replace('_', " ");
+    let head = format!("  {status:<CHECK_STATUS_COLUMN$}{component}");
+    let one_line = format!("{head} — {detail}");
+    if one_line.chars().count() <= crate::help::WIDTH {
+        return format!("{one_line}\n");
+    }
+    format!(
+        "{head}\n{}",
+        crate::help::wrap(detail, CHECK_STATUS_COLUMN + 4, crate::help::WIDTH)
+    )
+}
+
+/// A `Label: value` summary line, the value wrapped under itself.
+fn labelled_row(label: &str, value: &str) -> String {
+    const COLUMN: usize = 13;
+    let wrapped = crate::help::wrap(value, COLUMN, crate::help::WIDTH);
+    format!(
+        "{label:<COLUMN$}{}",
+        wrapped.get(COLUMN..).unwrap_or_default()
+    )
 }
 
 /// Exercise the actual matching engine under terminal-only admission. This
@@ -1303,6 +1357,33 @@ pub(crate) fn repair(args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn setup_check_rows_fit_80_columns_and_align_their_details() {
+        let short = super::check_row("pass", "cli", "/usr/bin/wayexpand");
+        assert_eq!(short, "  PASS         cli — /usr/bin/wayexpand\n");
+        let long = super::check_row(
+            "not_tested",
+            "target_insertion",
+            "setup preflight never claims successful insertion; run the interactive desktop integration test",
+        );
+        let lines: Vec<&str> = long.lines().collect();
+        assert_eq!(lines[0], "  NOT TESTED   target_insertion");
+        for line in &lines[1..] {
+            assert!(line.starts_with(&" ".repeat(17)), "{line:?}");
+            assert!(line.chars().count() <= crate::help::WIDTH, "{line:?}");
+        }
+        let unavailable = super::check_row("unavailable", "daemon_runtime", "x");
+        assert!(
+            unavailable.starts_with("  UNAVAILABLE  daemon_runtime"),
+            "{unavailable:?}"
+        );
+        let row = super::labelled_row("Recommended:", &"word ".repeat(30));
+        for line in row.lines().skip(1) {
+            assert!(line.starts_with(&" ".repeat(13)), "{line:?}");
+        }
+        assert!(row.starts_with("Recommended: word"));
+    }
+
     use super::*;
 
     #[test]
