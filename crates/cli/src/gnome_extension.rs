@@ -961,7 +961,7 @@ pub(crate) fn describe_state(
         ExtensionState::Active => (true, "the WayExpand GNOME Shell extension is active; app filters can see the focused app".into(), None),
         ExtensionState::Inactive => (false, "the WayExpand GNOME Shell extension is installed but turned off".into(), Some("run `wayexpand setup`, or `gnome-extensions enable wayexpand-window-tracker@cyberducttape.github.io`".into())),
         ExtensionState::Error(error) => (false, format!("GNOME Shell could not load the WayExpand extension: {}", if error.is_empty() { "no error text" } else { error }), Some("reinstall WayExpand and run `wayexpand setup`; see `journalctl --user -b | grep -i wayexpand` for details".into())),
-        ExtensionState::OutOfDate => (false, "this GNOME Shell version is not supported by the WayExpand extension (GNOME 45 or newer is required)".into(), None),
+        ExtensionState::OutOfDate => (false, "this GNOME Shell version is not supported by the WayExpand extension, which is tested on GNOME Shell 46, 48, 50, and 51".into(), Some("expansion through IBus still works; app-specific snippets stay unavailable on this Shell version, and the Quick Picker works everywhere".into())),
         ExtensionState::Unknown => (false, "GNOME Shell has not reported the WayExpand extension; setup must confirm whether it is a newly installed extension or an unavailable extension state".into(), Some("run `wayexpand doctor --gnome --json` to inspect the Shell session and extension state".into())),
         ExtensionState::Other(number) => (false, format!("the WayExpand GNOME Shell extension is in state {number}"), Some("check again in a moment".into())),
     }

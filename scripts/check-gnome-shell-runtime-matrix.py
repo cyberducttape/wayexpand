@@ -69,6 +69,18 @@ def validate(metadata, matrix, workflow, e2e):
                 errors.append(f"GNOME {major} Fedora runtime job is absent or has the wrong runner")
             if f"WX_GNOME_EXPECTED_SHELL_MAJOR={major}" not in job_text:
                 errors.append(f"GNOME {major} Fedora runtime job does not pin its actual Shell major")
+        elif item.get("job") == "gnome-shell-versions-e2e":
+            job_start = workflow.find("  gnome-shell-versions-e2e:")
+            job_end = workflow.find("\n  packaging:", job_start)
+            job_text = workflow[job_start:job_end if job_end != -1 else None]
+            matrix_row = (
+                f"- image: {item.get('runner')}\n"
+                f"            shell_major: '{major}'"
+            )
+            if job_start == -1 or matrix_row not in job_text:
+                errors.append(f"GNOME {major} container job is absent or not pinned to {item.get('runner')}")
+            if 'WX_GNOME_EXPECTED_SHELL_MAJOR="${{ matrix.shell_major }}"' not in job_text:
+                errors.append(f"GNOME {major} container job does not pin its actual Shell major")
         else:
             errors.append(f"GNOME {major} has no recognized version-specific CI job")
 

@@ -381,7 +381,7 @@ GNOME (Mutter) exposes no Wayland protocol or public D-Bus API for the focused
 window: `org.gnome.Shell.Introspect` answers only allowlisted callers and
 `org.gnome.Shell.Eval` is disabled. WayExpand therefore ships a small GNOME
 Shell extension (`gnome-extension/wayexpand-window-tracker@cyberducttape.github.io`,
-currently runtime-gated on GNOME Shell 46, 50, and 51) that runs inside GNOME
+currently runtime-gated on GNOME Shell 46, 48, 50, and 51) that runs inside GNOME
 Shell. Other Shell majors are not declared compatible until they have a
 version-pinned runtime gate. A tracker calls its
 `Subscribe()` method and gets the focused window (app ID, title, Mutter window
