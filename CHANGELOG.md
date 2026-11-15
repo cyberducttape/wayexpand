@@ -21,6 +21,19 @@ All notable changes to WayExpand are documented here.
   registry as the help, and document the commands missing from the manual
   page; a test now fails when a command is not in the manual.
 
+- Add `wayexpand ibus restart`, which restarts IBus the way the desktop that
+  owns it expects. On KDE Plasma, KWin launches IBus as its Wayland input
+  method: a plain `ibus restart` hangs waiting for a daemon KWin never
+  relaunches, and `ibus restart --type=kde-wayland` waits without a timeout
+  for a KWin signal that never comes when the setting is unchanged. The new
+  command switches KWin's input method off and on, waits for the new daemon,
+  and confirms WayExpand is selected again. Elsewhere it runs `ibus restart`.
+  Setup uses the same method, and diagnostics and the update notice suggest
+  the new command.
+- Exit the IBus engine when its ibus-daemon goes away. Each IBus restart used
+  to leave the previous `wayexpand-ibus` process running indefinitely beside
+  the new one. Covered by the real-IBus end-to-end test.
+
 ## [1.3.5] - 2026-11-14
 
 ### Highlights
