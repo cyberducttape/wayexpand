@@ -110,7 +110,9 @@ makepkg -si
 **To maintain:**
 1. Follow [RELEASING.md](RELEASING.md) to update version numbers across all files
 2. Update `pkgver` and `pkgrel` in `PKGBUILD` (happens automatically with `prepare-release.sh`)
-3. SHA256 checksum is computed and inserted during release workflow
+3. The release workflow publishes `wayexpand-<version>.PKGBUILD` with the
+   SHA256 checksum of the archive it built and the release tag in `source`;
+   use that file for the AUR
 4. Test with `makepkg -si`
 5. Before publication, generate `.SRCINFO` and verify in a clean Arch chroot
 
