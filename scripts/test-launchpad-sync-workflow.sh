@@ -96,4 +96,22 @@ sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'bash scripts/publish-launch
 sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'for attempt in 1 2 3 4 5; do' >/dev/null
 sed -n "$publish_line,\$p" "$workflow" | grep -F -- "if [ \"\$attempt\" -lt 5 ]; then" >/dev/null
 
+# A divergent Launchpad tag is refused unless a manual run names that tag and
+# the commit Launchpad has now; the replacement is then leased on the tag ref.
+# The patterns below are literal workflow text, not expansions.
+# shellcheck disable=SC2016
+{
+grep -F -- "echo 'Refusing to overwrite a divergent existing tag.' >&2" "$workflow" >/dev/null
+grep -F -- 'REPLACE_TAG: ${{ inputs.replace_tag }}' "$workflow" >/dev/null
+grep -F -- '[[ "$replace_expected" =~ ^[0-9a-f]{40}$ ]]' "$workflow" >/dev/null
+replace_line=$(grep -nF -- 'if [ "$tag" = "$replace_tag" ] && [ "$remote_commit" = "$replace_expected" ]; then' "$workflow" | cut -d: -f1)
+refuse_line=$(grep -nF -- "echo 'Refusing to overwrite a divergent existing tag.' >&2" "$workflow" | cut -d: -f1)
+test -n "$replace_line" -a -n "$refuse_line"
+test "$(grep -cF -- '"+refs/tags/' "$workflow")" -eq 1
+forced_line=$(grep -nF -- '"+refs/tags/$tag:refs/tags/$tag"' "$workflow" | cut -d: -f1)
+lease_line=$(grep -nF -- '--force-with-lease="refs/tags/$tag:$remote_ref"' "$workflow" | cut -d: -f1)
+test -n "$forced_line" -a -n "$lease_line"
+test "$replace_line" -lt "$lease_line" -a "$lease_line" -lt "$forced_line" -a "$forced_line" -lt "$refuse_line"
+}
+
 printf '%s\n' 'Launchpad workflow safety contract passed'
