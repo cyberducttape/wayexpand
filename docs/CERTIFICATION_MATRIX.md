@@ -1,6 +1,6 @@
 # WayExpand Compositor Certification Matrix
 
-**WayExpand version scope:** 1.3.5 release line
+**WayExpand version scope:** 1.3.6 release line
 **Matrix revision:** 2026-11-02.1
 **Last Updated:** 2026-11-02
 **Status:** No compositor route is production-certified
