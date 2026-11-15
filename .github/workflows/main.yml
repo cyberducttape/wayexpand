@@ -2,6 +2,20 @@ name: Sync Launchpad
 
 on:
   workflow_dispatch:
+    inputs:
+      replace_tag:
+        description: >-
+          Replace this one existing Launchpad tag with GitHub's (for a release
+          tag that was moved on GitHub). Leave empty for a normal sync.
+        required: false
+        default: ""
+      replace_tag_launchpad_commit:
+        description: >-
+          The full commit the Launchpad tag points to now, as the sync's
+          refusal message printed it. The tag is replaced only if it still
+          points there.
+        required: false
+        default: ""
   push:
     branches: [main]
     tags: ["v*"]
@@ -76,8 +90,23 @@ jobs:
       - name: Push GitHub main to Launchpad
         env:
           GIT_SSH_COMMAND: ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -i ~/.ssh/launchpad_key
+          REPLACE_TAG: ${{ inputs.replace_tag }}
+          REPLACE_TAG_LAUNCHPAD_COMMIT: ${{ inputs.replace_tag_launchpad_commit }}
         run: |
           set -euo pipefail
+          replace_tag="${REPLACE_TAG:-}"
+          replace_expected="${REPLACE_TAG_LAUNCHPAD_COMMIT:-}"
+          if [ -n "$replace_tag" ] || [ -n "$replace_expected" ]; then
+            if ! git check-ref-format "refs/tags/$replace_tag" \
+              || ! git rev-parse -q --verify "refs/tags/$replace_tag" >/dev/null; then
+              echo "replace_tag must name an existing GitHub tag." >&2
+              exit 1
+            fi
+            if ! [[ "$replace_expected" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "replace_tag_launchpad_commit must be a full 40-character commit." >&2
+              exit 1
+            fi
+          fi
           git remote add launchpad \
             ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
           retry_ls_remote() {
@@ -154,7 +183,20 @@ jobs:
             if [ -n "$remote_commit" ]; then
               if [ "$remote_commit" != "$local_commit" ]; then
                 echo "Launchpad tag $tag points to $remote_commit; GitHub points to $local_commit." >&2
+                if [ "$tag" = "$replace_tag" ] && [ "$remote_commit" = "$replace_expected" ]; then
+                  # The lease names the tag ref's current value (the tag
+                  # object for an annotated tag), so a concurrent change on
+                  # Launchpad makes the push fail instead of being lost.
+                  remote_ref="$(awk -v ref="refs/tags/${tag}" \
+                    '$2 == ref { print $1; exit }' "$remote_tags")"
+                  echo "Replacing Launchpad tag $tag as requested."
+                  retry_push launchpad \
+                    --force-with-lease="refs/tags/$tag:$remote_ref" \
+                    "+refs/tags/$tag:refs/tags/$tag"
+                  continue
+                fi
                 echo 'Refusing to overwrite a divergent existing tag.' >&2
+                echo "To replace it, run this workflow manually with replace_tag=$tag and replace_tag_launchpad_commit=$remote_commit." >&2
                 exit 1
               fi
               echo "Launchpad tag $tag already matches; skipping."
