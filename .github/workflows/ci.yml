@@ -960,7 +960,9 @@ jobs:
           # (Debian) does not create; the Shell exits without it.
           mkdir -p /tmp/.X11-unix
           chmod 1777 /tmp/.X11-unix
-          logind=$(ls /usr/lib/systemd/systemd-logind /lib/systemd/systemd-logind 2>/dev/null | head -n1)
+          for logind in /usr/lib/systemd/systemd-logind /lib/systemd/systemd-logind; do
+            [ -x "$logind" ] && break
+          done
           "$logind" &
           attempt=0
           until busctl --system status org.freedesktop.login1 >/dev/null 2>&1; do
