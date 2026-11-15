@@ -5,6 +5,7 @@ mod command_editor;
 mod diagnostics;
 mod dialogs;
 mod editor;
+pub(crate) use editor::FormFieldError;
 mod editor_preview;
 mod first_run;
 mod import;
