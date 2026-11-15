@@ -18,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn doctor_app_filter_support_does_not_overstate_gnome_shell_compatibility() {
-    assert!(GNOME_APP_FILTER_SUPPORT_DETAIL.contains("GNOME Shell 46, 50, and 51"));
+    assert!(GNOME_APP_FILTER_SUPPORT_DETAIL.contains("GNOME Shell 46, 48, 50, and 51"));
     assert!(!GNOME_APP_FILTER_SUPPORT_DETAIL.contains("GNOME 45+"));
 }
 

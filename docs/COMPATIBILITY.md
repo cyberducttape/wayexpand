@@ -503,7 +503,7 @@ Diagnostic output suitable for health checks and monitoring systems.
     },
     "app_filter": {
       "status": "kwin_or_gnome_extension",
-      "detail": "Focused-window tracking is provided by the KWin bridge on KDE Plasma and by the WayExpand GNOME Shell extension on runtime-gated GNOME Shell 46, 50, and 51; filtered snippets fail closed when tracking is unavailable."
+      "detail": "Focused-window tracking is provided by the KWin bridge on KDE Plasma and by the WayExpand GNOME Shell extension on runtime-gated GNOME Shell 46, 48, 50, and 51; filtered snippets fail closed when tracking is unavailable."
     }
   },
   "capture_readiness": {
@@ -564,7 +564,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `gnome_window_tracker` (object or null): `null` outside GNOME. On GNOME: `uuid`, `installed_path` (the copy GNOME Shell loads, user copy first), `installed_matches_bundled`, `state` (`active`, `inactive`, `error`, `out-of-date`, `not-loaded`, `other`, or `shell-unavailable`), `user_extensions_enabled`, `ready`, `detail`, and `fix`. `build_identity` reports the bundled, on-disk, and live extension identities, whether on-disk metadata matches the extension JavaScript, and `runtime_state` (`current`, `logout-required`, `update-required`, `invalid-on-disk`, `unavailable`, or `not-running`). The live identity comes from the currently loaded Shell extension metadata, so replacing files cannot make an older loaded instance appear current. Additive.
 - `ibus` (object): `installed` (bool, IBus' live registry lists the engine), `status`, and `route`, which has the same shape as `wayexpand ibus status --json` (below). Additive.
 - `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering across IBus, libei, wlroots, and input-method-v2. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.
-- `feature_support` (object): Product-wide integration limits, separate from backend probes. `ime_preedit.status` is `unsupported`; `app_filter.status` is `kwin_or_gnome_extension` (KWin on KDE Plasma, the WayExpand GNOME Shell extension on runtime-gated GNOME Shell 46, 50, and 51; it was `kwin_only` before GNOME support). These are implementation-scope statements, not compositor certification.
+- `feature_support` (object): Product-wide integration limits, separate from backend probes. `ime_preedit.status` is `unsupported`; `app_filter.status` is `kwin_or_gnome_extension` (KWin on KDE Plasma, the WayExpand GNOME Shell extension on runtime-gated GNOME Shell 46, 48, 50, and 51; it was `kwin_only` before GNOME support). These are implementation-scope statements, not compositor certification.
 - `capabilities` (array): Backend feature contracts, including explicit `limitations` that consumers must display rather than infer away.
 
 The graphical diagnostics view uses the same IBus installation probe as the

@@ -17,6 +17,12 @@
       "runtime_test": "scripts/test-gnome-e2e.sh"
     },
     {
+      "major": "48",
+      "runner": "debian:13",
+      "job": "gnome-shell-versions-e2e",
+      "runtime_test": "scripts/test-gnome-e2e.sh"
+    },
+    {
       "major": "50",
       "runner": "ubuntu-26.04",
       "job": "gnome-e2e",

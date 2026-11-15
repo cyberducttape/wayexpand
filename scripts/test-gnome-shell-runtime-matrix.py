@@ -24,7 +24,7 @@ class RuntimeMatrixTests(unittest.TestCase):
         self.assertEqual(checker.validate(self.metadata, self.matrix, self.workflow, self.e2e), [])
 
     def test_uncovered_advertised_major_fails_the_gate(self):
-        self.metadata["shell-version"].append("49")
+        self.metadata["shell-version"].append("47")
         errors = checker.validate(self.metadata, self.matrix, self.workflow, self.e2e)
         self.assertTrue(any("exactly match runtime-gated majors" in error for error in errors))
 

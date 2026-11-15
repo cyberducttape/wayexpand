@@ -11,6 +11,16 @@ All notable changes to WayExpand are documented here.
   picker now stays open, says what happened, and offers Copy instead. The new
   control lines `insert-target-tracked` and `insert-result` are documented in
   `docs/COMPATIBILITY.md`.
+- Support GNOME Shell 48 (Debian 13) with the WayExpand extension, backed by
+  a new containerized runtime gate that runs the full GNOME acceptance test.
+  GNOME 49 (Fedora 43, RHEL 10.2) passes everything except the German and
+  French layout cases, where its RemoteDesktop virtual keyboard delivers US
+  keysyms after a layout switch, so it is not declared compatible until layout
+  tracking is confirmed on a real GNOME 49 session. GNOME 47 is no longer
+  shipped by a supported distribution. The GNOME layout cases now type the
+  layout's physical keys, as a real keyboard does. An unsupported Shell
+  version is reported with the supported versions and what still works,
+  instead of "GNOME 45 or newer is required".
 - Rework the CLI help. `wayexpand help` fits one 80-column screen and groups
   commands by task, with examples; `wayexpand help --all` lists every command.
   Every command has its own help with usage, explanation, and examples through

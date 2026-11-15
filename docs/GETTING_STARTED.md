@@ -268,8 +268,8 @@ provide focus information to subscribing services.
 
 **Window-specific snippets (`app_filter`):**
 - `wayexpand setup` installs and enables the WayExpand GNOME Shell extension
-  (runtime-gated GNOME Shell 46, 50, and 51; Ubuntu 24.04, Ubuntu 26.04, and
-  Fedora 45 in CI). Other Shell majors are not currently declared compatible.
+  (runtime-gated GNOME Shell 46, 48, 50, and 51; Ubuntu 24.04, Debian 13,
+  Ubuntu 26.04, and Fedora 45 in CI). Other Shell majors are not currently declared compatible.
   A new extension may
   require a GNOME logout/login before Shell loads it; `wayexpand doctor --gnome`
   distinguishes that case from an unavailable Shell query or extension error.

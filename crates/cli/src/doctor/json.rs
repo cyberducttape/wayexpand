@@ -15,7 +15,7 @@ use super::status::{
 };
 use crate::*;
 
-pub(crate) const GNOME_APP_FILTER_SUPPORT_DETAIL: &str = "Focused-window tracking is provided by the KWin bridge on KDE Plasma and by the WayExpand GNOME Shell extension, which is runtime-gated on GNOME Shell 46, 50, and 51; filtered snippets fail closed when tracking is unavailable.";
+pub(crate) const GNOME_APP_FILTER_SUPPORT_DETAIL: &str = "Focused-window tracking is provided by the KWin bridge on KDE Plasma and by the WayExpand GNOME Shell extension, which is runtime-gated on GNOME Shell 46, 48, 50, and 51; filtered snippets fail closed when tracking is unavailable.";
 
 /// Stable, automation-friendly diagnostic output for service managers and
 /// fleet health checks. Probes are bounded and non-interactive; portal

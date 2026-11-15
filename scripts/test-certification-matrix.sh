@@ -23,7 +23,7 @@ jq -e '
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and (.input_paths | index("input-method-v2")))] | length == 2) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and .certification_backend == "input-method-v2" and .production_certification_required == false)] | length == 2) and
   ([.targets[] | select(.id == "kde" and .application_filter == "supported" and .window_tracker == "KWin application tracker")] | length == 1) and
-  ([.targets[] | select(.id == "gnome" and .application_filter == "implemented" and .window_tracker == "WayExpand GNOME Shell extension (headless runtime gates: GNOME 46, 50, 51)")] | length == 1) and
+  ([.targets[] | select(.id == "gnome" and .application_filter == "implemented" and .window_tracker == "WayExpand GNOME Shell extension (headless runtime gates: GNOME 46, 48, 50, 51)")] | length == 1) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and .application_filter == "unavailable" and .window_tracker == "none")] | length == 2) and
   ([.required_scenarios | length] | all(. == 48)) and
   ([.required_scenarios[]] | unique | length == 48) and
