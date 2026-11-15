@@ -897,16 +897,6 @@ pub(crate) fn control_command(
         .map_err(Into::into)
 }
 
-pub(crate) fn insert_target(generation: u64, token: &str, trigger: &str) -> anyhow::Result<String> {
-    wayexpand_core::DaemonClient::from_environment()?
-        .execute(wayexpand_core::DaemonOperation::InsertTarget {
-            generation,
-            token: token.to_owned(),
-            trigger: trigger.to_owned(),
-        })
-        .map_err(Into::into)
-}
-
 /// `insert-target` whose outcome the daemon records under the returned
 /// reply's id (`insert scheduled id=<n>`).
 pub(crate) fn insert_target_tracked(
