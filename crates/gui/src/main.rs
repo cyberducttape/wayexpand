@@ -213,6 +213,11 @@ struct GuiApp {
     picker_shortcut: Option<runtime::PickerShortcut>,
     /// What first-run setup established, from `gui-setup.toml`.
     setup_record: Option<setup_record::SetupRecord>,
+    /// Whether `setup_record` reached disk; a confirmation that could not
+    /// be saved counts for this session only.
+    setup_record_saved: bool,
+    /// The running IBus engine's instance (`ibus:<pid>:<started>`).
+    ibus_instance: Option<String>,
     /// Why the last attempt to set it failed (a conflict, usually).
     picker_shortcut_error: Option<String>,
     /// Snippet indices the desktop test may use, keyed by library revision
@@ -634,6 +639,8 @@ impl GuiApp {
             library_revision: 0,
             picker_shortcut: None,
             setup_record: setup_record::load(),
+            setup_record_saved: true,
+            ibus_instance: None,
             picker_shortcut_error: None,
             desktop_test_cache: None,
             visible_indices_cache: None,

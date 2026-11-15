@@ -8,6 +8,8 @@ use crate::*;
 pub enum HeaderState {
     /// Expansion confirmed in a real application on this route and desktop.
     Working,
+    /// Confirmed, but the confirmation could not be saved: this session only.
+    WorkingUnsaved,
     /// Connected with nothing wrong, but no expansion confirmed yet.
     NeedsVerification,
     Limited,
@@ -32,6 +34,7 @@ impl Strings {
         use HeaderState as S;
         match (self.lang, state) {
             (Language::English, S::Working) => "Working",
+            (Language::English, S::WorkingUnsaved) => "Working (this session only)",
             (Language::English, S::NeedsVerification) => "Needs verification",
             (Language::English, S::Limited) => "Limited",
             (Language::English, S::Paused) => "Paused",
@@ -46,6 +49,7 @@ impl Strings {
             (Language::English, S::Disconnected) => "Disconnected",
             (Language::English, S::NeedsSetup) => "Needs setup",
             (Language::German, S::Working) => "Funktioniert",
+            (Language::German, S::WorkingUnsaved) => "Funktioniert (nur diese Sitzung)",
             (Language::German, S::NeedsVerification) => "Prüfung nötig",
             (Language::German, S::Limited) => "Eingeschränkt",
             (Language::German, S::Paused) => "Pausiert",
@@ -60,6 +64,7 @@ impl Strings {
             (Language::German, S::Disconnected) => "Getrennt",
             (Language::German, S::NeedsSetup) => "Einrichtung nötig",
             (Language::Indonesian, S::Working) => "Berfungsi",
+            (Language::Indonesian, S::WorkingUnsaved) => "Berfungsi (sesi ini saja)",
             (Language::Indonesian, S::NeedsVerification) => "Perlu verifikasi",
             (Language::Indonesian, S::Limited) => "Terbatas",
             (Language::Indonesian, S::Paused) => "Dijeda",

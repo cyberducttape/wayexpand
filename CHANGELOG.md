@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- A verification also expires when the typing route restarts: a new IBus
+  engine instance, or the daemon reconnecting its input or output. A
+  restarted service with the same route name has not been tested. A
+  confirmation that could not be saved shows **Working (this session
+  only)**, and the tooltip explains it is asked again after a restart.
 - **Working** in the header now means a user-confirmed insertion in a real
   application, scoped to the current compositor session, WayExpand build,
   typing route and desktop:

@@ -574,6 +574,8 @@ impl GuiApp {
                     self.strings
                         .setup_changed_since_test(&self.strings.setup_change(&change)),
                 );
+            } else if !self.setup_record_saved {
+                details.insert(0, self.strings.verification_not_saved().to_owned());
             }
         }
         // Lead with what to do, the same answer the banner under the header
@@ -711,7 +713,12 @@ impl GuiApp {
             }
         }
         if self.expansion_observed() {
-            (S::Working, palette.success)
+            // Verified, but only in memory: say it lasts this session only.
+            if self.setup_record_saved {
+                (S::Working, palette.success)
+            } else {
+                (S::WorkingUnsaved, palette.success)
+            }
         } else {
             (S::NeedsVerification, palette.accent)
         }
@@ -737,6 +744,18 @@ impl GuiApp {
         Some(format!("{source} → {backend}"))
     }
 
+    /// Which run of the typing route is live: the IBus engine instance, or
+    /// the daemon's input and output connection times. A restart or
+    /// reconnect changes it. `None` while unknown.
+    pub(crate) fn current_route_instance(&self) -> Option<String> {
+        if self.current_route_label().as_deref() == Some("ibus") {
+            return self.ibus_instance.clone();
+        }
+        let input = runtime::status_field(&self.daemon_status, "input_last_connected_unix")?;
+        let output = runtime::status_field(&self.daemon_status, "output_last_connected_unix")?;
+        Some(format!("daemon:{input}:{output}"))
+    }
+
     /// The saved verification and why it does not cover what is running
     /// now (`None` when it does).
     pub(crate) fn verification_status(
@@ -750,11 +769,13 @@ impl GuiApp {
             .as_ref()
             .filter(|record| record.outcome == crate::setup_record::SetupOutcome::Verified)?;
         let route = self.current_route_label();
+        let instance = self.current_route_instance();
         let desktop = crate::setup_record::current_desktop();
         let session = crate::setup_record::current_session();
         let build = crate::setup_record::current_build();
         let scope = crate::setup_record::Scope {
             route: route.as_deref(),
+            route_instance: instance.as_deref(),
             desktop: &desktop,
             session: session.as_deref(),
             build: &build,

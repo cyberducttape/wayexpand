@@ -144,8 +144,23 @@ pub(crate) fn parse_picker_shortcut(json: &[u8]) -> Option<PickerShortcut> {
 /// Whether the WayExpand IBus engine is live and serving input contexts,
 /// from its published activity file (a small, private file read).
 pub(crate) fn ibus_engine_active() -> bool {
-    wayexpand_backend_ibus::telemetry::read_status()
-        .is_some_and(|reading| reading.live && reading.status.engines > 0)
+    ibus_engine_state().0
+}
+
+/// Whether the IBus engine is live and serving contexts, and which run of
+/// it this is (`ibus:<pid>:<started>`), from one read of its status file.
+/// The instance changes whenever the engine restarts.
+pub(crate) fn ibus_engine_state() -> (bool, Option<String>) {
+    match wayexpand_backend_ibus::telemetry::read_status() {
+        Some(reading) if reading.live => (
+            reading.status.engines > 0,
+            Some(format!(
+                "ibus:{}:{}",
+                reading.status.pid, reading.status.started_unix
+            )),
+        ),
+        _ => (false, None),
+    }
 }
 
 pub(crate) type RouteState = wayexpand_core::DaemonRouteState;
