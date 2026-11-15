@@ -2404,31 +2404,36 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
             .expect("first-run guide should expose accessible controls")
             .nodes
     );
-    assert!(
-        guide_semantics.contains("Check the Matcher preview"),
-        "{guide_semantics}"
-    );
+    // Three steps, each with a plain-language title.
+    for step in ["Connect your desktop", "Create a snippet", "Test it"] {
+        assert!(guide_semantics.contains(step), "{step}: {guide_semantics}");
+    }
     assert!(
         [
             "Working in tested application",
-            "Safe fallback",
-            // The incomplete state is a note pointing at the steps.
-            "Almost there",
+            "Connected, not tested yet",
+            "Setup incomplete",
         ]
         .iter()
-        .any(|state| guide_semantics.contains(state)),
-        "first-run must expose one unambiguous operational state: {guide_semantics}"
+        .filter(|state| guide_semantics.contains(*state))
+        .count()
+            == 1,
+        "first-run must expose exactly one operational state: {guide_semantics}"
     );
     assert!(
-        guide_semantics.contains("Try it in a real app"),
+        guide_semantics.contains("Ready: typing :wayexpand-test becomes"),
         "{guide_semantics}"
     );
-    assert!(guide_semantics.contains("Verified in tested application: not tested"));
+    // The local matcher check above is reported, but never as a desktop
+    // verification.
+    assert!(guide_semantics.contains("The trigger works inside WayExpand."));
+    assert!(!guide_semantics.contains("Working in tested application"));
     assert!(!guide_semantics.contains("Verified working: yes"));
-    assert!(
-        guide_semantics.contains("Open Quick Picker (copy and paste)")
-            || guide_semantics.contains("Use Quick Picker meanwhile (copy and paste)")
-    );
+    // The copy-and-paste fallback is always offered until a real test passes.
+    assert!(guide_semantics.contains("Open Quick Picker (copy and paste)"));
+    // Technical detail sits behind one collapsed section.
+    assert!(guide_semantics.contains("Troubleshooting details"));
+    assert!(!guide_semantics.contains("Backend probes show"));
     assert!(!guide_semantics.contains("It expanded correctly"));
     assert!(!guide_semantics.contains("Copy trigger"));
 
@@ -3681,4 +3686,140 @@ fn creating_the_test_snippet_selects_it_and_leaves_the_desktop_test_enabled() {
         "a freshly saved test snippet must not block the desktop test"
     );
     fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn first_run_offers_turn_on_only_after_the_service_is_known_to_be_off() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-first-run-checking-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.onboarding_completed = false;
+    app.onboarding_visible = true;
+    app.ibus_active = false;
+    app.language = Language::English;
+    app.strings.set_language(Language::English);
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let render = |app: &mut GuiApp| {
+        let frame = run_gui_test_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 1200.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                app.render_editor(ui, &palette);
+            },
+        );
+        format!(
+            "{:?}",
+            frame
+                .platform_output
+                .accesskit_update
+                .expect("first-run guide should expose accessible controls")
+                .nodes
+        )
+    };
+
+    app.daemon_reachable = None;
+    let checking = render(&mut app);
+    assert!(checking.contains("Checking this desktop"), "{checking}");
+    assert!(!checking.contains("Turn on WayExpand"), "{checking}");
+
+    app.daemon_reachable = Some(false);
+    let off = render(&mut app);
+    assert!(!off.contains("Checking this desktop"), "{off}");
+    assert!(off.contains("Turn on"), "{off}");
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn first_run_test_dialog_explains_the_switch_and_drops_advanced_sections() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-first-run-test-dialog-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.language = Language::English;
+    app.strings.set_language(Language::English);
+    app.create_test_snippet();
+    let semantics_for = |app: &mut GuiApp| {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut semantics = String::new();
+        for _ in 0..4 {
+            let frame = run_gui_test_frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 1000.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let frame_ctx = ui.ctx().clone();
+                    let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                    app.render_diagnostics(&frame_ctx, &palette);
+                },
+            );
+            if let Some(update) = frame.platform_output.accesskit_update {
+                semantics = format!("{:?}", update.nodes);
+            }
+        }
+        semantics
+    };
+
+    app.desktop_test_dialog_required = true;
+    app.test_expansion_dialog_open = true;
+    let first_run = semantics_for(&mut app);
+    assert!(
+        first_run.contains("switch to it and type the trigger once within 30 seconds"),
+        "{first_run}"
+    );
+    assert!(!first_run.contains("Open Matcher Test"), "{first_run}");
+    assert!(
+        !first_run.contains("Copy desktop test command"),
+        "{first_run}"
+    );
+
+    // Outside first run, the full tool keeps its other sections.
+    app.desktop_test_dialog_required = false;
+    app.test_expansion_dialog_open = true;
+    let full = semantics_for(&mut app);
+    assert!(full.contains("Open Matcher Test"), "{full}");
+    assert!(full.contains("Copy desktop test command"), "{full}");
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn writing_a_first_snippet_returns_to_the_guide() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-first-run-new-snippet-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.onboarding_completed = false;
+    app.onboarding_visible = true;
+    app.request_action(PendingAction::New);
+    assert!(app.new_draft, "the editor shows the new draft");
+    assert!(app.onboarding_visible, "the guide waits behind the draft");
+    let draft = app.draft.as_mut().expect("a new draft");
+    draft.trigger = ";sig".into();
+    draft.replacement = "Best regards".into();
+    app.save_selected();
+    assert!(!app.new_draft, "{}", app.status.text());
+    assert!(app.onboarding_visible, "the guide is back after saving");
+    assert_eq!(app.config.expansion.len(), 1);
+    assert_eq!(app.config.expansion[0].trigger, ";sig");
+    let _ = fs::remove_file(path);
 }

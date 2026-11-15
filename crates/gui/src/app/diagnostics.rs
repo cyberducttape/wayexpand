@@ -1436,16 +1436,21 @@ impl GuiApp {
                     })
                     .color(palette.muted),
                 );
-                ui.label(RichText::new(self.strings.dg_matcher_test()).strong());
-                ui.label(self.strings.dg_checks_the_loaded_snippets_and_template());
-                if ui.button(self.strings.dg_open_matcher_test()).clicked() {
-                    self.diagnostics_close_requested = true;
-                    self.try_live_open = true;
-                    close = true;
+                // First run keeps to the one test it needs; the matcher
+                // test, copied command and route advice stay available from
+                // Diagnostics.
+                if !first_run_verification {
+                    ui.label(RichText::new(self.strings.dg_matcher_test()).strong());
+                    ui.label(self.strings.dg_checks_the_loaded_snippets_and_template());
+                    if ui.button(self.strings.dg_open_matcher_test()).clicked() {
+                        self.diagnostics_close_requested = true;
+                        self.try_live_open = true;
+                        close = true;
+                    }
+                    ui.separator();
+                    ui.label(RichText::new(self.strings.dg_desktop_test()).strong());
+                    ui.label(self.strings.dg_tests_the_active_route_in_a());
                 }
-                ui.separator();
-                ui.label(RichText::new(self.strings.dg_desktop_test()).strong());
-                ui.label(self.strings.dg_tests_the_active_route_in_a());
                 if desktop_tests.len() > 1 {
                     egui::ComboBox::from_id_salt("desktop_test_trigger_choice")
                         .selected_text(if self.desktop_test_trigger.is_empty() {
@@ -1538,9 +1543,10 @@ impl GuiApp {
                     );
                 }
                 if let Some(command) = &desktop_test_command {
-                    if ui
-                        .button(self.strings.dg_copy_desktop_test_command())
-                        .clicked()
+                    if !first_run_verification
+                        && ui
+                            .button(self.strings.dg_copy_desktop_test_command())
+                            .clicked()
                     {
                         ui.ctx().copy_text(command.clone());
                     }
@@ -1555,10 +1561,12 @@ impl GuiApp {
                 } else {
                     ui.label(self.strings.dg_no_enabled_static_snippet_is_available());
                 }
-                ui.colored_label(
-                    palette.warning,
-                    self.strings.dg_if_the_matcher_succeeds_but_desktop(),
-                );
+                if !first_run_verification {
+                    ui.colored_label(
+                        palette.warning,
+                        self.strings.dg_if_the_matcher_succeeds_but_desktop(),
+                    );
+                }
                 if ui
                     .button(if first_run_verification {
                         self.strings.dg_continue_later_setup_stays_unverified()

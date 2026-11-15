@@ -8,21 +8,13 @@ texts! {
         "Funktioniert in der getesteten Anwendung",
         "Berfungsi di aplikasi yang diuji";
     outcome_safe_fallback =>
-        "Safe fallback",
-        "Sichere Ausweichlösung",
-        "Cadangan aman";
+        "Connected, not tested yet",
+        "Verbunden, noch nicht getestet",
+        "Terhubung, belum diuji";
     outcome_setup_incomplete =>
         "Setup incomplete",
         "Einrichtung unvollständig",
         "Penyiapan belum selesai";
-    verification_not_tested =>
-        "Verified in tested application: not tested",
-        "In getesteter Anwendung verifiziert: nicht getestet",
-        "Terverifikasi di aplikasi yang diuji: belum diuji";
-    verification_unnamed_application =>
-        "Verified in tested application: the tested application",
-        "In getesteter Anwendung verifiziert: die getestete Anwendung",
-        "Terverifikasi di aplikasi yang diuji: aplikasi yang diuji";
     status_create_test_expansion_first =>
         "Create or enable the harmless WayExpand test expansion before testing insertion.",
         "Legen Sie die harmlose WayExpand-Testerweiterung an oder aktivieren Sie sie, bevor Sie das Einfügen testen.",
@@ -51,14 +43,6 @@ texts! {
         "Resume GNOME setup",
         "GNOME-Einrichtung fortsetzen",
         "Lanjutkan penyiapan GNOME";
-    safe_fallback_matcher_passed =>
-        "The local matcher produced the expected result. Automatic replacement has not been verified in a real application.",
-        "Der lokale Abgleich lieferte das erwartete Ergebnis. Die automatische Ersetzung wurde in keiner echten Anwendung verifiziert.",
-        "Pencocok lokal memberi hasil yang diharapkan. Penggantian otomatis belum diverifikasi di aplikasi nyata.";
-    safe_fallback_nothing_verified =>
-        "No real-application insertion has been verified. Use Quick Picker to copy a snippet and paste it yourself.",
-        "Kein Einfügen in einer echten Anwendung wurde verifiziert. Kopieren Sie ein Snippet mit dem Schnellwähler und fügen Sie es selbst ein.",
-        "Belum ada penyisipan di aplikasi nyata yang terverifikasi. Gunakan Quick Picker untuk menyalin cuplikan lalu tempel sendiri.";
     test_in_real_application =>
         "Test in a real application",
         "In einer echten Anwendung testen",
@@ -107,22 +91,14 @@ texts! {
         "I selected it — check again",
         "Ausgewählt – erneut prüfen",
         "Sudah dipilih — periksa lagi";
-    static_test_expansion_available =>
-        "An enabled static expansion is available for the real-app test.",
-        "Für den Test in einer echten Anwendung ist eine aktive statische Erweiterung vorhanden.",
-        "Ekspansi statis yang aktif tersedia untuk uji di aplikasi nyata.";
     authorize_or_use_picker =>
-        "Use the review action above to authorize compatibility replacement, or keep using Quick Picker for manual paste.",
-        "Erlauben Sie die Kompatibilitäts-Ersetzung über die Prüfaktion oben, oder nutzen Sie weiter den Schnellwähler zum manuellen Einfügen.",
-        "Gunakan tindakan tinjau di atas untuk mengizinkan penggantian kompatibilitas, atau tetap gunakan Quick Picker untuk menempel manual.";
+        "Before testing, review and allow compatibility replacement for this desktop, or keep using Quick Picker to paste snippets yourself.",
+        "Prüfen und erlauben Sie vor dem Test die Kompatibilitäts-Ersetzung für diesen Desktop, oder fügen Sie Snippets weiter selbst mit dem Schnellwähler ein.",
+        "Sebelum menguji, tinjau dan izinkan penggantian kompatibilitas untuk desktop ini, atau tetap tempel cuplikan sendiri dengan Quick Picker.";
     the_tested_application =>
         "the tested application",
         "der getesteten Anwendung",
         "aplikasi yang diuji";
-    use_test_action_above =>
-        "Use the test action above to verify this route in a real application.",
-        "Prüfen Sie diesen Weg mit der Testaktion oben in einer echten Anwendung.",
-        "Gunakan tindakan uji di atas untuk memverifikasi jalur ini di aplikasi nyata.";
 }
 
 texts! {
@@ -338,9 +314,9 @@ texts! {
         "Prüfen Sie die Einrichtungsschritte und nötige Zustimmungen, um fortzufahren.",
         "Tinjau tahap penyiapan dan persetujuan yang diperlukan untuk melanjutkan.";
     setup_desktop_test_running =>
-        "Desktop test running; type the selected trigger once in the confirmed disposable field.",
-        "Desktop-Test läuft; tippen Sie das gewählte Kürzel einmal in das bestätigte Testfeld.",
-        "Uji desktop berjalan; ketik pemicu yang dipilih sekali di kolom uji yang sudah dikonfirmasi.";
+        "Desktop test running: switch to your test text field now and type the trigger once within 30 seconds. Do not press Enter.",
+        "Desktop-Test läuft: Wechseln Sie jetzt in Ihr Testfeld und tippen Sie das Kürzel innerhalb von 30 Sekunden einmal. Drücken Sie nicht die Eingabetaste.",
+        "Uji desktop berjalan: pindah ke kolom teks uji sekarang dan ketik pemicu sekali dalam 30 detik. Jangan tekan Enter.";
     setup_desktop_test_finished =>
         "Desktop test finished.",
         "Desktop-Test beendet.",
@@ -406,14 +382,6 @@ impl Strings {
         }
     }
 
-    pub fn verification_in_application(&self, application: &str) -> String {
-        match self.lang {
-            Language::English => format!("Verified in tested application: {application}"),
-            Language::German => format!("In getesteter Anwendung verifiziert: {application}"),
-            Language::Indonesian => format!("Terverifikasi di aplikasi yang diuji: {application}"),
-        }
-    }
-
     pub fn status_real_app_test_state_unsaved(&self, error: &str) -> String {
         match self.lang {
             Language::English => format!(
@@ -467,14 +435,6 @@ impl Strings {
             Language::Indonesian => format!("Pendaftaran: {registration} · Aktif: {active}"),
         }
     }
-
-    pub fn expected_result(&self, replacement: &str) -> String {
-        match self.lang {
-            Language::English => format!("Expected result: {replacement}"),
-            Language::German => format!("Erwartetes Ergebnis: {replacement}"),
-            Language::Indonesian => format!("Hasil yang diharapkan: {replacement}"),
-        }
-    }
 }
 
 impl Strings {
@@ -495,4 +455,72 @@ impl Strings {
             (Language::Indonesian, E::DefaultNotAChoice) => "Nilai bawaan dropdown harus sama persis dengan salah satu pilihannya.",
         }
     }
+}
+
+// The three-step first-run guide: connect, create, test.
+texts! {
+    step_connect_title =>
+        "Connect your desktop",
+        "Desktop verbinden",
+        "Hubungkan desktop Anda";
+    step_create_title =>
+        "Create a snippet",
+        "Snippet anlegen",
+        "Buat cuplikan";
+    step_test_title =>
+        "Test it",
+        "Ausprobieren",
+        "Uji coba";
+    first_run_checking =>
+        "Checking this desktop…",
+        "Dieser Desktop wird geprüft …",
+        "Memeriksa desktop ini…";
+    first_run_connected =>
+        "Connected: {detail}",
+        "Verbunden: {detail}",
+        "Terhubung: {detail}";
+    first_run_check_again =>
+        "Check again",
+        "Erneut prüfen",
+        "Periksa lagi";
+    first_run_restart_service =>
+        "Restart WayExpand",
+        "WayExpand neu starten",
+        "Mulai ulang WayExpand";
+    first_run_snippet_ready =>
+        "Ready: typing {trigger} becomes “{replacement}”.",
+        "Bereit: Aus {trigger} wird „{replacement}“.",
+        "Siap: mengetik {trigger} menjadi “{replacement}”.";
+    first_run_test_needs_connection =>
+        "Finish step 1 first. Until then you can copy snippets with Quick Picker and paste them yourself.",
+        "Schließen Sie zuerst Schritt 1 ab. Bis dahin können Sie Snippets mit dem Schnellwähler kopieren und selbst einfügen.",
+        "Selesaikan langkah 1 dulu. Sementara itu Anda bisa menyalin cuplikan dengan Quick Picker dan menempelkannya sendiri.";
+    first_run_test_needs_snippet =>
+        "Create a snippet in step 2 first.",
+        "Legen Sie zuerst in Schritt 2 ein Snippet an.",
+        "Buat cuplikan di langkah 2 dulu.";
+    first_run_test_help =>
+        "Open a plain, non-sensitive text field in another app, such as a new text editor document. Press the button below, switch to that field and type the trigger once within 30 seconds. WayExpand then asks whether the text appeared correctly.",
+        "Öffnen Sie ein normales, unkritisches Textfeld in einer anderen App, etwa ein neues Texteditor-Dokument. Klicken Sie unten, wechseln Sie innerhalb von 30 Sekunden in dieses Feld und geben Sie den Auslöser einmal ein. WayExpand fragt danach, ob der Text richtig erschienen ist.",
+        "Buka kolom teks biasa yang tidak sensitif di aplikasi lain, misalnya dokumen baru di editor teks. Tekan tombol di bawah, pindah ke kolom itu, lalu ketik pemicu sekali dalam 30 detik. WayExpand lalu menanyakan apakah teks muncul dengan benar.";
+    first_run_try_inside =>
+        "Try the trigger inside WayExpand first",
+        "Auslöser zuerst in WayExpand ausprobieren",
+        "Coba pemicu di dalam WayExpand dulu";
+    first_run_trigger_works_inside =>
+        "The trigger works inside WayExpand.",
+        "Der Auslöser funktioniert in WayExpand.",
+        "Pemicu berfungsi di dalam WayExpand.";
+    first_run_troubleshooting_details =>
+        "Troubleshooting details",
+        "Details zur Fehlerbehebung",
+        "Detail pemecahan masalah";
+    setup_no_route_available =>
+        "No compatible input route is available yet. Diagnostics shows the missing prerequisite; fix it, then try again.",
+        "Noch ist kein passender Eingabeweg verfügbar. Die Diagnose zeigt die fehlende Voraussetzung; beheben Sie sie und versuchen Sie es erneut.",
+        "Belum ada jalur masukan yang cocok. Diagnostik menunjukkan prasyarat yang kurang; perbaiki, lalu coba lagi.";
+    setup_preflight_stopped =>
+        "The IBus setup check stopped unexpectedly. Open Diagnostics and try again.",
+        "Die IBus-Einrichtungsprüfung wurde unerwartet beendet. Öffnen Sie die Diagnose und versuchen Sie es erneut.",
+        "Pemeriksaan penyiapan IBus berhenti tiba-tiba. Buka Diagnostik dan coba lagi.";
 }

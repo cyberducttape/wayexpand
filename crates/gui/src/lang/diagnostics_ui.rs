@@ -254,9 +254,9 @@ texts! {
         "Anwendungstyp (für den Testbericht)",
         "Jenis aplikasi (untuk laporan uji)";
     dg_i_am_focused_on_a_disposable =>
-        "I am focused on a disposable, non-sensitive text field and will type the trigger once.",
-        "Ein Wegwerf-Textfeld ohne sensible Daten hat den Fokus, und ich tippe das Kürzel einmal.",
-        "Fokus saya ada di kolom teks sekali pakai yang tidak sensitif, dan saya akan mengetik pemicu sekali.";
+        "I have a plain, non-sensitive text field open in another app (for example a new text editor document). After starting, I will switch to it and type the trigger once within 30 seconds.",
+        "In einer anderen App ist ein normales Textfeld ohne sensible Daten offen (etwa ein neues Texteditor-Dokument). Nach dem Start wechsle ich hinein und tippe das Kürzel innerhalb von 30 Sekunden einmal.",
+        "Saya sudah membuka kolom teks biasa yang tidak sensitif di aplikasi lain (misalnya dokumen baru di editor teks). Setelah mulai, saya akan pindah ke sana dan mengetik pemicu sekali dalam 30 detik.";
     dg_start_desktop_test =>
         "Start Desktop Test",
         "Desktop-Test starten",
