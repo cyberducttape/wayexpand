@@ -166,7 +166,9 @@ jobs:
   linux-x86_64:
     name: Linux x86_64 release
     needs: [ci, certification, linux-aarch64]
-    if: ${{ !cancelled() && needs.ci.result == 'success' && needs.linux-aarch64.result == 'success' }}
+    # An aarch64-only failure (a missing runner, an arm64 build problem) must
+    # not withhold the x86_64 release; it ships without the aarch64 archive.
+    if: ${{ !cancelled() && needs.ci.result == 'success' }}
     # Build the release binaries and .deb against Ubuntu 24.04 LTS, the oldest
     # supported Ubuntu package target. Fedora package installation is covered
     # by the pinned Fedora 45 smoke lane in ci.yml.
@@ -296,8 +298,15 @@ jobs:
           test "$(target/release/wayexpand-daemon --version)" = \
             "wayexpand-daemon $expected_version (commit $expected_commit)"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ needs.linux-aarch64.result == 'success' }}
         with:
           name: wayexpand-linux-aarch64
+      - name: Note a missing aarch64 archive
+        if: ${{ needs.linux-aarch64.result != 'success' }}
+        run: |
+          echo "::warning::The aarch64 build did not succeed; this release publishes x86_64 only."
+          echo '## aarch64 archive missing' >>"$GITHUB_STEP_SUMMARY"
+          echo 'The aarch64 build did not succeed, so only x86_64 artifacts are published.' >>"$GITHUB_STEP_SUMMARY"
       - name: Package x86_64 release
         run: scripts/package-release-binaries.sh "${RELEASE_REF_NAME#v}" x86_64
       - name: Generate Cargo metadata
