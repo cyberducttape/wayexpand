@@ -310,8 +310,7 @@ impl PickerApp {
                 self.insert_state = InsertState::Failed {
                     trigger: expansion.trigger.clone(),
                     text: String::new(),
-                    error: "Could not identify the original focused window; refusing to insert."
-                        .to_owned(),
+                    error: self.strings.picker_message(&PickerMessage::FocusUnknown),
                 };
                 return;
             };
@@ -336,7 +335,9 @@ impl PickerApp {
                 self.insert_state = InsertState::Failed {
                     trigger,
                     text: String::new(),
-                    error: format!("Could not start insertion worker: {error}"),
+                    error: self
+                        .strings
+                        .picker_message(&PickerMessage::WorkerStartFailed(error.to_string())),
                 };
                 return;
             }
@@ -383,40 +384,46 @@ impl PickerApp {
         let context = self.config.template_context(None);
         render_template_with_cursor(&expansion.replacement, &context)
             .map(|(text, _)| text)
-            .map_err(|error| format!("Could not render this snippet: {error}"))
+            .map_err(|error| {
+                self.strings
+                    .picker_message(&PickerMessage::RenderFailed(error.to_string()))
+            })
     }
 
     /// Why "Copy instead" is not offered for `trigger` after a failed
     /// insert, if it is not: organization policy, or a snippet copy-only mode
     /// would hide (app-restricted, or reading the clipboard or a secret).
     /// A failed insert must never widen what can reach the clipboard.
-    fn fallback_copy_blocked(&self, trigger: &str) -> Option<&'static str> {
+    fn fallback_copy_blocked(&self, trigger: &str) -> Option<String> {
         if !self.clipboard_fallback_allowed {
-            return Some("Organization policy does not allow copying snippets for manual paste.");
+            return Some(
+                self.strings
+                    .picker_message(&PickerMessage::CopyNotAllowedByPolicy),
+            );
         }
         let expansion = self
             .config
             .expansion
             .iter()
             .find(|expansion| expansion.trigger == trigger)?;
-        (!picker_expansion_is_eligible(expansion, false)).then_some(
-            "This snippet cannot be copied: it is limited to specific applications or reads \
-             the clipboard or a secret, and a manual paste cannot check where it goes.",
-        )
+        (!picker_expansion_is_eligible(expansion, false)).then(|| {
+            self.strings
+                .picker_message(&PickerMessage::CopyNotAllowedForSnippet)
+        })
     }
 
     /// The text "Copy instead" puts on the clipboard, after the same checks
     /// as [`Self::fallback_copy_blocked`].
     fn fallback_copy_text(&self, trigger: &str, text: &str) -> Result<String, String> {
         if let Some(reason) = self.fallback_copy_blocked(trigger) {
-            return Err(reason.to_owned());
+            return Err(reason);
         }
         let expansion = self
             .config
             .expansion
             .iter()
             .find(|expansion| expansion.trigger == trigger)
-            .ok_or_else(|| "This snippet is no longer in the library.".to_owned())?;
+            .ok_or_else(|| self.strings.picker_message(&PickerMessage::SnippetGone))?;
         if text.is_empty() {
             self.clipboard_text(expansion)
         } else {
@@ -476,8 +483,8 @@ impl PickerApp {
             Ok(InsertOutcome::Delivered | InsertOutcome::Cancelled) => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close)
             }
-            Ok(InsertOutcome::Failed(error)) => {
-                self.insert_state = failed(error);
+            Ok(InsertOutcome::Failed(message)) => {
+                self.insert_state = failed(self.strings.picker_message(&message));
                 bring_back(ctx);
             }
             Err(TryRecvError::Empty) => {
@@ -491,9 +498,8 @@ impl PickerApp {
                 ctx.request_repaint_after(FOCUS_POLL_INTERVAL);
             }
             Err(TryRecvError::Disconnected) => {
-                self.insert_state = failed(
-                    "The insertion worker stopped before the insert was confirmed.".to_owned(),
-                );
+                self.insert_state =
+                    failed(self.strings.picker_message(&PickerMessage::WorkerStopped));
                 bring_back(ctx);
             }
         }
@@ -502,6 +508,23 @@ impl PickerApp {
     /// Escape, Cancel, or closing the window. A pending insert is cancelled
     /// if the daemon does not have it yet; otherwise the picker stays open
     /// and reports what really happened.
+    /// Decide a close request while an insert may be pending, cancelling
+    /// it when nothing has been sent yet.
+    fn close_requested(&mut self) -> CloseDecision {
+        if let InsertState::Waiting {
+            handoff,
+            cancel_refused,
+            ..
+        } = &mut self.insert_state
+        {
+            if !handoff.cancel() {
+                *cancel_refused = true;
+                return CloseDecision::KeepOpen;
+            }
+        }
+        CloseDecision::Close
+    }
+
     fn cancel(&mut self, ctx: &egui::Context) {
         if let InsertState::Waiting {
             handoff,
@@ -516,6 +539,14 @@ impl PickerApp {
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
+}
+
+/// Whether a request to close the picker may go ahead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CloseDecision {
+    Close,
+    /// The daemon already has the insert: stay until its result is shown.
+    KeepOpen,
 }
 
 /// Show a minimized picker again after a failed insert, so its explanation
@@ -556,11 +587,14 @@ impl eframe::App for PickerApp {
         if escape {
             self.cancel(&ctx);
         }
-        // The window's close button must not leave a pending insert behind.
-        if ctx.input(|input| input.viewport().close_requested()) {
-            if let InsertState::Waiting { handoff, .. } = &self.insert_state {
-                handoff.cancel();
-            }
+        // Closing the window follows the same policy as Escape: an insert
+        // not yet sent is cancelled and the window closes; one the daemon
+        // already has keeps the picker open until its result is known.
+        if ctx.input(|input| input.viewport().close_requested())
+            && self.close_requested() == CloseDecision::KeepOpen
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            bring_back(&ctx);
         }
         if down && count > 0 {
             self.selected = (self.selected + 1).min(count - 1);
@@ -638,8 +672,7 @@ impl eframe::App for PickerApp {
                             if *cancel_refused {
                                 ui.colored_label(
                                     palette.warning,
-                                    "Too late to cancel: WayExpand already has this insert. \
-                                     The picker reports the result when it arrives.",
+                                    self.strings.picker_too_late_to_cancel(),
                                 );
                             } else {
                                 ui.label(self.strings.picker_waiting_for_focus());
@@ -664,7 +697,7 @@ impl eframe::App for PickerApp {
                             );
                             ui.label(error);
                             let copy_blocked = self.fallback_copy_blocked(trigger);
-                            if let Some(reason) = copy_blocked {
+                            if let Some(reason) = &copy_blocked {
                                 ui.label(RichText::new(reason).small().color(palette.muted));
                             }
                             ui.horizontal(|ui| {
@@ -836,20 +869,39 @@ fn picker_row(
                 );
             }
         });
+    // An unusable row is not a button: no click, no pointing hand, and
+    // assistive technology hears its reason rather than an action.
+    let usable = unavailable.is_none();
     let response = ui.interact(
         frame.response.rect,
         ui.id().with(("picker_row", &expansion.trigger)),
-        egui::Sense::click(),
+        if usable {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
     );
     response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::Button,
-            true,
-            selected,
-            expansion.trigger.as_str(),
-        )
+        if usable {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                true,
+                selected,
+                expansion.trigger.as_str(),
+            )
+        } else {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Label,
+                false,
+                format!("{}: {}", expansion.trigger, unavailable.unwrap_or_default()),
+            )
+        }
     });
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    if usable {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 
 fn format_app_scope(filters: &[String]) -> String {
@@ -943,7 +995,32 @@ enum InsertOutcome {
     /// The user cancelled before anything was sent.
     Cancelled,
     /// Nothing, or possibly part, was inserted; the message says which.
-    Failed(String),
+    Failed(PickerMessage),
+}
+
+/// Everything the picker tells the user about an insert or a copy. The
+/// worker thread has no language settings, so it reports one of these and
+/// the window renders it in the user's language (`Strings::picker_message`).
+/// Details carried as strings come from the system and stay as they are.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PickerMessage {
+    FocusUnknown,
+    WorkerStartFailed(String),
+    WorkerStopped,
+    RenderFailed(String),
+    CopyNotAllowedByPolicy,
+    CopyNotAllowedForSnippet,
+    SnippetGone,
+    OlderService,
+    CallFailed(String),
+    Refused(String),
+    FocusNotReturned,
+    LostContact(String),
+    UnexpectedReply(String),
+    NotConfirmed(u64),
+    LostTrack,
+    Uncertain,
+    NotInserted(wayexpand_core::InsertFailure),
 }
 
 /// The daemon calls the insert worker makes, so tests can drive it.
@@ -1011,7 +1088,7 @@ fn wait_for_focus_and_insert(
                 }
                 let response = match daemon.insert_tracked(&current, trigger) {
                     Ok(response) => response,
-                    Err(error) => return InsertOutcome::Failed(error),
+                    Err(error) => return InsertOutcome::Failed(PickerMessage::CallFailed(error)),
                 };
                 if let Some(id) = wayexpand_core::parse_insert_scheduled_id(&response) {
                     return wait_for_delivery(daemon, id, timing);
@@ -1020,23 +1097,15 @@ fn wait_for_focus_and_insert(
                     // An older daemon cannot report delivery. Closing on its
                     // untracked "insert scheduled" would claim a success
                     // nobody observed, so send nothing.
-                    return InsertOutcome::Failed(
-                        "The running WayExpand service is older than this picker and cannot \
-                         confirm inserts, so nothing was inserted. Restart it with \
-                         `wayexpand service restart --yes`, or copy the snippet instead."
-                            .to_owned(),
-                    );
+                    return InsertOutcome::Failed(PickerMessage::OlderService);
                 }
-                return InsertOutcome::Failed(format!(
-                    "WayExpand refused the insert: {}",
-                    response.trim_end()
+                return InsertOutcome::Failed(PickerMessage::Refused(
+                    response.trim_end().to_owned(),
                 ));
             }
         }
         if Instant::now() >= deadline {
-            return InsertOutcome::Failed(
-                "Focus did not return to the original window, so nothing was inserted.".to_owned(),
-            );
+            return InsertOutcome::Failed(PickerMessage::FocusNotReturned);
         }
         thread::sleep(timing.focus_poll);
     }
@@ -1052,16 +1121,11 @@ fn wait_for_delivery(
     loop {
         let response = match daemon.insert_result(id) {
             Ok(response) => response,
-            Err(error) => {
-                return InsertOutcome::Failed(format!(
-                    "Lost contact with WayExpand before the insert was confirmed: {error}"
-                ))
-            }
+            Err(error) => return InsertOutcome::Failed(PickerMessage::LostContact(error)),
         };
         let Ok(state) = wayexpand_core::InsertDelivery::parse_response(&response, id) else {
-            return InsertOutcome::Failed(format!(
-                "Unexpected reply from WayExpand: {}",
-                response.trim_end()
+            return InsertOutcome::Failed(PickerMessage::UnexpectedReply(
+                response.trim_end().to_owned(),
             ));
         };
         match delivery_verdict(state) {
@@ -1070,10 +1134,8 @@ fn wait_for_delivery(
             None => {}
         }
         if Instant::now() >= deadline {
-            return InsertOutcome::Failed(format!(
-                "WayExpand did not confirm the insert within {} seconds. Check the field \
-                 before copying, in case part of the snippet was typed.",
-                timing.delivery_timeout.as_secs()
+            return InsertOutcome::Failed(PickerMessage::NotConfirmed(
+                timing.delivery_timeout.as_secs(),
             ));
         }
         thread::sleep(timing.delivery_poll);
@@ -1082,46 +1144,18 @@ fn wait_for_delivery(
 
 /// What the picker does with a reported insert state: `None` keeps waiting,
 /// `Ok` closes the picker, `Err` shows the failure with "Copy instead".
-fn delivery_verdict(state: Option<wayexpand_core::InsertDelivery>) -> Option<Result<(), String>> {
-    use wayexpand_core::{InsertDelivery, InsertFailure};
-    let nothing = "Nothing was inserted.";
-    let failure = |reason: &str| Some(Err(format!("{reason} {nothing}")));
+fn delivery_verdict(
+    state: Option<wayexpand_core::InsertDelivery>,
+) -> Option<Result<(), PickerMessage>> {
+    use wayexpand_core::InsertDelivery;
     let Some(state) = state else {
-        return Some(Err(
-            "WayExpand lost track of this insert, perhaps because it restarted. Check the \
-             field before copying."
-                .to_owned(),
-        ));
+        return Some(Err(PickerMessage::LostTrack));
     };
     match state {
         InsertDelivery::Pending => None,
         InsertDelivery::Delivered => Some(Ok(())),
-        InsertDelivery::Uncertain => Some(Err(
-            "The desktop could not confirm the insert, so part of the snippet may have been \
-             typed. Check the field before copying."
-                .to_owned(),
-        )),
-        InsertDelivery::Failed(InsertFailure::FocusChanged) => {
-            failure("Focus moved to another window before the snippet was typed.")
-        }
-        InsertDelivery::Failed(InsertFailure::PolicyRefused) => {
-            failure("Your organization's policy blocks this snippet.")
-        }
-        InsertDelivery::Failed(InsertFailure::InputArrived) => {
-            failure("Typing started before the snippet could be inserted.")
-        }
-        InsertDelivery::Failed(InsertFailure::NoBackend) => {
-            failure("WayExpand is reconnecting to the desktop.")
-        }
-        InsertDelivery::Failed(InsertFailure::Refused) => {
-            failure("WayExpand could not use this snippet; it may be disabled or changed.")
-        }
-        InsertDelivery::Failed(InsertFailure::NotApplied) => {
-            failure("The desktop did not accept the text.")
-        }
-        InsertDelivery::Failed(InsertFailure::Superseded) => {
-            failure("A newer insert replaced this one.")
-        }
+        InsertDelivery::Uncertain => Some(Err(PickerMessage::Uncertain)),
+        InsertDelivery::Failed(failure) => Some(Err(PickerMessage::NotInserted(failure))),
     }
 }
 
@@ -1294,6 +1328,7 @@ fn top_ranked_into(ranked: &mut Vec<(i64, usize)>, limit: usize, result: &mut Ve
 
 #[cfg(test)]
 mod tests {
+    use super::PickerMessage;
     use super::{
         clipboard_fallback_allowed_by_policy, copy_snippet, delivery_verdict,
         focus_returned_to_target, focus_target_from_response, format_app_scope,
@@ -1670,14 +1705,11 @@ mod tests {
             delivery_verdict(Some(InsertDelivery::Delivered)),
             Some(Ok(()))
         );
-        let Some(Err(uncertain)) = delivery_verdict(Some(InsertDelivery::Uncertain)) else {
-            panic!("an uncertain insert must be shown");
-        };
-        assert!(uncertain.contains("Check the field"), "{uncertain}");
-        let Some(Err(lost)) = delivery_verdict(None) else {
-            panic!("an id the daemon forgot must be shown");
-        };
-        assert!(lost.contains("Check the field"), "{lost}");
+        assert_eq!(
+            delivery_verdict(Some(InsertDelivery::Uncertain)),
+            Some(Err(PickerMessage::Uncertain))
+        );
+        assert_eq!(delivery_verdict(None), Some(Err(PickerMessage::LostTrack)));
         for failure in [
             InsertFailure::FocusChanged,
             InsertFailure::PolicyRefused,
@@ -1687,17 +1719,68 @@ mod tests {
             InsertFailure::NotApplied,
             InsertFailure::Superseded,
         ] {
-            let Some(Err(message)) = delivery_verdict(Some(InsertDelivery::Failed(failure))) else {
-                panic!("{failure:?} must be shown");
-            };
-            assert!(message.ends_with("Nothing was inserted."), "{message}");
+            assert_eq!(
+                delivery_verdict(Some(InsertDelivery::Failed(failure))),
+                Some(Err(PickerMessage::NotInserted(failure)))
+            );
+        }
+    }
+
+    #[test]
+    fn every_picker_message_is_translated() {
+        use crate::lang::{Language, Strings};
+        use wayexpand_core::InsertFailure;
+        let mut messages = vec![
+            PickerMessage::FocusUnknown,
+            PickerMessage::WorkerStartFailed("x".into()),
+            PickerMessage::WorkerStopped,
+            PickerMessage::RenderFailed("x".into()),
+            PickerMessage::CopyNotAllowedByPolicy,
+            PickerMessage::CopyNotAllowedForSnippet,
+            PickerMessage::SnippetGone,
+            PickerMessage::OlderService,
+            PickerMessage::CallFailed("x".into()),
+            PickerMessage::Refused("x".into()),
+            PickerMessage::FocusNotReturned,
+            PickerMessage::LostContact("x".into()),
+            PickerMessage::UnexpectedReply("x".into()),
+            PickerMessage::NotConfirmed(15),
+            PickerMessage::LostTrack,
+            PickerMessage::Uncertain,
+        ];
+        messages.extend(
+            [
+                InsertFailure::FocusChanged,
+                InsertFailure::PolicyRefused,
+                InsertFailure::InputArrived,
+                InsertFailure::NoBackend,
+                InsertFailure::Refused,
+                InsertFailure::NotApplied,
+                InsertFailure::Superseded,
+            ]
+            .map(PickerMessage::NotInserted),
+        );
+        let english = Strings::new(Language::English);
+        for message in &messages {
+            let en = english.picker_message(message);
+            assert!(!en.is_empty(), "{message:?}");
+            for language in [Language::German, Language::Indonesian] {
+                let other = Strings::new(language).picker_message(message);
+                assert_ne!(other, en, "{message:?} is not translated");
+            }
+        }
+        // Commands stay commands in every language.
+        for language in [Language::English, Language::German, Language::Indonesian] {
+            assert!(Strings::new(language)
+                .picker_message(&PickerMessage::OlderService)
+                .contains("wayexpand service restart --yes"));
         }
     }
 
     mod insert_handoff {
         use super::super::{
             wait_for_focus_and_insert, FocusTarget, InsertHandoff, InsertOutcome, InsertTiming,
-            PickerApp, PickerDaemon,
+            PickerApp, PickerDaemon, PickerMessage,
         };
         use std::sync::{Arc, Mutex};
         use std::time::Duration;
@@ -1792,6 +1875,69 @@ mod tests {
         }
 
         #[test]
+        fn closing_the_window_cancels_or_waits_for_the_result() {
+            use super::super::{CloseDecision, HandoffState, InsertState};
+            let loaded = wayexpand_core::Config::parse(
+                "[[expansion]]\ntrigger = ';sig'\nreplacement = 'x'\n",
+            )
+            .unwrap();
+            let mut app = PickerApp::new(
+                loaded,
+                wayexpand_core::Config::load_versioned(&{
+                    let path = std::env::temp_dir().join(format!(
+                        "wayexpand-picker-close-{}.toml",
+                        std::process::id()
+                    ));
+                    std::fs::write(&path, "").unwrap();
+                    std::fs::set_permissions(
+                        &path,
+                        std::os::unix::fs::PermissionsExt::from_mode(0o600),
+                    )
+                    .unwrap();
+                    path
+                })
+                .unwrap()
+                .revision,
+                crate::lang::Language::English,
+                crate::colorpack::ColorPack::Default,
+                true,
+                true,
+                true,
+                Some(target(1)),
+            );
+            let waiting = |handoff: InsertHandoff| InsertState::Waiting {
+                trigger: ";sig".into(),
+                text: String::new(),
+                receiver: std::sync::mpsc::channel().1,
+                handoff,
+                cancel_refused: false,
+            };
+
+            // Not sent yet: closing cancels it.
+            let handoff = InsertHandoff::new();
+            app.insert_state = waiting(handoff.clone());
+            assert_eq!(app.close_requested(), CloseDecision::Close);
+            assert_eq!(handoff.state(), HandoffState::Cancelled);
+
+            // Already sent: the picker stays to show what happens.
+            let handoff = InsertHandoff::new();
+            assert!(handoff.begin_submit());
+            app.insert_state = waiting(handoff);
+            assert_eq!(app.close_requested(), CloseDecision::KeepOpen);
+            assert!(matches!(
+                app.insert_state,
+                InsertState::Waiting {
+                    cancel_refused: true,
+                    ..
+                }
+            ));
+
+            // Nothing pending: close.
+            app.insert_state = InsertState::Ready;
+            assert_eq!(app.close_requested(), CloseDecision::Close);
+        }
+
+        #[test]
         fn exactly_one_side_wins_the_handoff() {
             let handoff = InsertHandoff::new();
             assert!(handoff.cancel());
@@ -1813,14 +1959,11 @@ mod tests {
                 &InsertHandoff::new(),
                 TIMING,
             );
-            let InsertOutcome::Failed(message) = outcome else {
-                panic!("an unconfirmable insert must not close the picker: {outcome:?}");
-            };
-            assert!(
-                message.contains("wayexpand service restart --yes"),
-                "{message}"
+            assert_eq!(
+                outcome,
+                InsertOutcome::Failed(PickerMessage::OlderService),
+                "an unconfirmable insert must not close the picker"
             );
-            assert!(message.contains("nothing was inserted"), "{message}");
             // Only the tracked request was sent; no untracked fallback.
             assert_eq!(inserts.lock().unwrap().len(), 1);
         }

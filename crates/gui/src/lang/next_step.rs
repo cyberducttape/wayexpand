@@ -136,6 +136,33 @@ impl Strings {
             (Staleness::DesktopChanged { was }, Language::Indonesian) => {
                 format!("desktop sebelumnya {was}")
             }
+            (Staleness::SessionChanged, Language::English) => {
+                "you logged in again or the desktop restarted".into()
+            }
+            (Staleness::SessionChanged, Language::German) => {
+                "Sie haben sich neu angemeldet oder der Desktop wurde neu gestartet".into()
+            }
+            (Staleness::SessionChanged, Language::Indonesian) => {
+                "Anda masuk lagi atau desktop dimulai ulang".into()
+            }
+            (Staleness::BuildChanged { was }, Language::English) => {
+                format!("WayExpand was updated from {was}")
+            }
+            (Staleness::BuildChanged { was }, Language::German) => {
+                format!("WayExpand wurde von {was} aktualisiert")
+            }
+            (Staleness::BuildChanged { was }, Language::Indonesian) => {
+                format!("WayExpand diperbarui dari {was}")
+            }
+            (Staleness::Incomplete, Language::English) => {
+                "the saved test does not say what it covered".into()
+            }
+            (Staleness::Incomplete, Language::German) => {
+                "der gespeicherte Test sagt nicht, was er abdeckte".into()
+            }
+            (Staleness::Incomplete, Language::Indonesian) => {
+                "uji tersimpan tidak menyebut apa yang dicakupnya".into()
+            }
         }
     }
 }

@@ -4,6 +4,20 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Working** in the header now means a user-confirmed insertion in a real
+  application, scoped to the current compositor session, WayExpand build,
+  typing route and desktop:
+  - A saved confirmation stops counting after a new login or desktop
+    restart, an update, or a route change. It stays visible as history
+    ("last confirmed …"), with what changed.
+  - A record missing any of those fields never counts.
+  - The daemon's output acknowledgements no longer count either: they are
+    process-wide and do not show the application's resulting text.
+- Closing the Quick Picker window after it has sent an insert is refused.
+  The picker stays (or comes back) until WayExpand reports the result,
+  instead of disappearing with the outcome unknown. Unusable picker rows
+  are no longer buttons (no pointer cursor, no click), and every picker
+  message is translated into German and Indonesian.
 - The Quick Picker lists snippets it cannot use, after the usable ones and
   greyed out, with the reason, instead of leaving them out so they seemed
   to have disappeared:
