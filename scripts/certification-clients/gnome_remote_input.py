@@ -91,6 +91,45 @@ def click_test_field(bus, path):
     time.sleep(0.1)
 
 
+# Linux input-event-codes.h keycodes for the physical keys that type each
+# test character on a layout, and whether Shift is held. Layout cases send
+# these instead of keysyms: Mutter 49 resolves an injected keysym to the
+# wrong key on the German layout (";" arrived as "<"), while physical
+# keycodes are what a real keyboard sends on every GNOME version.
+KEY_LEFTSHIFT = 42
+LAYOUT_KEYCODES = {
+    "de": {";": (51, True), "e": (18, False), "2": (3, False)},
+    "fr": {";": (51, False), "e": (18, False), "2": (3, True)},
+}
+
+
+def send_layout_keycodes(bus, path, text, layout, delay_seconds, ready_marker):
+    """Type `text` as the physical key presses of `layout`."""
+    table = LAYOUT_KEYCODES[layout]
+    if any(character not in table for character in text):
+        raise ValueError(f"no {layout} keycodes for the requested test input")
+    sent = 0
+    for character in text:
+        if not os.path.isfile(ready_marker):
+            raise RuntimeError(
+                "GTK active focus was lost; stopped before sending remaining test input"
+            )
+        release_shell_key_focus(bus)
+        keycode, shifted = table[character]
+        try:
+            if shifted:
+                key_event(bus, path, KEY_LEFTSHIFT, True, keycode=True)
+            key_event(bus, path, keycode, True, keycode=True)
+            time.sleep(delay_seconds)
+        finally:
+            key_event(bus, path, keycode, False, keycode=True)
+            if shifted:
+                key_event(bus, path, KEY_LEFTSHIFT, False, keycode=True)
+        sent += 1
+        time.sleep(delay_seconds)
+    return sent
+
+
 def send_text(
     bus, path, text, delay_seconds, ready_marker, *, keycode_probe=False
 ):
@@ -236,7 +275,14 @@ def main():
         action="store_true",
         help="send only the fixed US-layout 'a' baseline as evdev KEY_A",
     )
+    parser.add_argument(
+        "--keycode-layout",
+        choices=sorted(LAYOUT_KEYCODES),
+        help="type the text as this layout's physical key presses",
+    )
     args = parser.parse_args()
+    if args.keycode_layout and args.keycode_probe:
+        parser.error("--keycode-layout and --keycode-probe are exclusive")
     if args.delay_ms < 0 or args.delay_ms > 1000:
         parser.error("--delay-ms must be between 0 and 1000")
     if not args.text or any(not 0x20 <= ord(character) <= 0x7E for character in args.text):
@@ -286,14 +332,24 @@ def main():
             )
         release_shell_key_focus(bus)
         report_shell_input_state(bus, "before-input")
-        sent = send_text(
-            bus,
-            session_path,
-            args.text,
-            args.delay_ms / 1000,
-            args.ready_marker,
-            keycode_probe=args.keycode_probe,
-        )
+        if args.keycode_layout:
+            sent = send_layout_keycodes(
+                bus,
+                session_path,
+                args.text,
+                args.keycode_layout,
+                args.delay_ms / 1000,
+                args.ready_marker,
+            )
+        else:
+            sent = send_text(
+                bus,
+                session_path,
+                args.text,
+                args.delay_ms / 1000,
+                args.ready_marker,
+                keycode_probe=args.keycode_probe,
+            )
         report_shell_input_state(bus, "after-input")
     except (GLib.Error, OSError, RuntimeError, ValueError) as error:
         print(f"Mutter RemoteDesktop keyboard input failed: {error}", file=sys.stderr)
@@ -317,6 +373,11 @@ def main():
     if args.keycode_probe:
         print(
             f"Mutter accepted {sent} fixed KEY_A press/release pair; "
+            "GTK verifies delivery"
+        )
+    elif args.keycode_layout:
+        print(
+            f"Mutter accepted {sent} {args.keycode_layout} keycode presses; "
             "GTK verifies delivery"
         )
     else:

@@ -1183,7 +1183,7 @@ fn discover_window_tracker_for_desktop(desktop: &str) -> (BackendState, String) 
     if gnome {
         (
             BackendState::Implemented,
-            "GNOME detected; uses the WayExpand GNOME Shell extension (runtime-gated on GNOME Shell 46, 50, and 51), because \
+            "GNOME detected; uses the WayExpand GNOME Shell extension (runtime-gated on GNOME Shell 46, 48, 50, and 51), because \
              Mutter exposes no window-listing Wayland protocol and limits \
              org.gnome.Shell.Introspect to allowlisted callers; `wayexpand setup` installs and \
              enables it"
@@ -1328,7 +1328,7 @@ mod tests {
     fn gnome_window_tracking_diagnostic_only_names_runtime_gated_shell_majors() {
         let (state, detail) = discover_window_tracker_for_desktop("GNOME");
         assert_eq!(state, BackendState::Implemented);
-        assert!(detail.contains("GNOME Shell 46, 50, and 51"));
+        assert!(detail.contains("GNOME Shell 46, 48, 50, and 51"));
         assert!(!detail.contains("GNOME 45+"));
     }
 

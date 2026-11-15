@@ -905,6 +905,93 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # GNOME Shell majors between the hosted Ubuntu runners and Fedora 45, run
+  # in containers with the same acceptance test. GNOME 47 has no supported
+  # distribution left (RHEL 10.2 moved to GNOME 49), so it is not gated.
+  # GNOME 49 (Fedora 43) passes everything except the German/French layout
+  # cases: its RemoteDesktop virtual keyboard delivers US keysyms after a
+  # layout switch, with keysym and keycode injection alike, so it is not
+  # advertised until layout tracking is confirmed on a real GNOME 49 session.
+  gnome-shell-versions-e2e:
+    name: GNOME IBus Acceptance (${{ matrix.label }}, Headless)
+    needs: change-scope
+    if: needs.change-scope.outputs.ibus == 'true' || needs.change-scope.outputs.gnome_extension == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:13
+            shell_major: '48'
+            label: Debian 13 / GNOME 48
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+      - name: Install GNOME, IBus, and client test dependencies
+        run: sh scripts/install-gnome-e2e-deps.sh
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.96.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build GNOME IBus acceptance clients
+        run: >-
+          cargo build --locked -p wayexpand --bin wayexpand
+          -p wayexpand-backend-ibus --bin wayexpand-ibus
+          -p wayexpand-e2e --bin wx-e2e-sink --bin wx-e2e-gnome-tracker
+          --bin wx-e2e-ibus
+      - name: Register the test engine through the system IBus component path
+        run: |
+          mkdir -p /usr/share/ibus/component
+          sed "s|<exec>wayexpand-ibus</exec>|<exec>$GITHUB_WORKSPACE/target/debug/wayexpand-ibus</exec>|" \
+            desktop/wayexpand-ibus.xml > /usr/share/ibus/component/wayexpand.xml
+          python3 -c 'import xml.etree.ElementTree as ET; ET.parse("/usr/share/ibus/component/wayexpand.xml")'
+          chmod 0644 /usr/share/ibus/component/wayexpand.xml
+      - name: Start the isolated system bus required by GNOME Shell
+        run: |
+          mkdir -p /run/dbus
+          dbus-daemon --system --fork --nopidfile
+          mkdir -p /run/systemd/seats /run/systemd/sessions /run/systemd/users /var/lib/systemd/linger
+          touch /var/lib/systemd/linger/wayexpand-test
+          # Mutter starts XWayland in /tmp/.X11-unix, which a minimal image
+          # (Debian) does not create; the Shell exits without it.
+          mkdir -p /tmp/.X11-unix
+          chmod 1777 /tmp/.X11-unix
+          for logind in /usr/lib/systemd/systemd-logind /lib/systemd/systemd-logind; do
+            [ -x "$logind" ] && break
+          done
+          "$logind" &
+          attempt=0
+          until busctl --system status org.freedesktop.login1 >/dev/null 2>&1; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge 50 ]; then
+              echo "systemd-logind did not acquire org.freedesktop.login1" >&2
+              exit 1
+            fi
+            sleep 0.1
+          done
+      - name: Run GTK, Qt, browser, terminal, layout, privacy, and Shell-restart checks
+        run: |
+          chmod -R a+rX "$GITHUB_WORKSPACE"
+          browser=$(command -v chromium || command -v chromium-browser)
+          runuser -u wayexpand-test -- env \
+            E2E_BIN="$GITHUB_WORKSPACE/target/debug" \
+            E2E_SKIP_BUILD=1 E2E_BROWSER_BIN="$browser" E2E_BROWSER_NO_SANDBOX=1 \
+            WX_GNOME_EXPECTED_SHELL_MAJOR="${{ matrix.shell_major }}" \
+            E2E_IBUS_COMPONENT_PATH=/usr/share/ibus/component \
+            bash scripts/test-gnome-e2e.sh --keep
+      - name: Upload GNOME acceptance diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gnome-e2e-diagnostics-gnome-${{ matrix.shell_major }}-${{ github.sha }}
+          path: /tmp/wayexpand-gnome-e2e.*/**
+          if-no-files-found: ignore
+          retention-days: 14
+
   packaging:
     name: Debian and RPM Package Artifacts
     needs: change-scope
