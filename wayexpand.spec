@@ -4,13 +4,17 @@ Release:        1%{?dist}
 Summary:        A privacy-first, Wayland-native text expander for Linux
 License:        MIT
 URL:            https://github.com/cyberducttape/wayexpand
-Source0:        %{url}/releases/download/v%{version}/wayexpand-%{version}-vendored.tar.gz
+Source0:        %{url}/releases/download/%{version}/wayexpand-%{version}-vendored.tar.gz
 
 %{!?_userunitdir:%global _userunitdir %{_prefix}/lib/systemd/user}
 
 BuildRequires:  cargo
 BuildRequires:  rustc
 BuildRequires:  pkg-config
+# %check: the CLI's library-sync tests run git, and the input-method
+# composition tests read the XKB Compose tables libX11-common ships.
+BuildRequires:  git-core
+BuildRequires:  libX11-common
 BuildRequires:  wayland-devel
 BuildRequires:  libxkbcommon-devel
 Recommends:     ibus
@@ -31,7 +35,8 @@ cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p action-broker
 . scripts/load-build-identity.sh
 # Package builds do not run inside a delegated systemd cgroup, so command
 # tests use process-group containment, as debian/rules does.
-WAYEXPAND_PROCESS_CGROUP=disabled cargo test --frozen --workspace
+# LC_ALL picks a locale with an XKB Compose table, as debian/rules does.
+WAYEXPAND_PROCESS_CGROUP=disabled LC_ALL=C.UTF-8 cargo test --frozen --workspace
 
 %install
 install -Dm755 target/release/wayexpand %{buildroot}%{_bindir}/wayexpand
