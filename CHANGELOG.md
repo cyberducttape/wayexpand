@@ -4,6 +4,18 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The recovery screen validates backups until it finds the five newest valid
+  ones. Previously it took the five newest files and validated only those, so
+  five damaged recent backups hid an older good one. A broken configuration
+  set aside during recovery is named `<name>.broken-<seconds>-<nanoseconds>`
+  and claimed without overwriting, so two recoveries in the same second no
+  longer fail.
+- After the library file changes on disk and is reloaded, the sidebar's
+  visible-snippet list and the reusable-snippet choices are rebuilt. The
+  reload kept their old revision, so they could show stale rows.
+- The real-application test dialog keeps a cached list of eligible snippets,
+  updated when the library changes, instead of copying every eligible
+  trigger and replacement on each repaint.
 - The first-run guide has three steps: *Connect your desktop*, *Create a
   snippet* and *Test it*. Route, permission and certification notes moved
   into a collapsed *Troubleshooting details* section. Removed: the separate

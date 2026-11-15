@@ -3823,3 +3823,46 @@ fn writing_a_first_snippet_returns_to_the_guide() {
     assert_eq!(app.config.expansion[0].trigger, ";sig");
     let _ = fs::remove_file(path);
 }
+
+#[test]
+fn desktop_test_candidates_follow_library_changes_including_reloads() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-desktop-test-cache-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    fs::write(
+        &path,
+        "[[expansion]]\ntrigger = \";one\"\nreplacement = \"one\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    assert_eq!(app.cached_desktop_tests(false).len(), 1);
+
+    // Saved through the GUI: the tutorial snippet is added and, on first
+    // run, offered first.
+    app.create_test_snippet();
+    let first_run = app.cached_desktop_tests(true);
+    assert_eq!(first_run.len(), 2);
+    assert_eq!(
+        app.config.expansion[first_run[0]].trigger,
+        ":wayexpand-test"
+    );
+
+    // Changed on disk and reloaded: the cache must not keep the old list.
+    fs::write(
+        &path,
+        "[[expansion]]\ntrigger = \";a\"\nreplacement = \"a\"\n\n\
+         [[expansion]]\ntrigger = \";b\"\nreplacement = \"b\"\n\n\
+         [[expansion]]\ntrigger = \";c\"\nreplacement = \"c\"\n",
+    )
+    .unwrap();
+    app.apply_reload_snapshot(runtime::load_config_snapshot(path.clone()).unwrap());
+    let reloaded = app.cached_desktop_tests(false);
+    assert_eq!(reloaded.len(), 3, "{reloaded:?}");
+    assert!(reloaded
+        .iter()
+        .all(|index| *index < app.config.expansion.len()));
+    let _ = fs::remove_file(path);
+}
