@@ -196,6 +196,15 @@ rpmbuild --rebuild /tmp/wayexpand-srpm/wayexpand-*.src.rpm   # or: mock <srpm>
 installs `cargo`, `git` and `rpm-build` if missing and vendors crates there.
 The RPM build itself runs without network access.
 
+`scripts/copr-srpm.sh` names each build so that no two builds share an RPM
+version. A checkout exactly at the release tag of the spec's `Version`
+(`X.Y.Z` or `vX.Y.Z`) builds `X.Y.Z-1`. Any later commit builds
+`X.Y.Z-1.N.gitSHA`, where `N` counts the commits since the tag: it upgrades
+the release, sorts before the next release, grows along `main`, and names
+the source commit. A checkout without that tag is refused.
+`scripts/test-copr-srpm-version.sh` checks this, including RPM ordering
+when `rpmdev-vercmp` is available.
+
 ### aarch64
 
 The release workflow builds on native x86_64 and aarch64 runners and is

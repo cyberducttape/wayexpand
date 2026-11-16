@@ -44,6 +44,12 @@ pub(crate) struct SetupRecord {
     /// The compositor session the test ran in (see `current_session`).
     #[serde(default)]
     pub session: Option<String>,
+    /// The run of the typing route that was tested: the IBus engine
+    /// instance, or the daemon's input and output connection times. A
+    /// restarted engine or daemon, even under the same route name, has not
+    /// been verified.
+    #[serde(default)]
+    pub route_instance: Option<String>,
     #[serde(default)]
     pub verified_at_unix: Option<u64>,
 }
@@ -61,6 +67,8 @@ pub(crate) enum Staleness {
     },
     /// A new login or compositor start since the test.
     SessionChanged,
+    /// The input engine or daemon restarted or reconnected since the test.
+    RouteRestarted,
     BuildChanged {
         was: String,
     },
@@ -70,17 +78,23 @@ pub(crate) enum Staleness {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Scope<'a> {
     pub route: Option<&'a str>,
+    pub route_instance: Option<&'a str>,
     pub desktop: &'a str,
     pub session: Option<&'a str>,
     pub build: &'a str,
 }
 
 impl SetupRecord {
-    pub(crate) fn verified(application: &str, route: Option<String>) -> Self {
+    pub(crate) fn verified(
+        application: &str,
+        route: Option<String>,
+        route_instance: Option<String>,
+    ) -> Self {
         Self {
             outcome: SetupOutcome::Verified,
             application: Some(application.to_owned()),
             route,
+            route_instance,
             build: Some(current_build()),
             desktop: Some(current_desktop()),
             session: current_session(),
@@ -99,6 +113,7 @@ impl SetupRecord {
             build: None,
             desktop: None,
             session: None,
+            route_instance: None,
             verified_at_unix: None,
         }
     }
@@ -108,8 +123,9 @@ impl SetupRecord {
     /// and one typing route on one desktop; anything missing from either
     /// side means a new test, never a match.
     pub(crate) fn staleness(&self, scope: &Scope<'_>) -> Option<Staleness> {
-        let (Some(route), Some(desktop), Some(session), Some(build)) = (
+        let (Some(route), Some(instance), Some(desktop), Some(session), Some(build)) = (
             self.route.as_deref(),
+            self.route_instance.as_deref(),
             self.desktop.as_deref(),
             self.session.as_deref(),
             self.build.as_deref(),
@@ -130,13 +146,16 @@ impl SetupRecord {
             });
         }
         match scope.route {
-            Some(now) if now == route => None,
-            Some(_) => Some(Staleness::RouteChanged {
-                was: route.to_owned(),
-            }),
+            Some(now) if now != route => {
+                return Some(Staleness::RouteChanged {
+                    was: route.to_owned(),
+                })
+            }
+            Some(_) => {}
             // An unknown current route says nothing; it is not a match.
-            None => Some(Staleness::Incomplete),
+            None => return Some(Staleness::Incomplete),
         }
+        (scope.route_instance != Some(instance)).then_some(Staleness::RouteRestarted)
     }
 
     /// A user-confirmed insertion that covers what is running now.
@@ -242,6 +261,7 @@ mod tests {
             build: Some("1.3.6 (abc)".into()),
             desktop: Some(desktop.into()),
             session: Some("boot:1".into()),
+            route_instance: Some("ibus:42:100".into()),
             verified_at_unix: Some(1),
         }
     }
@@ -249,6 +269,7 @@ mod tests {
     fn scope<'a>(route: Option<&'a str>, desktop: &'a str, session: Option<&'a str>) -> Scope<'a> {
         Scope {
             route,
+            route_instance: Some("ibus:42:100"),
             desktop,
             session,
             build: "1.3.6 (abc)",
@@ -295,6 +316,24 @@ mod tests {
     }
 
     #[test]
+    fn a_restarted_engine_or_daemon_needs_a_new_test() {
+        let record = verified("ibus", "KDE · wayland");
+        let restarted = Scope {
+            route_instance: Some("ibus:43:200"),
+            ..scope(Some("ibus"), "KDE · wayland", Some("boot:1"))
+        };
+        assert_eq!(
+            record.staleness(&restarted),
+            Some(Staleness::RouteRestarted)
+        );
+        let unknown = Scope {
+            route_instance: None,
+            ..scope(Some("ibus"), "KDE · wayland", Some("boot:1"))
+        };
+        assert_eq!(record.staleness(&unknown), Some(Staleness::RouteRestarted));
+    }
+
+    #[test]
     fn a_record_missing_any_scope_field_never_counts() {
         let current = scope(Some("ibus"), "KDE · wayland", Some("boot:1"));
         let complete = verified("ibus", "KDE · wayland");
@@ -313,6 +352,10 @@ mod tests {
             },
             SetupRecord {
                 build: None,
+                ..complete.clone()
+            },
+            SetupRecord {
+                route_instance: None,
                 ..complete.clone()
             },
         ] {

@@ -1693,8 +1693,10 @@ impl GuiApp {
             let record = crate::setup_record::SetupRecord::verified(
                 &application_class,
                 self.current_route_label(),
+                self.current_route_instance(),
             );
             save_error = crate::setup_record::save(&record).err();
+            self.setup_record_saved = save_error.is_none();
             self.setup_record = Some(record);
             self.desktop_test_review = None;
             if self.desktop_test_dialog_required || self.onboarding_visible {
