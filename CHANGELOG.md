@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- In the Quick Picker, the arrow keys skip snippets that cannot be used here,
+  and the first selection is the first usable match. Those snippets stay
+  listed with their reason, or are hidden with *Show snippets that can't be
+  used here*.
 - The README leads with the prebuilt `.deb`, `.rpm` and archives published
   with 1.3.6, with install commands that check their checksums. The package
   availability text, generated from `packaging/release-status.json`, is
