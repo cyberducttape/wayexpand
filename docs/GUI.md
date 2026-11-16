@@ -249,7 +249,10 @@ fixes it, in a banner under the toolbar (and in the guide's first step): turn
 WayExpand on, resume, grant permission or select the GNOME input source through
 guided setup, restart an older service, review replacement consent, check
 again, or open the Quick Picker when the desktop or the app cannot have text
-replaced. *Details* opens Diagnostics.
+replaced. *Details* opens Diagnostics. When only `wayexpand-control.service`
+runs (Quick Picker and hotkeys) and the IBus engine it pairs with is not
+active, nothing reads typing: the guide's first step and the header say so
+and offer guided setup, instead of counting the running service as connected.
 
 The toolbar's main status chip uses the same model. It describes typed
 triggers; the Quick Picker has its own chip beside it (see above), because

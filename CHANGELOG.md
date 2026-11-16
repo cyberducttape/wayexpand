@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The GUI no longer counts the control-only service (Quick Picker and
+  hotkeys) as a connected typing route when the IBus engine is not active.
+  The first-run guide ticked *Connect your desktop* and then asked for
+  replacement consent; it now says nothing reads typing yet and offers guided
+  setup, and the header shows *Needs setup*.
 - New `wayexpand why` says why the last trigger did not expand: matching is
   off (and why), no typing arrives, nothing matched, or what stopped the last
   expansion, with what to do. It combines the service's and the IBus engine's
