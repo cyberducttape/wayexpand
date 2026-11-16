@@ -656,9 +656,9 @@ impl GuiApp {
     /// The header chip's state and color. It follows the same readiness
     /// model as the banner and the first-run guide: a live process alone is
     /// never success. A problem `next_step` names wins; with none, the chip
-    /// is green only once an expansion is known to have reached an app (a
-    /// confirmed desktop test, or output the daemon's backend acknowledged),
-    /// and otherwise reads Running in a neutral color.
+    /// is green only for a user-confirmed insertion that still covers this
+    /// session, build, route and route instance (`expansion_observed`).
+    /// Backend acknowledgements never count.
     pub(crate) fn header_state(
         &self,
         ibus_only: bool,

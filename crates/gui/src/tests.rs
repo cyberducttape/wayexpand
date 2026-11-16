@@ -4147,3 +4147,51 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
         "acknowledged output is not a confirmed insertion"
     );
 }
+
+#[test]
+fn every_header_state_is_documented() {
+    use crate::lang::HeaderState as S;
+    // Exhaustive: adding a state without listing it here does not compile.
+    let documented = |state: S| match state {
+        S::Working
+        | S::WorkingUnsaved
+        | S::NeedsVerification
+        | S::Limited
+        | S::Paused
+        | S::Off
+        | S::NotSetUp
+        | S::Checking
+        | S::Starting
+        | S::Reconnecting
+        | S::NeedsPermission
+        | S::CopyOnly
+        | S::Stopped
+        | S::Disconnected
+        | S::NeedsSetup => state,
+    };
+    let guide = include_str!("../../../docs/GUI.md");
+    let strings = crate::lang::Strings::new(Language::English);
+    for state in [
+        S::Working,
+        S::WorkingUnsaved,
+        S::NeedsVerification,
+        S::Limited,
+        S::Paused,
+        S::Off,
+        S::NotSetUp,
+        S::Checking,
+        S::Starting,
+        S::Reconnecting,
+        S::NeedsPermission,
+        S::CopyOnly,
+        S::Stopped,
+        S::Disconnected,
+        S::NeedsSetup,
+    ] {
+        let label = strings.header_state(documented(state));
+        assert!(
+            guide.contains(&format!("`{label}`")),
+            "docs/GUI.md does not describe the header state `{label}`"
+        );
+    }
+}

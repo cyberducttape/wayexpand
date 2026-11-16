@@ -121,7 +121,7 @@ extensions are reported for manual review rather than silently approximated.
 | Scripts and command integrations | Supported | Structured command expansions with bounds and timeouts; imported scripts are not enabled automatically |
 | Community package workflow | Espanso Hub and package commands | Versioned offline packs, Git-based sharing, review checks, and optional signatures; no central registry or automatic update service |
 | Search interface | Supported | GUI library search and filtering |
-| Application-specific configuration | Supported on supported platforms; Espanso documents this as unavailable on Wayland | `app_filter` through the KWin tracker path; currently uncertified and fail-closed elsewhere |
+| Application-specific configuration | Supported on supported platforms; Espanso documents this as unavailable on Wayland | `app_filter` through the KWin tracker on KDE Plasma or the bundled GNOME Shell extension (GNOME 46, 48, 50, 51); not yet certified in a physical session, and fail-closed where no tracker identifies the window |
 | Linux Wayland input route | Wayland distribution path with documented limitations | Native input/injection routes with explicit capability and lifecycle diagnostics |
 | Sensitive-field awareness | Depends on integration | Available only when the selected route/compositor supplies reliable content-purpose information; not universally certified |
 | Administrative policy | Project/package configuration | Organization policy, allowed backends/packs, command restrictions, and fleet-oriented config |
@@ -234,8 +234,9 @@ it in the report and adapt it manually. Common cases include:
 - clipboard variables: import refuses to enable clipboard access implicitly;
 - Espanso list controls, ID-mapped choices, and complex form controls: convert
   manually and validate the resulting form;
-- application filters: verify that the current session is a certified KWin
-  route before relying on them;
+- application filters: check with `wayexpand doctor` that the session has a
+  window tracker (KWin on KDE Plasma, the WayExpand Shell extension on GNOME)
+  and test the filter before relying on it; neither tracker is certified yet;
 - IME/preedit workflows: active composition is currently outside WayExpand's
   supported scope;
 - evdev fallback: it has no password-field signal and is not the recommended

@@ -4,6 +4,16 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Documentation matches the current behaviour:
+  - the Quick Picker types directly only on a route that is both atomic and
+    able to identify the exact window, which no standard route combines
+    today, so it often copies
+  - unusable picker snippets stay listed with their reason
+  - window tracking also covers GNOME 46, 48, 50 and 51
+  - the header states and scoped verification are described
+  - Copr builds go through `.copr/Makefile`
+  - the bare `X.Y.Z` release tag is canonical
+  - the minimum Rust (1.92) is separate from the pinned toolchain (1.96.0)
 - In the Quick Picker, the arrow keys skip snippets that cannot be used here,
   and the first selection is the first usable match. Those snippets stay
   listed with their reason, or are hidden with *Show snippets that can't be

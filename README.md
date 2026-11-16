@@ -22,10 +22,11 @@ local, offline, no account, no telemetry.
   `wayexpand doctor` covers that.
 - **Quick-insert picker.** Press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> +
   <kbd>Space</kbd> (set up by the first-run guide or `wayexpand shortcut set`
-  on KDE Plasma and GNOME). Type a few letters, press Enter, and the running WayExpand service
-  types the snippet into the app you were using. Typing needs focused-window
-  tracking (currently KDE Plasma); elsewhere, or without the service, Enter
-  copies it to the clipboard. No trigger to remember.
+  on KDE Plasma and GNOME), type a few letters, and press Enter. No trigger to
+  remember. The picker types the snippet into the app you came from only on a
+  route that is atomic and identifies that exact window; none of today's
+  standard routes combines both, so Enter usually copies the snippet for you to
+  paste, even with the service running. The footer always says which.
 
   ![The quick-insert picker in the Terminal Blue color pack: a search box above the snippet list, each entry showing its trigger, description, category, and a preview](docs/images/wayexpand-quick-insert-picker.png)
 
@@ -116,6 +117,13 @@ cd wayexpand
 ./scripts/install-user.sh
 wayexpand-gui
 ```
+
+The minimum supported Rust is 1.92 (`rust-version`, tested in CI). The
+checkout also pins the toolchain it is developed and released with,
+`rust-toolchain.toml` (currently 1.96.0), so under rustup the first build
+downloads that toolchain. To build offline, run
+`rustup toolchain install 1.96.0` while online first, or build with an
+installed 1.92 or newer through `cargo +<version> build`.
 
 ### Release archive
 

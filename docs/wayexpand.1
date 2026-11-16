@@ -232,7 +232,9 @@ atomically, and asks the daemon to reload.
 .B profile assign-app APP-ID PROFILE [CONFIG] | profile unassign-app APP-ID [CONFIG]
 Use a profile automatically while an application with this exact normalized
 app ID is focused. Matching pauses while the profile loads, and stays off if
-it does not validate. Requires a window tracker (currently KDE Plasma).
+it does not validate. Requires a window tracker: KWin scripting on KDE
+Plasma, or the bundled GNOME Shell extension on GNOME 46, 48, 50 and 51.
+Neither is certified in a physical session yet.
 .TP
 .B backup [CONFIG] [DESTINATION]
 Create a private, non-overwriting configuration backup.

@@ -1,7 +1,8 @@
 # Release procedure
 
-WayExpand releases are created from annotated `vX.Y.Z` version tags. The
-unprefixed form (`X.Y.Z`) is not a release reference and must not be reused.
+WayExpand releases are created from annotated version tags. The canonical form
+is the bare `X.Y.Z` that every release has used (`1.3.3` through `1.3.6`); the
+release workflow also accepts `vX.Y.Z`. Use one form per version, never both.
 The release
 workflow rejects a mismatch before publishing artifacts if the tag does not
 match all package metadata:
