@@ -15,6 +15,9 @@ use wayexpand_backend_ibus::chain::IbusCheckState;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Problem {
     ServiceOff,
+    /// Only the control service runs (Quick Picker, hotkeys): nothing
+    /// captures typing, because the IBus engine it pairs with is not live.
+    NoTypingRoute,
     Paused,
     PermissionNeeded,
     PermissionRevoked,
@@ -100,7 +103,11 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     match s.daemon_reachable {
         None => return None,
         Some(false) => return Some((Problem::ServiceOff, Action::TurnOn)),
-        Some(true) if s.control_only => return None,
+        // The control-only service exists to sit beside IBus; reaching here
+        // means the IBus engine is not live, so nothing reads typing.
+        Some(true) if s.control_only => {
+            return Some((Problem::NoTypingRoute, Action::RunSetup));
+        }
         Some(true) => {}
     }
     match s.build {
@@ -295,6 +302,26 @@ mod tests {
             (
                 running(RouteState::Unsupported),
                 Some((Problem::Unsupported, Action::QuickPicker)),
+            ),
+            // Quick Picker and hotkeys only: a running process, but nothing
+            // reads typing, so it must never pass as connected.
+            (
+                Situation {
+                    control_only: true,
+                    ..running(RouteState::Connected)
+                },
+                Some((Problem::NoTypingRoute, Action::RunSetup)),
+            ),
+            // Beside a live IBus engine the same service is the normal
+            // KDE route, and IBus decides.
+            (
+                Situation {
+                    control_only: true,
+                    ibus_active: true,
+                    replacement_allowed: true,
+                    ..running(RouteState::Connected)
+                },
+                None,
             ),
             (
                 Situation {

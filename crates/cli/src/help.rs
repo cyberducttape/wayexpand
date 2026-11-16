@@ -213,6 +213,9 @@ pub(crate) const COMMANDS: &[Command] = &[
     command("upgrade", Service, "Finish, check or roll back a staged upgrade", &["upgrade --check|--apply|--rollback [--json]"]),
     command("upgrade-status", Service, "Check whether the running service matches this CLI", &["upgrade-status [--json]"]).advanced(),
     // Troubleshooting
+    command("why", Troubleshoot, "Say why the last trigger did not expand", &["why [--json]"])
+        .details("Reads the running service's and the IBus engine's content-free history: whether matching is on, whether typing arrives, and what happened to the last few expansions. No typed text is recorded or shown.")
+        .examples(&[("wayexpand why", "Type a trigger that did not expand, then run this")]),
     command("explain", Troubleshoot, "Explain why text would or would not expand", &["explain <text> [--json] [--offline] [--app ID] [config]"])
         .details("Runs the text through the same matcher the service uses and reports each check: trigger, word boundary, app filter, policy. --app tests it as if that application had focus; --offline skips the running service.")
         .examples(&[("wayexpand explain 'Thanks ;sig'", "Why ;sig does or does not expand here")]),
@@ -453,11 +456,7 @@ fn main_help(style: &Style, version: &str, all: bool) -> String {
     help.push_str(&format!("\n{}\n", style.heading("Examples:")));
     for (example, meaning) in [
         ("wayexpand setup --check", "Is everything ready?"),
-        ("wayexpand list", "Show your snippets"),
-        (
-            "wayexpand explain 'Thanks ;sig'",
-            "Why does ;sig expand here, or not?",
-        ),
+        ("wayexpand why", "Why didn't my last trigger expand?"),
     ] {
         help.push_str(&format!("  {example:<34}{meaning}\n"));
     }

@@ -23,6 +23,7 @@ pub(crate) mod restore;
 pub(crate) mod service;
 pub(crate) mod shortcut;
 pub(crate) mod system;
+pub(crate) mod why;
 pub(crate) mod workflow;
 
 /// The remaining command-line arguments after the subcommand name.
