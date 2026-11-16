@@ -5,6 +5,14 @@ use crate::picker::PickerMessage as M;
 use wayexpand_core::InsertFailure as F;
 
 impl Strings {
+    pub(crate) fn picker_show_unavailable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Show snippets that can't be used here",
+            Language::German => "Snippets anzeigen, die hier nicht nutzbar sind",
+            Language::Indonesian => "Tampilkan cuplikan yang tidak bisa dipakai di sini",
+        }
+    }
+
     pub(crate) fn picker_too_late_to_cancel(&self) -> &'static str {
         match self.lang {
             Language::English => "Too late to cancel: WayExpand already has this insert. The picker shows the result when it arrives.",

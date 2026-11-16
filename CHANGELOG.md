@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- In the Quick Picker, the arrow keys skip snippets that cannot be used here,
+  and the first selection is the first usable match. Those snippets stay
+  listed with their reason, or are hidden with *Show snippets that can't be
+  used here*.
 - Copr builds can no longer publish different code under one RPM version.
   A checkout at the release tag builds `X.Y.Z-1`. A later commit builds
   `X.Y.Z-1.N.gitSHA`, which upgrades the release, sorts before the next one,
