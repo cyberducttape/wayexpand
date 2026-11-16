@@ -192,6 +192,9 @@ pub(crate) struct PickerApp {
     focus_requested: bool,
     target_focus: Option<FocusTarget>,
     insert_state: InsertState,
+    /// List snippets the picker cannot use (with their reason). On by
+    /// default so nothing silently disappears; the user can hide them.
+    show_unavailable: bool,
     /// Debug builds only: capture the window and exit (see `screenshot`).
     screenshot: Option<crate::screenshot::ScreenshotCapture>,
 }
@@ -265,6 +268,7 @@ impl PickerApp {
             target_focus,
             screenshot: None,
             insert_state: InsertState::Ready,
+            show_unavailable: true,
         }
     }
 
@@ -283,7 +287,9 @@ impl PickerApp {
         }
         self.ranked_scratch.clear();
         for (index, entry) in self.search_index.iter().enumerate() {
-            if entry.availability == Availability::Hidden {
+            if entry.availability == Availability::Hidden
+                || !self.show_unavailable && !entry.eligible()
+            {
                 continue;
             }
             if let Some(score) = score_normalized(&query, &entry.trigger, &entry.description) {
@@ -480,7 +486,7 @@ impl PickerApp {
             error,
         };
         match receiver.try_recv() {
-            Ok(InsertOutcome::Delivered | InsertOutcome::Cancelled) => {
+            Ok(InsertOutcome::OutputAcknowledged | InsertOutcome::Cancelled) => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close)
             }
             Ok(InsertOutcome::Failed(message)) => {
@@ -541,6 +547,27 @@ impl PickerApp {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Step {
+    Up,
+    Down,
+    /// Stay if usable, else the nearest usable row below, else above.
+    Settle,
+}
+
+/// The row a keyboard step lands on, skipping rows the picker cannot use.
+/// Without a usable row in that direction the selection stays put.
+fn step_to_usable(usable: &[bool], from: usize, step: Step) -> usize {
+    let below = || (from + 1..usable.len()).find(|row| usable[*row]);
+    let above = || (0..from).rev().find(|row| usable[*row]);
+    match step {
+        Step::Down => below().unwrap_or(from),
+        Step::Up => above().unwrap_or(from),
+        Step::Settle if usable.get(from).copied().unwrap_or(false) => from,
+        Step::Settle => below().or_else(above).unwrap_or(from),
+    }
+}
+
 /// Whether a request to close the picker may go ahead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CloseDecision {
@@ -596,13 +623,22 @@ impl eframe::App for PickerApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             bring_back(&ctx);
         }
-        if down && count > 0 {
-            self.selected = (self.selected + 1).min(count - 1);
+        // Arrow keys move between usable rows only; an unusable row stays
+        // listed with its reason but is never a stop on the way.
+        let usable_rows: Vec<bool> = result_indices
+            .iter()
+            .map(|index| self.search_index[*index].eligible())
+            .collect();
+        self.selected = self.selected.min(count.saturating_sub(1));
+        if down {
+            self.selected = step_to_usable(&usable_rows, self.selected, Step::Down);
         }
         if up {
-            self.selected = self.selected.saturating_sub(1);
+            self.selected = step_to_usable(&usable_rows, self.selected, Step::Up);
         }
-        self.selected = self.selected.min(count.saturating_sub(1));
+        if !usable_rows.get(self.selected).copied().unwrap_or(false) {
+            self.selected = step_to_usable(&usable_rows, self.selected, Step::Settle);
+        }
         // Enter and clicks pick only usable snippets; an unusable row shows
         // why instead of doing something unexpected.
         let usable = |index: usize| self.search_index[index].eligible();
@@ -633,6 +669,25 @@ impl eframe::App for PickerApp {
                 if !self.focus_requested || !response.has_focus() {
                     response.request_focus();
                     self.focus_requested = true;
+                }
+                let has_unavailable = self
+                    .search_index
+                    .iter()
+                    .any(|entry| entry.availability != Availability::Hidden && !entry.eligible());
+                if has_unavailable
+                    && ui
+                        .checkbox(
+                            &mut self.show_unavailable,
+                            RichText::new(self.strings.picker_show_unavailable())
+                                .small()
+                                .color(palette.muted),
+                        )
+                        .changed()
+                {
+                    // The cached ranking was built with the other setting.
+                    self.cached_query = None;
+                    self.selected = 0;
+                    response.request_focus();
                 }
                 ui.add_space(10.0);
 
@@ -990,8 +1045,9 @@ impl InsertHandoff {
 /// What the insert worker reports back to the picker.
 #[derive(Debug, PartialEq, Eq)]
 enum InsertOutcome {
-    /// The daemon confirmed the text reached the window.
-    Delivered,
+    /// The daemon's output backend acknowledged the text. The application's
+    /// resulting document is not observed; only the user can confirm it.
+    OutputAcknowledged,
     /// The user cancelled before anything was sent.
     Cancelled,
     /// Nothing, or possibly part, was inserted; the message says which.
@@ -1068,7 +1124,8 @@ const INSERT_TIMING: InsertTiming = InsertTiming {
 
 /// Wait for focus to return to the window the picker was opened from, send
 /// the insert unless the user cancelled first, and wait for the daemon to
-/// confirm delivery.
+/// report its outcome (an output acknowledgement at best; the application's
+/// document is not observed).
 fn wait_for_focus_and_insert(
     daemon: &mut dyn PickerDaemon,
     target_focus: &FocusTarget,
@@ -1129,7 +1186,7 @@ fn wait_for_delivery(
             ));
         };
         match delivery_verdict(state) {
-            Some(Ok(())) => return InsertOutcome::Delivered,
+            Some(Ok(())) => return InsertOutcome::OutputAcknowledged,
             Some(Err(message)) => return InsertOutcome::Failed(message),
             None => {}
         }
@@ -1869,7 +1926,7 @@ mod tests {
             let handoff = InsertHandoff::new();
             let outcome =
                 wait_for_focus_and_insert(&mut daemon, &target(1), ";sig", &handoff, TIMING);
-            assert_eq!(outcome, InsertOutcome::Delivered);
+            assert_eq!(outcome, InsertOutcome::OutputAcknowledged);
             assert_eq!(*inserts.lock().unwrap(), [";sig"]);
             assert!(!handoff.cancel(), "the insert was already sent");
         }
@@ -2069,6 +2126,37 @@ mod tests {
                     "{availability:?}"
                 );
             }
+        }
+
+        #[test]
+        fn arrow_keys_skip_rows_that_cannot_be_used() {
+            use super::super::{step_to_usable, Step};
+            //            0      1      2     3      4
+            let rows = [false, true, false, false, true];
+            assert_eq!(step_to_usable(&rows, 1, Step::Down), 4);
+            assert_eq!(step_to_usable(&rows, 4, Step::Up), 1);
+            // No usable row further on: stay.
+            assert_eq!(step_to_usable(&rows, 4, Step::Down), 4);
+            assert_eq!(step_to_usable(&rows, 1, Step::Up), 1);
+            // Landing on an unusable row moves to the nearest usable one,
+            // preferring below.
+            assert_eq!(step_to_usable(&rows, 0, Step::Settle), 1);
+            assert_eq!(step_to_usable(&rows, 2, Step::Settle), 4);
+            assert_eq!(step_to_usable(&[true, false], 1, Step::Settle), 0);
+            assert_eq!(step_to_usable(&[false, false], 0, Step::Settle), 0);
+        }
+
+        #[test]
+        fn unusable_snippets_can_be_hidden() {
+            let mut app = picker(LIBRARY, false);
+            app.show_unavailable = false;
+            app.refresh_results();
+            let listed: Vec<&str> = app
+                .result_indices
+                .iter()
+                .map(|index| app.config.expansion[*index].trigger.as_str())
+                .collect();
+            assert_eq!(listed, [";sig"]);
         }
 
         #[test]

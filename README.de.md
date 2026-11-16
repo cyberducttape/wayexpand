@@ -36,15 +36,18 @@ produktiven Einsatz `wayexpand doctor` und die
   Dockerfiles, Compose, Kubernetes, systemd-Units, nginx und CI-Workflows
   sind eingebaut; eigene Vorlagen funktionieren genauso
   ([Templates](docs/TEMPLATES.md)).
-- **Mit einem Klick einschalten.** Der Startbildschirm aktiviert den sichersten
-  erkannten Eingabeweg und gewährt nie selbstständig rohen Tastaturzugriff.
+- **Geführte Einrichtung.** Der Einrichtungsassistent erkennt Ihren Desktop,
+  aktiviert den sichersten Eingabeweg und sagt, was fehlt, wenn es nicht
+  geht: eine Berechtigung, die IBus-Registrierung oder eine Neuanmeldung unter
+  GNOME. Rohen Tastaturzugriff gewährt er nie selbstständig.
 
 ## Schnellstart
 
 ### Experimentelle Pakete
 
-Release 1.3.3 enthält keine Binärdateien; ab der nächsten GitHub-Version
-hängen Archive, `.deb` und `.rpm` an jeder Version.
+Seit 1.3.6 hängen an jeder GitHub-Version Archive für x86_64 und aarch64,
+ein `.deb` und ein `.rpm`, jeweils mit Prüfsumme
+([neueste Version](https://github.com/cyberducttape/wayexpand/releases/latest)).
 
 Unzertifizierte Builds können als GitHub-Vorabversionen *Experimental build …*
 auf der [Release-Seite](https://github.com/cyberducttape/wayexpand/releases)

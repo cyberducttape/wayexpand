@@ -59,22 +59,30 @@ def render_readme():
         if entry["status"] == "unavailable"
     )
     release = STATUS["latest_github_release"]
-    release_text = (
-        f"GitHub release {release['version']} has no uploaded binary assets."
-        if release["published"] and not release["binary_assets_published"]
-        else f"Latest GitHub release: {release['version']}."
-    )
-    details = []
+    if not release["published"]:
+        release_text = f"GitHub release {release['version']} is not published yet."
+    elif release["binary_assets_published"]:
+        release_text = (
+            f"GitHub release {release['version']} has prebuilt binaries with "
+            "checksums (`.tar.gz`, `.deb`, `.rpm`)."
+        )
+    else:
+        release_text = f"GitHub release {release['version']} has no uploaded binary assets."
+    sentences = [release_text]
+    if current:
+        sentences.append(f"PPA {ppa['status']} for {current}.")
     if stale:
-        details.append(f"PPA packages for {stale} are stale")
+        sentences.append(
+            f"PPA packages for {stale} lag behind; prefer the GitHub release there."
+        )
     if unavailable:
-        details.append(f"No PPA packages are published for {unavailable}")
-    availability_details = f" {'; '.join(details)}." if details else ""
+        sentences.append(f"No PPA packages are published for {unavailable}.")
+    copr = "published" if STATUS["fedora_copr_published"] else "not published yet"
+    sentences.append(f"Fedora Copr: {copr}.")
     return (
-        f"**Package availability (audited {STATUS['audited_on']}):** {ppa['status']} "
-        f"for {current}. {release_text}{availability_details} "
-        f"Fedora Copr published: {STATUS['fedora_copr_published']}. "
-        "Package availability is separate from desktop certification."
+        f"**Package availability (audited {STATUS['audited_on']}):** "
+        + " ".join(sentences)
+        + " Package availability is separate from desktop certification."
     )
 
 

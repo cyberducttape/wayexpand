@@ -1015,7 +1015,9 @@ with a reported outcome; the picker uses it. The daemon replies
 `insert-result id=<n> state=<state>`, where `<state>` is:
 
 - `pending`: accepted, not yet resolved.
-- `delivered`: the output backend acknowledged the text.
+- `delivered`: the output backend acknowledged the text. This is not proof
+  that the application's document changed; no route observes that, and
+  only a user-confirmed test establishes it.
 - `uncertain`: the backend could not tell whether the text, or part of it,
   arrived.
 - `failed reason=<reason>`: nothing was typed. `<reason>` is `focus_changed`,

@@ -14,6 +14,24 @@ All notable changes to WayExpand are documented here.
   - Copr builds go through `.copr/Makefile`
   - the bare `X.Y.Z` release tag is canonical
   - the minimum Rust (1.92) is separate from the pinned toolchain (1.96.0)
+- In the Quick Picker, the arrow keys skip snippets that cannot be used here,
+  and the first selection is the first usable match. Those snippets stay
+  listed with their reason, or are hidden with *Show snippets that can't be
+  used here*.
+- The README leads with the prebuilt `.deb`, `.rpm` and archives published
+  with 1.3.6, with install commands that check their checksums. The package
+  availability text, generated from `packaging/release-status.json`, is
+  re-audited against Launchpad: the Ubuntu 24.04 and 22.04 PPA packages are
+  a stale 0.2.0, not missing. "One click to turn on" became "Guided setup",
+  which says what the guide may still ask for.
+- `wayexpand new --validate` accepts every output path the configuration
+  accepts, such as `./site.yml`, and stages the file that will actually be
+  written: the `-o` destination when given, otherwise `output_file`, taken
+  literally rather than rendered as a template. `-o` alone is enough.
+  Configuration and validation share one path rule (`relative_output_path`).
+- The picker and the control protocol describe a reported `delivered` insert
+  as what it is: the output backend acknowledged the text. That is not proof
+  the application's document changed.
 - Copr builds can no longer publish different code under one RPM version.
   A checkout at the release tag builds `X.Y.Z-1`. A later commit builds
   `X.Y.Z-1.N.gitSHA`, which upgrades the release, sorts before the next one,
