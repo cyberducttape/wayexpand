@@ -480,7 +480,7 @@ impl PickerApp {
             error,
         };
         match receiver.try_recv() {
-            Ok(InsertOutcome::Delivered | InsertOutcome::Cancelled) => {
+            Ok(InsertOutcome::OutputAcknowledged | InsertOutcome::Cancelled) => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close)
             }
             Ok(InsertOutcome::Failed(message)) => {
@@ -990,8 +990,9 @@ impl InsertHandoff {
 /// What the insert worker reports back to the picker.
 #[derive(Debug, PartialEq, Eq)]
 enum InsertOutcome {
-    /// The daemon confirmed the text reached the window.
-    Delivered,
+    /// The daemon's output backend acknowledged the text. The application's
+    /// resulting document is not observed; only the user can confirm it.
+    OutputAcknowledged,
     /// The user cancelled before anything was sent.
     Cancelled,
     /// Nothing, or possibly part, was inserted; the message says which.
@@ -1068,7 +1069,8 @@ const INSERT_TIMING: InsertTiming = InsertTiming {
 
 /// Wait for focus to return to the window the picker was opened from, send
 /// the insert unless the user cancelled first, and wait for the daemon to
-/// confirm delivery.
+/// report its outcome (an output acknowledgement at best; the application's
+/// document is not observed).
 fn wait_for_focus_and_insert(
     daemon: &mut dyn PickerDaemon,
     target_focus: &FocusTarget,
@@ -1129,7 +1131,7 @@ fn wait_for_delivery(
             ));
         };
         match delivery_verdict(state) {
-            Some(Ok(())) => return InsertOutcome::Delivered,
+            Some(Ok(())) => return InsertOutcome::OutputAcknowledged,
             Some(Err(message)) => return InsertOutcome::Failed(message),
             None => {}
         }
@@ -1869,7 +1871,7 @@ mod tests {
             let handoff = InsertHandoff::new();
             let outcome =
                 wait_for_focus_and_insert(&mut daemon, &target(1), ";sig", &handoff, TIMING);
-            assert_eq!(outcome, InsertOutcome::Delivered);
+            assert_eq!(outcome, InsertOutcome::OutputAcknowledged);
             assert_eq!(*inserts.lock().unwrap(), [";sig"]);
             assert!(!handoff.cancel(), "the insert was already sent");
         }

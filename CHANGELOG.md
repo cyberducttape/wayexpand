@@ -10,11 +10,25 @@ All notable changes to WayExpand are documented here.
   re-audited against Launchpad: the Ubuntu 24.04 and 22.04 PPA packages are
   a stale 0.2.0, not missing. "One click to turn on" became "Guided setup",
   which says what the guide may still ask for.
+- `wayexpand new --validate` accepts every output path the configuration
+  accepts, such as `./site.yml`, and stages the file that will actually be
+  written: the `-o` destination when given, otherwise `output_file`, taken
+  literally rather than rendered as a template. `-o` alone is enough.
+  Configuration and validation share one path rule (`relative_output_path`).
+- The picker and the control protocol describe a reported `delivered` insert
+  as what it is: the output backend acknowledged the text. That is not proof
+  the application's document changed.
 - Copr builds can no longer publish different code under one RPM version.
   A checkout at the release tag builds `X.Y.Z-1`. A later commit builds
   `X.Y.Z-1.N.gitSHA`, which upgrades the release, sorts before the next one,
   grows along `main` and names its commit. A checkout without the release
   tag is refused.
+
+- A verification also expires when the typing route restarts: a new IBus
+  engine instance, or the daemon reconnecting its input or output. A
+  restarted service with the same route name has not been tested. A
+  confirmation that could not be saved shows **Working (this session
+  only)**, and the tooltip explains it is asked again after a restart.
 
 ## [1.3.6] - 2026-11-15
 

@@ -154,6 +154,15 @@ impl Strings {
             (Staleness::BuildChanged { was }, Language::Indonesian) => {
                 format!("WayExpand diperbarui dari {was}")
             }
+            (Staleness::RouteRestarted, Language::English) => {
+                "the input engine or service restarted".into()
+            }
+            (Staleness::RouteRestarted, Language::German) => {
+                "die Eingabe-Engine oder der Dienst wurde neu gestartet".into()
+            }
+            (Staleness::RouteRestarted, Language::Indonesian) => {
+                "mesin masukan atau layanan dimulai ulang".into()
+            }
             (Staleness::Incomplete, Language::English) => {
                 "the saved test does not say what it covered".into()
             }
@@ -163,6 +172,16 @@ impl Strings {
             (Staleness::Incomplete, Language::Indonesian) => {
                 "uji tersimpan tidak menyebut apa yang dicakupnya".into()
             }
+        }
+    }
+}
+
+impl Strings {
+    pub fn verification_not_saved(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Your confirmation could not be saved, so it counts for this session only; WayExpand asks again after a restart.",
+            Language::German => "Ihre Bestätigung konnte nicht gespeichert werden und gilt daher nur für diese Sitzung; WayExpand fragt nach einem Neustart erneut.",
+            Language::Indonesian => "Konfirmasi Anda tidak dapat disimpan, jadi hanya berlaku untuk sesi ini; WayExpand akan bertanya lagi setelah dimulai ulang.",
         }
     }
 }

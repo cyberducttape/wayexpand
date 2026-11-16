@@ -167,7 +167,9 @@ impl InsertFailure {
 pub enum InsertDelivery {
     /// Accepted and not yet resolved.
     Pending,
-    /// The output backend acknowledged the text.
+    /// The output backend acknowledged the text. That is not proof of the
+    /// application's resulting document, which no route observes; the wire
+    /// name `delivered` is kept for protocol compatibility.
     Delivered,
     /// The backend could not tell whether the text, or part of it, arrived.
     Uncertain,
