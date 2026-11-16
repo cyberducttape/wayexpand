@@ -10,6 +10,12 @@ All notable changes to WayExpand are documented here.
   grows along `main` and names its commit. A checkout without the release
   tag is refused.
 
+- A verification also expires when the typing route restarts: a new IBus
+  engine instance, or the daemon reconnecting its input or output. A
+  restarted service with the same route name has not been tested. A
+  confirmation that could not be saved shows **Working (this session
+  only)**, and the tooltip explains it is asked again after a restart.
+
 ## [1.3.6] - 2026-11-15
 
 - **Working** in the header now means a user-confirmed insertion in a real
