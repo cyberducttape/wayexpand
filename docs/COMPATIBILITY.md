@@ -977,6 +977,37 @@ command exits 0 whether or not the text expands.
 
 ---
 
+### `wayexpand why [--json]`
+
+Answers "why didn't my last trigger expand?" from content-free state only: the
+daemon's `matching_unavailable_reason`, `input_events_total`,
+`matches_found_total`, `suppressed_expansions_total` and
+`recent_expansion_outcomes`, and the IBus engine's per-field telemetry. Typed
+text, triggers and replacements are never read or printed.
+
+Only outcomes from the last two minutes count as "the last attempt"; an older
+one means the trigger never reached that route. Window-dependent matching
+reasons (`application_scope_denied`, `application_scope_unknown`) are ignored,
+because the focused window while the command runs is the terminal.
+
+`--json` prints `{"daemon": …, "ibus": …}`; either is `null` when that route
+is not running. `daemon` holds `source`, `backend`, `verdict`
+(`matching_off`, `no_typing_seen`, `nothing_matched`, `last_stopped`,
+`last_expanded`), `matching_block` (`capture_disconnected`,
+`keyboard_layout_unavailable`, `output_unavailable`, `policy_route`, `paused`,
+`configuration_unhealthy`, `replacement_not_allowed`, `other`, or `null`),
+`last_outcome`, `terminal_apps_only`, the counters, and `recent` (newest
+first: `at_unix`, `outcome`, and the daemon's fixed `completion` label).
+`outcome` is one of `expanded`, `expanded_cursor_misplaced`, `not_applied`,
+`unknown`, `partial`, `blocked_by_policy`, `interrupted_by_typing`,
+`snippet_action_failed` or `other`. `ibus` holds the newest typed field's
+`verdict` (an IBus field label such as `no-surrounding-text`), `keys` and
+`expansions`, all `null` before any typing. The control-only service (stdin
+source) counts as no daemon route. Exit code 0 when either route is running,
+4 when neither is. **Stability:** 🧪 **Experimental**.
+
+---
+
 ### `wayexpand insert [--verified] <trigger>` and the `insert` control command
 
 `wayexpand insert <trigger>` asks the running daemon to type the snippet with
