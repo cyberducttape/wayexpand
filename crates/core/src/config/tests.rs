@@ -1345,3 +1345,26 @@ fn terminal_paste_parses_and_decides_which_text_to_paste() {
         "text the keystroke route would refuse is pasted instead"
     );
 }
+
+#[test]
+fn relative_output_paths_are_literal_normalized_and_contained() {
+    use std::path::PathBuf;
+    assert_eq!(
+        crate::relative_output_path("./site.yml").unwrap(),
+        PathBuf::from("site.yml")
+    );
+    assert_eq!(
+        crate::relative_output_path("roles/./web/tasks.yml").unwrap(),
+        PathBuf::from("roles/web/tasks.yml")
+    );
+    assert_eq!(
+        crate::relative_output_path("{{date}}.txt").unwrap(),
+        PathBuf::from("{{date}}.txt")
+    );
+    for unsafe_path in ["/etc/passwd", "../out.yml", "a/../../b", "", "dir/"] {
+        assert!(
+            crate::relative_output_path(unsafe_path).is_err(),
+            "{unsafe_path:?}"
+        );
+    }
+}
