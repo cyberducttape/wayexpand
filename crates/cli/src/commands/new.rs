@@ -272,7 +272,7 @@ pub(crate) fn new_command(args: impl Iterator<Item = String>) -> Result<()> {
                 short_name(&snippet.trigger)
             ))
         })?;
-        let relative_path = rendered_output_path(snippet, &context)?;
+        let relative_path = validation_path(destination.as_deref(), snippet)?;
         let workspace = ValidationWorkspace::new()?;
         let staged_path = workspace.write_file(&relative_path, rendered.as_bytes())?;
         validator.validate(workspace.path(), &ValidationTarget::File(staged_path))?;
@@ -630,24 +630,32 @@ fn validate_role_name(value: &str) -> Result<&str> {
     Ok(value)
 }
 
-fn rendered_output_path(snippet: &ExpansionConfig, context: &TemplateContext) -> Result<PathBuf> {
-    use std::path::Component;
-
-    let configured = snippet
-        .output_file
-        .as_deref()
-        .context("--validate requires a file template with an output_file")?;
-    let (rendered, _) = render_template_with_cursor(configured, context)
-        .map_err(|error| config_error(format!("{} output path: {error}", snippet.trigger)))?;
-    let path = PathBuf::from(rendered);
-    if path.as_os_str().is_empty()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        usage_bail!("--validate requires a safe relative output path");
+/// The file `--validate` stages: the effective destination (`-o PATH` when
+/// given, otherwise the snippet's `output_file`), taken literally. A safe
+/// relative path keeps its directories (a validator may care that it is
+/// `.github/workflows/ci.yml`); a destination outside the current directory,
+/// such as an absolute `-o`, is staged under its file name, since only the
+/// staged copy is validated.
+fn validation_path(destination: Option<&str>, snippet: &ExpansionConfig) -> Result<PathBuf> {
+    let name = destination
+        .or(snippet.output_file.as_deref())
+        .ok_or_else(|| {
+            usage_error(
+                "--validate needs a file name: give the template an output_file, or use -o PATH",
+            )
+        })?;
+    if let Ok(path) = wayexpand_core::relative_output_path(name) {
+        return Ok(path);
     }
-    Ok(path)
+    let file_name = Path::new(name)
+        .file_name()
+        .filter(|file_name| !file_name.is_empty())
+        .ok_or_else(|| {
+            usage_error(format!(
+                "--validate cannot stage {name}: it does not name a file"
+            ))
+        })?;
+    Ok(PathBuf::from(file_name))
 }
 
 struct ValidationWorkspace(PathBuf);
@@ -2169,6 +2177,50 @@ replacement = "#!/bin/sh\necho reviewed"
         );
         assert_eq!(display_path("Dockerfile"), "Dockerfile");
         assert_eq!(display_path("broken{{field:x"), "broken{{field:x");
+    }
+
+    #[test]
+    fn validate_stages_the_effective_destination_literally() {
+        let with_output = |output_file: &str| {
+            config(&format!(
+                "[[expansion]]\ntrigger = ';;t'\noutput_file = '{output_file}'\n\
+                 delivery = 'generate_only'\nreplacement = 'x'\n"
+            ))
+            .expansion
+            .remove(0)
+        };
+        // The configuration rule accepts ./site.yml; --validate must too.
+        assert_eq!(
+            validation_path(None, &with_output("./site.yml")).unwrap(),
+            PathBuf::from("site.yml")
+        );
+        assert_eq!(
+            validation_path(None, &with_output(".github/workflows/ci.yml")).unwrap(),
+            PathBuf::from(".github/workflows/ci.yml")
+        );
+        // -o wins over output_file.
+        assert_eq!(
+            validation_path(Some("alternative.yml"), &with_output("site.yml")).unwrap(),
+            PathBuf::from("alternative.yml")
+        );
+        // A destination outside the current directory is staged by name.
+        assert_eq!(
+            validation_path(Some("/tmp/out/site.yml"), &with_output("site.yml")).unwrap(),
+            PathBuf::from("site.yml")
+        );
+        // output_file is not a template.
+        assert_eq!(
+            validation_path(None, &with_output("{{date}}.txt")).unwrap(),
+            PathBuf::from("{{date}}.txt")
+        );
+        // -o alone is enough; neither is an error, not a guess.
+        let mut no_file = with_output("site.yml");
+        no_file.output_file = None;
+        assert_eq!(
+            validation_path(Some("site.yml"), &no_file).unwrap(),
+            PathBuf::from("site.yml")
+        );
+        assert!(validation_path(None, &no_file).is_err());
     }
 
     #[test]

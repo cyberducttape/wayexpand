@@ -595,10 +595,19 @@ fn form_action_parameter_name(key: &str) -> Option<&str> {
 /// `output_file` is where `wayexpand new` writes a snippet: a relative path
 /// that stays below the current directory. It is not a template.
 fn validate_output_file(output_file: &str, command_backed: bool) -> Result<(), &'static str> {
-    use std::path::{Component, Path};
     if command_backed {
         return Err("command-backed snippets cannot be written to a file");
     }
+    relative_output_path(output_file).map(|_| ())
+}
+
+/// `path` as a safe relative output path: literal (never a template), below
+/// the current directory, without `..`, and with any `.` components
+/// removed (`./site.yml` becomes `site.yml`). The one rule for configured
+/// `output_file` values and for the files `wayexpand new --validate`
+/// stages.
+pub fn relative_output_path(output_file: &str) -> Result<std::path::PathBuf, &'static str> {
+    use std::path::{Component, Path};
     if output_file.is_empty() || output_file.len() > MAX_OUTPUT_FILE_BYTES {
         return Err("it must be 1 to 255 bytes");
     }
@@ -616,7 +625,10 @@ fn validate_output_file(output_file: &str, command_backed: bool) -> Result<(), &
     {
         return Err("it must be a relative path without '..'");
     }
-    Ok(())
+    Ok(path
+        .components()
+        .filter(|component| matches!(component, Component::Normal(_)))
+        .collect())
 }
 
 /// Bytes in an `output_file` path.
