@@ -33,9 +33,10 @@ local, offline, no account, no telemetry.
   host group and package and writes a ready Ansible playbook. Dockerfiles,
   Compose, Kubernetes, systemd units, nginx, and CI workflows are built in,
   and your own templates work the same way.
-- **One click to turn on.** The first-run screen detects your desktop and
-  enables the safest input path it finds. It never grants raw keyboard access
-  on its own.
+- **Guided setup.** The first-run guide detects your desktop, enables the
+  safest input path it finds, and says what is missing when it cannot: a
+  permission prompt, an IBus registration, or a logout on GNOME. It never
+  grants raw keyboard access on its own.
 - **Safe by design.** Matching pauses in password fields when the desktop
   reports them, app-specific snippets fail closed, command snippets run
   without a shell under timeouts and output limits, and errors never echo your
@@ -51,23 +52,39 @@ local, offline, no account, no telemetry.
 | Linux architectures | x86_64 and aarch64 build paths |
 | Desktop integration | Wayland backends available; compositor support varies |
 | Production certification | No compositor has accepted physical-session certification; see the [certification matrix](docs/CERTIFICATION_MATRIX.md) |
-| Distribution packages | Ubuntu 26.04+ amd64 daily PPA package; release binaries for every distribution from the next GitHub release; no Fedora Copr repository yet; certification pending |
+| Distribution packages | Prebuilt `.tar.gz`, `.deb` and `.rpm` with checksums on every GitHub release since 1.3.6; Ubuntu 26.04+ amd64 daily PPA; no Fedora Copr repository yet; certification pending |
 
 ## Install
 
 | Your system | Install with |
 | --- | --- |
-| Ubuntu 26.04 or newer (amd64) | the [WayExpand PPA](#ubuntu-ppa) |
-| Any other Linux distribution | [a source build](#build-from-source), about five minutes |
-| Any distribution, no compiler | the `.tar.gz`, `.deb` or `.rpm` attached to a [GitHub release](https://github.com/cyberducttape/wayexpand/releases) or *Experimental build* prerelease; release 1.3.3 has none attached |
+| Debian, Ubuntu (amd64) | the `.deb` from the [latest GitHub release](https://github.com/cyberducttape/wayexpand/releases/latest) |
+| Fedora and other RPM distributions (x86_64) | the `.rpm` from the [latest GitHub release](https://github.com/cyberducttape/wayexpand/releases/latest) |
+| Any distribution, x86_64 or aarch64 | the [release archive](#release-archive) (`.tar.gz`), installed for your user |
+| Ubuntu 26.04 or newer (amd64), daily builds | the [WayExpand PPA](#ubuntu-ppa) |
+| Anything else, or to build it yourself | [a source build](#build-from-source), about five minutes |
 
 <!-- generated-install-status:start -->
-**Package availability (audited 2026-11-11):** experimental daily builds for Ubuntu 26.04 (Resolute) (amd64), Ubuntu 26.10 (Stonking) (amd64). GitHub release 1.3.3 has no uploaded binary assets. No PPA packages are published for Ubuntu 24.04 (Noble), Ubuntu 22.04 (Jammy). Fedora Copr published: False. Package availability is separate from desktop certification.
+**Package availability (audited 2026-11-16):** GitHub release 1.3.6 has prebuilt binaries with checksums (`.tar.gz`, `.deb`, `.rpm`). PPA packages for Ubuntu 26.04 (Resolute) (1.3.5, stale), Ubuntu 26.10 (Stonking) (1.3.5, stale), Ubuntu 24.04 (Noble) (0.2.0, stale), Ubuntu 22.04 (Jammy) (0.2.0, stale) lag behind; prefer the GitHub release there. Fedora Copr: not published yet. Package availability is separate from desktop certification.
 <!-- generated-install-status:end -->
 
 None of these channels is compositor-certified yet; see the
 [packaging status](docs/PACKAGING.md) and the
 [certification matrix](docs/CERTIFICATION_MATRIX.md).
+
+### Release packages
+
+Download the package and its `.sha256` from the
+[latest release](https://github.com/cyberducttape/wayexpand/releases/latest),
+then:
+
+```sh
+sha256sum --check wayexpand_*_amd64.deb.sha256 && sudo apt install ./wayexpand_*_amd64.deb   # Debian, Ubuntu
+sha256sum --check wayexpand-*.x86_64.rpm.sha256 && sudo dnf install ./wayexpand-*.x86_64.rpm  # Fedora
+```
+
+Then launch **WayExpand** from the application menu; its guide finishes the
+setup for your desktop.
 
 ### Ubuntu PPA
 

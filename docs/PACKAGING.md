@@ -14,14 +14,14 @@ packagers and source-build users need a compatible toolchain.
 ## Quick Reference
 
 <!-- generated-install-status:start -->
-**Publication status from the shared manifest (audited 2026-11-11):** GitHub 1.3.3 binary assets published: False. Launchpad PPA: experimental daily builds for ['amd64'].
+**Publication status from the shared manifest (audited 2026-11-16):** GitHub 1.3.6 binary assets published: True. Launchpad PPA: experimental daily builds for ['amd64'].
 
 | Distribution | PPA package status |
 |---|---|
-| Ubuntu 26.04 (Resolute) | 1.3.3 — current |
-| Ubuntu 26.10 (Stonking) | 1.3.3 — current |
-| Ubuntu 24.04 (Noble) | not published — unavailable |
-| Ubuntu 22.04 (Jammy) | not published — unavailable |
+| Ubuntu 26.04 (Resolute) | 1.3.5 — stale |
+| Ubuntu 26.10 (Stonking) | 1.3.5 — stale |
+| Ubuntu 24.04 (Noble) | 0.2.0 — stale |
+| Ubuntu 22.04 (Jammy) | 0.2.0 — stale |
 
 Fedora Copr published: False; Arch AUR submitted: False. Package CI targets: Ubuntu 24.04, Ubuntu 26.04, Fedora 45. Physical desktop certification: False. Previous-package upgrade CI passed: False.
 <!-- generated-install-status:end -->
