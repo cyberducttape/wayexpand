@@ -1,6 +1,6 @@
 # Action Broker Architecture
 
-**Version:** 1.3.5
+**Version:** 1.3.6
 **Status:** Named-action execution with optional per-action Landlock filesystem and direct-IP-socket restrictions; local AF_UNIX proxying remains possible
 **Next:** Device policy, broader per-action syscall profiles, and operational verification
 
