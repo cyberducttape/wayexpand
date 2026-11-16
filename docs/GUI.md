@@ -317,6 +317,9 @@ blocks, and show whether the output backend acknowledged insertion or where it
 refused/stopped. An acknowledgement does not prove that the target application
 displayed the text; unmatched typing and typed or inserted content are never
 recorded. Use the editor's Matcher preview to explain a test input.
+Above those traces, *Why didn't my trigger expand?* gives the plain answer
+for the keyboard service, from its last two minutes, with what to do: the
+same reasoning as `wayexpand why`.
 
 If the active route is restricted to configured terminal applications, the
 Diagnostics window calls that out explicitly: browser, editor, and other

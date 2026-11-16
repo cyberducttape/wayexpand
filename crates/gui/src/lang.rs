@@ -120,4 +120,5 @@ mod recovery;
 mod sidebar;
 mod status_messages;
 mod toolbar;
+mod why;
 pub use toolbar::HeaderState;

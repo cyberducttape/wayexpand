@@ -105,6 +105,13 @@ uses its live state (focused application, sensitive field, composition, pause,
 output backend); otherwise, or with \-\-offline or \-\-app, it is computed
 from the configuration and organization policy. Replacement text is never shown.
 .TP
+.B why [--json]
+Say why the last trigger did not expand. Reads the running service's and the
+IBus engine's content-free history: whether matching is on, whether typing
+arrives, and what happened to expansions in the last two minutes. No typed
+text, trigger or replacement is recorded or shown. Exits 4 when no typing
+route is running.
+.TP
 .B certify [--json]
 Produce a machine-readable local certification report. Protocol availability
 is not treated as end-to-end certification; untested scenarios remain visible.

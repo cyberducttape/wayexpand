@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- New `wayexpand why` says why the last trigger did not expand: matching is
+  off (and why), no typing arrives, nothing matched, or what stopped the last
+  expansion, with what to do. It combines the service's and the IBus engine's
+  content-free history and never shows typed text. Diagnostics in the GUI
+  opens with the same answer. `wayexpand help` shows it among its examples.
 - Documentation matches the current behaviour:
   - the Quick Picker types directly only on a route that is both atomic and
     able to identify the exact window, which no standard route combines
