@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The main window shows what the Quick Picker will do before you open it: a
+  second header chip reads *Quick Picker: types*, *copies* or *off*, with the
+  reason in its tooltip. It uses the picker's own rule (atomic replacement
+  and an exact window identity, plus organization policy). The main chip's
+  tooltip and screen-reader label now say it describes typed triggers.
 - Documentation matches the current behaviour:
   - the Quick Picker types directly only on a route that is both atomic and
     able to identify the exact window, which no standard route combines
