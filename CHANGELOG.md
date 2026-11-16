@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand new --validate` accepts every output path the configuration
+  accepts, such as `./site.yml`, and stages the file that will actually be
+  written: the `-o` destination when given, otherwise `output_file`, taken
+  literally rather than rendered as a template. `-o` alone is enough.
+  Configuration and validation share one path rule (`relative_output_path`).
+- The picker and the control protocol describe a reported `delivered` insert
+  as what it is: the output backend acknowledged the text. That is not proof
+  the application's document changed.
 - Copr builds can no longer publish different code under one RPM version.
   A checkout at the release tag builds `X.Y.Z-1`. A later commit builds
   `X.Y.Z-1.N.gitSHA`, which upgrades the release, sorts before the next one,

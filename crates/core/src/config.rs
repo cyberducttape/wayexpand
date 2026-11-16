@@ -1451,6 +1451,7 @@ use storage::{
     resolve_config_target, root_owned_target_requires_admin, save_atomic_serialized_relative,
     validate_parent_directories, validate_root_managed_parent_chain, ConfigWriteLock,
 };
+pub use validation::relative_output_path;
 
 #[cfg(test)]
 mod tests;

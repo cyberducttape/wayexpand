@@ -51,6 +51,7 @@ pub use backend::{
     WindowTrackerError, WindowUpdateReceiver, WindowUpdateSendError, WindowUpdateSender,
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
+pub use config::relative_output_path;
 pub use config::{
     is_reserved_process_app_id, validate_command_config, AppFilter, ClipboardMode, CommandConfig,
     CommandEnvironment, CompatibilityMode, Config, ConfigError, ConfigRevision, ExpansionConfig,
