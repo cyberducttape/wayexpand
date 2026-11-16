@@ -556,6 +556,8 @@ impl GuiApp {
                 self.strings.replacement_explanation(assurance)
             ));
         }
+        let picker = self.picker_readiness();
+        details.push(self.strings.picker_readiness_detail(picker));
         details.push(self.strings.header_status_details_hint().to_owned());
         // The last confirmed test is history, shown apart from the live
         // state: when it no longer covers this session, say why.
@@ -639,10 +641,38 @@ impl GuiApp {
         {
             open_diagnostics = true;
         }
+        // Typed triggers and the Quick Picker are ready in different
+        // situations (most routes expand triggers but leave the picker
+        // copying), so each has its own chip. A library with no snippets
+        // has nothing to pick yet.
+        if !compact && !self.config.expansion.is_empty() {
+            let color = match picker {
+                crate::picker::PickerReadiness::TypesDirectly => palette.success,
+                crate::picker::PickerReadiness::Copies(_) => palette.muted,
+                crate::picker::PickerReadiness::Unavailable(_) => palette.warning,
+            };
+            let label = self.strings.picker_readiness_chip(picker);
+            let detail = self.strings.picker_readiness_detail(picker);
+            let response = theme::status_chip(ui, label, color);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &detail));
+            if response.on_hover_text(&detail).clicked() {
+                open_diagnostics = true;
+            }
+        }
         let state_label = self.strings.header_state(state);
         let chip = theme::status_chip(ui, state_label, state_color);
-        // Screen readers get the same details sighted users see on hover.
-        let accessible = format!("{state_label}. {}", details.join(". "));
+        // Screen readers get the same details sighted users see on hover,
+        // after naming what this chip is about.
+        let accessible = format!(
+            "{}: {state_label}. {}",
+            self.strings.typed_triggers_label(),
+            details.join(". ")
+        );
+        details.insert(
+            0,
+            format!("{}: {state_label}", self.strings.typed_triggers_label()),
+        );
         chip.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &accessible));
         if chip.on_hover_text(details.join("\n")).clicked() {
             open_diagnostics = true;
@@ -722,6 +752,17 @@ impl GuiApp {
         } else {
             (S::NeedsVerification, palette.accent)
         }
+    }
+
+    /// What the Quick Picker would do if opened now, by the same rule the
+    /// picker applies on launch.
+    pub(crate) fn picker_readiness(&self) -> crate::picker::PickerReadiness {
+        let status = (self.daemon_reachable == Some(true)).then_some(self.daemon_status.as_str());
+        let policy = crate::picker::PickerPolicy::merge(
+            &self.config.organization,
+            self.administrator_policy.as_ref(),
+        );
+        crate::picker::picker_readiness(status, policy)
     }
 
     /// The typing route as a setup record names it: "ibus" for the IBus

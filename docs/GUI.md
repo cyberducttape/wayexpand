@@ -209,6 +209,13 @@ integration are running. Enter copies the snippet, and the window stays open so
 the clipboard remains available; press Esc when done. An enforced organization
 policy requiring a verified insertion target blocks this path.
 
+The main window shows which of the two applies before you open the picker: a
+second header chip reads `Quick Picker: types`, `Quick Picker: copies` or
+`Quick Picker: off` (policy forbids copying and typing is not possible), and
+its tooltip gives the reason (no running service, a typing route that cannot
+replace text in one step, or no exact window identity). It applies the same
+rule as the picker itself, using the service status and organization policy.
+
 **Snippets the picker cannot use** stay listed, greyed and after every usable
 match, with the reason in place of the preview: a command-backed snippet
 (type its trigger), a snippet with input fields (type its trigger or use the
@@ -244,7 +251,9 @@ guided setup, restart an older service, review replacement consent, check
 again, or open the Quick Picker when the desktop or the app cannot have text
 replaced. *Details* opens Diagnostics.
 
-The toolbar's status chip uses the same model:
+The toolbar's main status chip uses the same model. It describes typed
+triggers; the Quick Picker has its own chip beside it (see above), because
+most routes expand triggers while the picker can only copy.
 
 | State | Meaning |
 |---|---|
@@ -263,8 +272,8 @@ desktop session and date, and stops counting after a new login, an update, a
 route change or a restart of the input engine or service; the chip's tooltip
 then shows when it was last confirmed and what changed. The tooltip, and the
 accessible label for screen readers, lead with the current problem and its
-action, then list the facts behind the state. Separate chips appear only for
-partial or uncertain output and for a service that must restart after an
+action, then list the facts behind the state. Other chips appear only for the Quick Picker,
+partial or uncertain output, and a service that must restart after an
 update. The ☰ menu holds the remaining actions; the profile switcher appears in
 the toolbar once profiles exist.
 
