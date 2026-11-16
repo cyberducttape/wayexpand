@@ -213,7 +213,8 @@ policy requiring a verified insertion target blocks this path.
 match, with the reason in place of the preview: a command-backed snippet
 (type its trigger), a snippet with input fields (type its trigger or use the
 editor), and in copy-only mode an app-restricted snippet (a paste cannot check
-its destination) or one that reads the clipboard. They cannot be chosen.
+its destination) or one that reads the clipboard. They cannot be chosen, and
+the arrow keys skip them. *Show snippets that can't be used here* hides them.
 Disabled and generate-only snippets are not listed.
 
 Give the picker a global shortcut with `wayexpand shortcut set` (KDE Plasma and
