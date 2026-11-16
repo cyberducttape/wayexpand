@@ -142,10 +142,82 @@ fn bench_gui_save(c: &mut Criterion) {
     group.finish();
 }
 
+/// A library whose replacements are long: templates, signatures, canned
+/// replies. Index construction lowercases every replacement.
+fn long_replacement_config(count: usize, replacement_bytes: usize) -> Config {
+    let body = "Ordinary reply text. ".repeat(replacement_bytes / 21 + 1);
+    let mut text = String::with_capacity(count * (replacement_bytes + 120));
+    for index in 0..count {
+        text.push_str(&format!(
+            "[[expansion]]\ntrigger = \":snippet{index:05}\"\n\
+             replacement = \"{index} {}\"\ndescription = \"snippet {index}\"\n\n",
+            &body[..replacement_bytes]
+        ));
+    }
+    Config::parse(&text).expect("benchmark configuration should validate")
+}
+
+/// Rebuilding the sidebar's search index: on load and after every save.
+fn bench_search_index_build(c: &mut Criterion) {
+    let mut group = c.benchmark_group("gui_search_index_build");
+    group.sample_size(20);
+    for count in [100, 1_000, 10_000] {
+        let config = library_config(count);
+        group.bench_with_input(
+            BenchmarkId::new("short", count),
+            &config,
+            |bench, config| {
+                bench.iter(|| black_box(library::SearchIndex::new(black_box(config))));
+            },
+        );
+    }
+    // The largest library the 16 MiB configuration limit admits at this
+    // replacement size.
+    for count in [1_000, 10_000] {
+        let config = long_replacement_config(count, 1_000);
+        group.bench_with_input(BenchmarkId::new("1kB", count), &config, |bench, config| {
+            bench.iter(|| black_box(library::SearchIndex::new(black_box(config))));
+        });
+    }
+    group.finish();
+}
+
+/// One keystroke in the sidebar search box.
+fn bench_search_keystroke(c: &mut Criterion) {
+    let mut group = c.benchmark_group("gui_search_keystroke");
+    for count in [100, 1_000, 10_000] {
+        let config = library_config(count);
+        let index = library::SearchIndex::new(&config);
+        let all_fields = library::SearchFields {
+            triggers: true,
+            descriptions: true,
+            tags: true,
+            replacements: true,
+        };
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &config,
+            |bench, config| {
+                bench.iter(|| {
+                    black_box(index.visible_indices(
+                        config,
+                        black_box("ordinary"),
+                        None,
+                        all_fields,
+                    ))
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_editor_feedback,
     bench_gui_typing_preview,
-    bench_gui_save
+    bench_gui_save,
+    bench_search_index_build,
+    bench_search_keystroke
 );
 criterion_main!(benches);
