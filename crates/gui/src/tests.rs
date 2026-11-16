@@ -4197,6 +4197,49 @@ fn every_header_state_is_documented() {
 }
 
 #[test]
+fn diagnostics_answer_why_a_trigger_did_not_expand() {
+    let mut app = header_test_app("why-card");
+    let render = |app: &GuiApp| {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let output = run_gui_test_frame(&ctx, egui::RawInput::default(), |ui| {
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_why_card(ui, &palette);
+        });
+        format!(
+            "{:?}",
+            output
+                .platform_output
+                .accesskit_update
+                .map(|update| update.nodes)
+                .unwrap_or_default()
+        )
+    };
+    app.daemon_reachable = Some(true);
+    app.daemon_status = "running\nsource=evdev\nbackend=libei\n\
+        matching_unavailable_reason=paused\n"
+        .into();
+    let semantics = render(&app);
+    assert!(
+        semantics.contains("Why didn't my trigger expand?"),
+        "{semantics}"
+    );
+    assert!(semantics.contains("WayExpand is paused."), "{semantics}");
+
+    app.daemon_status = "running\nsource=evdev\nbackend=libei\n\
+        matching_unavailable_reason=application_scope_denied\nterminal_apps_only=true\n\
+        input_events_total=0\n"
+        .into();
+    assert!(render(&app).contains("It only handles your terminal apps."));
+
+    // The control-only service captures nothing, so it has no answer.
+    app.daemon_status = "running\nsource=stdin\nbackend=none\n".into();
+    assert!(!render(&app).contains("Why didn't my trigger expand?"));
+    app.daemon_reachable = Some(false);
+    assert!(!render(&app).contains("Why didn't my trigger expand?"));
+}
+
+#[test]
 fn header_shows_the_quick_picker_apart_from_typed_triggers() {
     use crate::picker::{CopyReason, PickerReadiness};
     let mut app = header_test_app("header-picker");
