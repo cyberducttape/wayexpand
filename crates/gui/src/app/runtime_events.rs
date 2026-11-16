@@ -58,7 +58,7 @@ impl GuiApp {
                     self.daemon_capabilities = snapshot.daemon_capabilities;
                     self.daemon_reachable = snapshot.daemon_reachable;
                     self.route_state = snapshot.route_state;
-                    self.ibus_active = runtime::ibus_engine_active();
+                    (self.ibus_active, self.ibus_instance) = runtime::ibus_engine_state();
                     self.ibus_route = Some(snapshot.ibus_route);
                     self.picker_shortcut = snapshot.picker_shortcut;
                     self.diagnostics_checked_at = Some(Instant::now());
@@ -187,7 +187,7 @@ impl GuiApp {
         self.retry_busy_save(now);
         if now >= self.next_status_poll {
             self.next_status_poll = now + Duration::from_secs(2);
-            self.ibus_active = runtime::ibus_engine_active();
+            (self.ibus_active, self.ibus_instance) = runtime::ibus_engine_state();
             if self.pending_control == 0 {
                 if let Some(sender) = self.runtime_sender.as_ref() {
                     if sender

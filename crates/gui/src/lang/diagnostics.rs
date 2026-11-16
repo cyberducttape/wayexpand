@@ -14,7 +14,7 @@ impl Strings {
             (Language::English, S::NeedsVerification, _) => {
                 "WayExpand is connected, but no expansion has been confirmed in a real application yet. Use Test in a real application."
             }
-            (Language::English, S::Working, _) => {
+            (Language::English, S::Working | S::WorkingUnsaved, _) => {
                 "Expansion is working. Password fields are detected where your desktop reports them."
             }
             (Language::English, S::Limited, false) => {
@@ -33,7 +33,7 @@ impl Strings {
             (Language::German, S::NeedsVerification, _) => {
                 "WayExpand ist verbunden, aber noch keine Ersetzung wurde in einer echten Anwendung bestätigt. Nutzen Sie „In einer echten Anwendung testen“."
             }
-            (Language::German, S::Working, _) => {
+            (Language::German, S::Working | S::WorkingUnsaved, _) => {
                 "Die Erweiterung funktioniert. Passwortfelder werden erkannt, wo der Desktop sie meldet."
             }
             (Language::German, S::Limited, false) => {
@@ -54,7 +54,7 @@ impl Strings {
             (Language::Indonesian, S::NeedsVerification, _) => {
                 "WayExpand terhubung, tetapi belum ada ekspansi yang dipastikan di aplikasi nyata. Gunakan Uji di aplikasi nyata."
             }
-            (Language::Indonesian, S::Working, _) => {
+            (Language::Indonesian, S::Working | S::WorkingUnsaved, _) => {
                 "Ekspansi berfungsi. Kolom kata sandi dikenali bila desktop Anda melaporkannya."
             }
             (Language::Indonesian, S::Limited, false) => {

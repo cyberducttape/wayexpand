@@ -4078,12 +4078,25 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
         state(&app),
         (HeaderState::NeedsVerification, palette.accent)
     );
+    app.ibus_instance = Some("ibus:42:100".into());
     app.setup_record = Some(crate::setup_record::SetupRecord::verified(
         "Text editor",
         app.current_route_label(),
+        app.current_route_instance(),
     ));
     if crate::setup_record::current_session().is_some() {
         assert_eq!(state(&app), (HeaderState::Working, palette.success));
+        // A confirmation that could not be saved lasts this session only.
+        app.setup_record_saved = false;
+        assert_eq!(state(&app), (HeaderState::WorkingUnsaved, palette.success));
+        app.setup_record_saved = true;
+        // The engine restarted under the same route name: not verified.
+        app.ibus_instance = Some("ibus:43:200".into());
+        assert_eq!(
+            state(&app),
+            (HeaderState::NeedsVerification, palette.accent)
+        );
+        app.ibus_instance = Some("ibus:42:100".into());
     } else {
         // No Wayland session to identify (CI): fail closed.
         assert_eq!(
