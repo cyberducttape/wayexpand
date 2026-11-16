@@ -4238,3 +4238,40 @@ fn diagnostics_answer_why_a_trigger_did_not_expand() {
     app.daemon_reachable = Some(false);
     assert!(!render(&app).contains("Why didn't my trigger expand?"));
 }
+
+#[test]
+fn header_shows_the_quick_picker_apart_from_typed_triggers() {
+    use crate::picker::{CopyReason, PickerReadiness};
+    let mut app = header_test_app("header-picker");
+    app.administrator_policy = Some(wayexpand_core::OrganizationPolicy::default());
+    app.daemon_reachable = Some(false);
+    assert_eq!(
+        app.picker_readiness(),
+        PickerReadiness::Copies(CopyReason::ServiceOff)
+    );
+    let semantics = header_semantics(&mut app);
+    assert!(
+        semantics.contains("Quick Picker: Enter copies"),
+        "{semantics}"
+    );
+    assert!(semantics.contains("Typed triggers: "), "{semantics}");
+
+    // A stale status from a service that stopped answering proves nothing.
+    app.daemon_status = "running\ninject_atomic_replace=true\nwindow_identity_exact=true\n".into();
+    assert_eq!(
+        app.picker_readiness(),
+        PickerReadiness::Copies(CopyReason::ServiceOff)
+    );
+    app.daemon_reachable = Some(true);
+    assert_eq!(app.picker_readiness(), PickerReadiness::TypesDirectly);
+    let semantics = header_semantics(&mut app);
+    assert!(semantics.contains("Enter types the snippet"), "{semantics}");
+
+    // No readable administrator policy: the picker would not start.
+    app.administrator_policy = None;
+    app.daemon_status = "running\ninject_atomic_replace=false\n".into();
+    assert_eq!(
+        app.picker_readiness(),
+        PickerReadiness::Unavailable(CopyReason::NotAtomic)
+    );
+}
