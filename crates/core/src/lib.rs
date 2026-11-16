@@ -18,6 +18,7 @@ mod config;
 mod daemon_client;
 mod daemon_status;
 mod engine;
+mod expansion_diagnosis;
 mod fleet;
 #[cfg(any(test, feature = "fuzzing"))]
 #[doc(hidden)]
@@ -73,6 +74,9 @@ pub use engine::{
     PendingExpansionDispatch, PendingExpansionResult, ProcessWaitFailure, ProcessWaitOperation,
     RouteLimit, SensitiveText, TransactionOutcome, TransactionPhase, TransactionReport,
     WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
+};
+pub use expansion_diagnosis::{
+    ExpansionDiagnosis, MatchingBlock, OutcomeKind, RecentOutcome, Verdict, RECENT_OUTCOME_SECS,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use insertion_plan::{
