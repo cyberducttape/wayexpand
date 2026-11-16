@@ -145,6 +145,8 @@ jobs:
         run: python3 scripts/test-ci-change-scope.py
       - name: Validate Launchpad synchronization safety
         run: bash scripts/test-launchpad-sync-workflow.sh
+      - name: Check Copr SRPM versioning
+        run: sh scripts/test-copr-srpm-version.sh
 
   supply-chain:
     name: Security Audit

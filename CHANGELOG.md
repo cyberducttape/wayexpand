@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Copr builds can no longer publish different code under one RPM version.
+  A checkout at the release tag builds `X.Y.Z-1`. A later commit builds
+  `X.Y.Z-1.N.gitSHA`, which upgrades the release, sorts before the next one,
+  grows along `main` and names its commit. A checkout without the release
+  tag is refused.
+
 ## [1.3.6] - 2026-11-15
 
 - **Working** in the header now means a user-confirmed insertion in a real
