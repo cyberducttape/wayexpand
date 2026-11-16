@@ -101,6 +101,13 @@ cd wayexpand
 wayexpand-gui
 ```
 
+The minimum supported Rust is 1.92 (`rust-version`, tested in CI). The
+checkout also pins the toolchain it is developed and released with,
+`rust-toolchain.toml` (currently 1.96.0), so under rustup the first build
+downloads that toolchain. To build offline, run
+`rustup toolchain install 1.96.0` while online first, or build with an
+installed 1.92 or newer through `cargo +<version> build`.
+
 ### Release archive
 
 ```sh

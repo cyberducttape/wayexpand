@@ -99,6 +99,12 @@ cd wayexpand
 wayexpand doctor
 ```
 
+Mindestens Rust 1.92 (`rust-version`, in der CI geprüft). Der Checkout legt
+zusätzlich die Entwicklungs- und Release-Toolchain fest (`rust-toolchain.toml`,
+derzeit 1.96.0); mit rustup lädt der erste Build sie herunter. Für Offline-Builds
+vorher online `rustup toolchain install 1.96.0` ausführen oder mit einem
+installierten Rust ab 1.92 über `cargo +<version> build` bauen.
+
 Die Installer sind standardmäßig nicht-destruktiv und aktivieren keinen Dienst,
 solange nicht ausdrücklich `--enable` verwendet wird. Die Installation als
 root wird verweigert.
