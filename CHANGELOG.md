@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The README leads with the prebuilt `.deb`, `.rpm` and archives published
+  with 1.3.6, with install commands that check their checksums. The package
+  availability text, generated from `packaging/release-status.json`, is
+  re-audited against Launchpad: the Ubuntu 24.04 and 22.04 PPA packages are
+  a stale 0.2.0, not missing. "One click to turn on" became "Guided setup",
+  which says what the guide may still ask for.
 - Copr builds can no longer publish different code under one RPM version.
   A checkout at the release tag builds `X.Y.Z-1`. A later commit builds
   `X.Y.Z-1.N.gitSHA`, which upgrades the release, sorts before the next one,
