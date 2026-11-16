@@ -254,13 +254,19 @@ impl GuiApp {
         let (recommended_route, recommended_route_detail) =
             self.strings.onboarding_recommended_route(recommendation);
         let daemon_running = self.daemon_reachable == Some(true);
-        // The IBus route needs no background service; a live engine means
-        // WayExpand is already on.
-        let ibus_only = !daemon_running && self.ibus_active;
+        // The control-only service (stdin source) runs the Quick Picker and
+        // hotkeys and captures nothing; it is a typing route only through
+        // the IBus engine beside it.
+        let control_only = daemon_running
+            && runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin");
+        // The IBus route needs no typing service; a live engine means
+        // WayExpand is already on (the same rule as `next_step`).
+        let ibus_only = self.ibus_active && (!daemon_running || control_only);
         // Until the first status answer arrives, "not running" would be a
         // guess, and offering Turn on could start setup for a running service.
         let checking = self.daemon_reachable.is_none() && !self.ibus_active;
         let route_connected = daemon_running
+            && !control_only
             && !self.paused
             && self.route_state == Some(runtime::RouteState::Connected);
         let daemon_build = daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status));

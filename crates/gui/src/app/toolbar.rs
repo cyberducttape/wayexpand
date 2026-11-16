@@ -682,6 +682,7 @@ impl GuiApp {
                 }
                 P::RouteFailed => (S::Disconnected, palette.danger),
                 P::Unsupported => (S::CopyOnly, palette.muted),
+                P::NoTypingRoute => (S::NeedsSetup, palette.warning),
                 P::FieldCannotReplace => (S::Limited, palette.warning),
                 P::RestartNeeded
                 | P::BuildUnknown

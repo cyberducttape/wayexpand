@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The GUI no longer counts the control-only service (Quick Picker and
+  hotkeys) as a connected typing route when the IBus engine is not active.
+  The first-run guide ticked *Connect your desktop* and then asked for
+  replacement consent; it now says nothing reads typing yet and offers guided
+  setup, and the header shows *Needs setup*.
 - Documentation matches the current behaviour:
   - the Quick Picker types directly only on a route that is both atomic and
     able to identify the exact window, which no standard route combines
