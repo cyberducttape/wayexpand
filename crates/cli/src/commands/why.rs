@@ -714,4 +714,49 @@ mod tests {
         assert_eq!(sentence("no keys were seen"), "No keys were seen.");
         assert_eq!(sentence("done."), "Done.");
     }
+
+    #[test]
+    fn gnome_source_selection_diagnosis_names_the_action_and_manual_fallback() {
+        let report = IbusChainReport {
+            desktop: IbusDesktop::Gnome,
+            checks: vec![
+                wayexpand_backend_ibus::chain::IbusCheck {
+                    id: "gnome-source-registered",
+                    title: "WayExpand registered in GNOME",
+                    state: IbusCheckState::Pass,
+                    problem_id: None,
+                    detail: "GNOME source is registered".into(),
+                    fix: None,
+                },
+                wayexpand_backend_ibus::chain::IbusCheck {
+                    id: "registered",
+                    title: "WayExpand engine is registered in IBus",
+                    state: IbusCheckState::Pass,
+                    problem_id: None,
+                    detail: "IBus registry lists WayExpand".into(),
+                    fix: None,
+                },
+                wayexpand_backend_ibus::chain::IbusCheck {
+                    id: "gnome-source-active",
+                    title: "WayExpand selected in GNOME",
+                    state: IbusCheckState::Warn,
+                    problem_id: Some("WX-GNOME-IM-002"),
+                    detail: "GNOME reports another source".into(),
+                    fix: Some("select WayExpand".into()),
+                },
+            ],
+            activity: None,
+        };
+        let guidance = diagnose_input_method_route(&report).unwrap();
+        assert_eq!(guidance.state, "not_selected");
+        assert!(guidance.answer.contains("has not selected"));
+        assert!(guidance.action.contains("Settings → Keyboard"));
+        assert!(guidance.action.contains("wayexpand ibus watch"));
+        assert!(guidance.action.contains("--copy-only"));
+
+        let value = report_json(None, None, 0, None, None, Some(&guidance));
+        assert_eq!(value["desktop_input_route"]["state"], "not_selected");
+        assert_eq!(value["matcher_preview_proves_application_delivery"], false);
+        assert_eq!(value["application_delivery_verified"], false);
+    }
 }

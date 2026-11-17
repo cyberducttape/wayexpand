@@ -557,6 +557,27 @@ mod tests {
     }
 
     #[test]
+    fn unknown_ibus_consent_never_looks_ready_or_configured() {
+        let unknown_consent = Situation {
+            gnome_ibus: true,
+            ibus_active: true,
+            source_registered: true,
+            source_active: true,
+            diagnostics_fresh: Some(true),
+            replacement_allowed: false,
+            ..Situation::default()
+        };
+        assert_eq!(
+            gnome_ibus_readiness(&unknown_consent),
+            GnomeIbusReadiness::ReplacementNotAllowed
+        );
+        assert_eq!(
+            next_step(&unknown_consent),
+            Some((Problem::ReplacementNotAllowed, Action::ReviewConsent))
+        );
+    }
+
+    #[test]
     fn gnome_source_deselection_has_a_corrective_action() {
         let deselected = Situation {
             gnome_ibus: true,

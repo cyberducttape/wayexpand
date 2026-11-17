@@ -787,6 +787,7 @@ impl GuiApp {
                 P::Unsupported => (S::CopyOnly, palette.muted),
                 P::NoTypingRoute => (S::NeedsSetup, palette.warning),
                 P::FieldCannotReplace => (S::Limited, palette.warning),
+                P::InputStatusPending => (S::Checking, palette.muted),
                 P::RestartNeeded
                 | P::BuildUnknown
                 | P::InputSourceNotSetUp
