@@ -254,6 +254,10 @@ impl GuiApp {
             });
             ui.add_space(8.0);
         }
+        // Put the direct answer before the detailed route and protocol
+        // inventory so users do not have to interpret diagnostics first.
+        self.render_why_card(ui, palette);
+        ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(self.strings.runtime_dashboard())
@@ -651,7 +655,6 @@ impl GuiApp {
             });
         }
 
-        self.render_why_card(ui, palette);
         ui.collapsing(self.strings.recent_expansion_outcomes(), |ui| {
             let traces = capabilities
                 .map(|caps| caps.recent_expansion_outcomes.as_slice())
