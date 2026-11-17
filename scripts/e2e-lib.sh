@@ -146,6 +146,11 @@ daemon_ready() {
     route_ready "$status"
 }
 
+terminal_paste_active() {
+    status=$(daemon_status) || return 1
+    printf '%s\n' "$status" | grep -Fxq 'terminal_paste=multiline'
+}
+
 write_config() {
     umask 077
     {
@@ -325,7 +330,12 @@ EOF
     # not; Konsole is the only window, so its focus is best effort here.
     activate org.kde.konsole || :
     start_daemon || return 2
-    sleep 1
+    if ! wait_until 50 terminal_paste_active; then
+        status=$(daemon_status 2>/dev/null || true)
+        printf '%s\n' "$status" >"$case_dir/status-before-input.txt"
+        printf 'WayExpand did not confirm Konsole paste mode before input'
+        return 2
+    fi
     "$bin/wx-e2e-type" text ";ml" >>"$case_dir/type.log" 2>&1 || return 2
     sleep 0.3
     daemon_sees ";ml"
@@ -337,9 +347,16 @@ second line ünïcode"
     sleep 0.5
     tail -c +7 "$out" >"$case_dir/got.txt"
     printf '%s' "$expected" >"$case_dir/expected.txt"
+    status=$(daemon_status 2>/dev/null || true)
+    printf '%s\n' "$status" >"$case_dir/status-after-input.txt"
     if ! cmp -s "$case_dir/expected.txt" "$case_dir/got.txt"; then
-        printf 'pasted bytes differ: expected=%s got=%s' \
-            "$(wc -c <"$case_dir/expected.txt")" "$(wc -c <"$case_dir/got.txt")"
+        paste_mode=$(printf '%s\n' "$status" | sed -n 's/^terminal_paste=//p')
+        pasted=$(printf '%s\n' "$status" | sed -n 's/^terminal_paste_total=//p')
+        fallbacks=$(printf '%s\n' "$status" | sed -n 's/^terminal_paste_fallbacks_total=//p')
+        unread=$(printf '%s\n' "$status" | sed -n 's/^terminal_paste_unread_total=//p')
+        printf 'pasted bytes differ: expected=%s got=%s (paste_mode=%s pasted=%s fallbacks=%s unread=%s)' \
+            "$(wc -c <"$case_dir/expected.txt")" "$(wc -c <"$case_dir/got.txt")" \
+            "${paste_mode:-unknown}" "${pasted:-unknown}" "${fallbacks:-unknown}" "${unread:-unknown}"
         return 1
     fi
     wait_until 30 session_clipboard_is "keep-me" || {
