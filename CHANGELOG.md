@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Quick Picker now supports validated form templates with editable fields and
+  an exact rendered preview before copying. Organization policy, app scope,
+  clipboard/secret variables, and field validators are enforced on the copy
+  path. Command-backed entries open a read-only review screen and never execute
+  from picker search or selection; generated-file templates are copied rather
+  than sent as keyboard input.
 - The GUI opens in an **Everyday** workspace centered on creating, finding,
   editing, enabling and testing text snippets. A visible workspace switcher
   exposes **Advanced** options for app rules, forms, variables, profiles and

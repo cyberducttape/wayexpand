@@ -1271,25 +1271,7 @@ impl Strings {
     ) -> Option<&'static str> {
         use crate::picker::Availability as A;
         Some(match (availability, self.lang) {
-            (A::Available | A::Hidden, _) => return None,
-            (A::RunsCommand, Language::English) => {
-                "Runs a command, so it works only when you type its trigger."
-            }
-            (A::RunsCommand, Language::German) => {
-                "Führt einen Befehl aus und funktioniert daher nur, wenn Sie den Auslöser tippen."
-            }
-            (A::RunsCommand, Language::Indonesian) => {
-                "Menjalankan perintah, jadi hanya berfungsi saat Anda mengetik pemicunya."
-            }
-            (A::NeedsInput, Language::English) => {
-                "Needs input the picker cannot ask for yet. Type its trigger, or use it from the editor."
-            }
-            (A::NeedsInput, Language::German) => {
-                "Braucht Eingaben, die der Schnellwähler noch nicht abfragen kann. Tippen Sie den Auslöser oder nutzen Sie den Editor."
-            }
-            (A::NeedsInput, Language::Indonesian) => {
-                "Memerlukan masukan yang belum bisa ditanyakan picker. Ketik pemicunya, atau gunakan dari editor."
-            }
+            (A::Available | A::Hidden | A::NeedsInput | A::RunsCommand, _) => return None,
             (A::AppRestricted, Language::English) => {
                 "Limited to specific apps. Copying cannot check where it is pasted, so type its trigger in that app."
             }
@@ -1308,6 +1290,145 @@ impl Strings {
             (A::ReadsClipboard, Language::Indonesian) => {
                 "Membaca papan klip, jadi tidak disalin untuk ditempel. Ketik pemicunya saja."
             }
+            (A::InvalidTemplate, Language::English) => {
+                "This template is invalid and cannot be previewed safely."
+            }
+            (A::InvalidTemplate, Language::German) => {
+                "Diese Vorlage ist ungültig und kann nicht sicher angezeigt werden."
+            }
+            (A::InvalidTemplate, Language::Indonesian) => {
+                "Templat ini tidak valid dan tidak dapat dipratinjau dengan aman."
+            }
+            (A::PolicyRestricted, Language::English) => {
+                "Organization policy does not allow copying this form output."
+            }
+            (A::PolicyRestricted, Language::German) => {
+                "Die Organisationsrichtlinie erlaubt das Kopieren dieser Formulare nicht."
+            }
+            (A::PolicyRestricted, Language::Indonesian) => {
+                "Kebijakan organisasi tidak mengizinkan penyalinan hasil formulir ini."
+            }
         })
+    }
+
+    pub(crate) fn picker_entry_status(
+        &self,
+        availability: crate::picker::Availability,
+        fields: usize,
+        direct_insert: bool,
+        file_template: bool,
+    ) -> String {
+        use crate::picker::Availability as A;
+        match (availability, self.lang) {
+            (A::Available, Language::English) if file_template => {
+                "File template · Ready to copy".into()
+            }
+            (A::Available, Language::German) if file_template => {
+                "Dateivorlage · Bereit zum Kopieren".into()
+            }
+            (A::Available, Language::Indonesian) if file_template => {
+                "Templat berkas · Siap disalin".into()
+            }
+            (A::Available, Language::English) if direct_insert => {
+                "Text snippet · Ready to insert".into()
+            }
+            (A::Available, Language::German) if direct_insert => {
+                "Textbaustein · Bereit zum Einfügen".into()
+            }
+            (A::Available, Language::Indonesian) if direct_insert => {
+                "Cuplikan teks · Siap disisipkan".into()
+            }
+            (A::Available, Language::English) => "Text snippet · Ready to copy".into(),
+            (A::Available, Language::German) => "Textbaustein · Bereit zum Kopieren".into(),
+            (A::Available, Language::Indonesian) => "Cuplikan teks · Siap disalin".into(),
+            (A::NeedsInput, Language::English) if file_template => {
+                format!("File template · Requires {fields} fields")
+            }
+            (A::NeedsInput, Language::German) if file_template => {
+                format!("Dateivorlage · {fields} Felder erforderlich")
+            }
+            (A::NeedsInput, Language::Indonesian) if file_template => {
+                format!("Templat berkas · Perlu {fields} isian")
+            }
+            (A::NeedsInput, Language::English) => format!("Template · Requires {fields} fields"),
+            (A::NeedsInput, Language::German) => format!("Vorlage · {fields} Felder erforderlich"),
+            (A::NeedsInput, Language::Indonesian) => format!("Templat · Perlu {fields} isian"),
+            (A::RunsCommand, Language::English) => "Automation · Review required".into(),
+            (A::RunsCommand, Language::German) => "Automatisierung · Prüfung erforderlich".into(),
+            (A::RunsCommand, Language::Indonesian) => "Otomatisasi · Perlu ditinjau".into(),
+            (A::AppRestricted, Language::English) => "Limited to specific apps".into(),
+            (A::AppRestricted, Language::German) => "Auf bestimmte Apps beschränkt".into(),
+            (A::AppRestricted, Language::Indonesian) => "Terbatas untuk aplikasi tertentu".into(),
+            (A::ReadsClipboard, Language::English) => "Reads clipboard or secret data".into(),
+            (A::ReadsClipboard, Language::German) => "Liest Zwischenablage oder Geheimnisse".into(),
+            (A::ReadsClipboard, Language::Indonesian) => {
+                "Membaca papan klip atau data rahasia".into()
+            }
+            (A::PolicyRestricted, Language::English) => "Blocked by organization policy".into(),
+            (A::PolicyRestricted, Language::German) => {
+                "Durch Organisationsrichtlinie blockiert".into()
+            }
+            (A::PolicyRestricted, Language::Indonesian) => "Diblokir kebijakan organisasi".into(),
+            (A::InvalidTemplate, Language::English) => "Template unavailable".into(),
+            (A::InvalidTemplate, Language::German) => "Vorlage nicht verfügbar".into(),
+            (A::InvalidTemplate, Language::Indonesian) => "Templat tidak tersedia".into(),
+            (A::Hidden, Language::English) => "Unavailable".into(),
+            (A::Hidden, Language::German) => "Nicht verfügbar".into(),
+            (A::Hidden, Language::Indonesian) => "Tidak tersedia".into(),
+        }
+    }
+
+    pub(crate) fn picker_form_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Fill in template",
+            Language::German => "Vorlage ausfüllen",
+            Language::Indonesian => "Isi templat",
+        }
+    }
+
+    pub(crate) fn picker_form_preview(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Preview · this is what will be copied",
+            Language::German => "Vorschau · dieser Text wird kopiert",
+            Language::Indonesian => "Pratinjau · teks ini akan disalin",
+        }
+    }
+
+    pub(crate) fn picker_review_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Automation review",
+            Language::German => "Automatisierungsprüfung",
+            Language::Indonesian => "Tinjau otomatisasi",
+        }
+    }
+
+    pub(crate) fn picker_review_no_execution(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "This is a review only. The Quick Picker will not execute this action."
+            }
+            Language::German => {
+                "Dies ist nur eine Prüfung. Der Schnellwähler führt diese Aktion nicht aus."
+            }
+            Language::Indonesian => {
+                "Ini hanya peninjauan. Quick Picker tidak akan menjalankan tindakan ini."
+            }
+        }
+    }
+
+    pub(crate) fn picker_copy_output(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Copy output",
+            Language::German => "Ausgabe kopieren",
+            Language::Indonesian => "Salin hasil",
+        }
+    }
+
+    pub(crate) fn picker_back_to_results(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Back to results",
+            Language::German => "Zurück zu den Ergebnissen",
+            Language::Indonesian => "Kembali ke hasil",
+        }
     }
 }
