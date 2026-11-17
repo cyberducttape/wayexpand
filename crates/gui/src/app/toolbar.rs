@@ -782,7 +782,9 @@ impl GuiApp {
                 P::RouteFailed => (S::Disconnected, palette.danger),
                 P::Unsupported => (S::CopyOnly, palette.muted),
                 P::NoTypingRoute => (S::NeedsSetup, palette.warning),
-                P::FieldCannotReplace | P::SensitiveField => (S::Limited, palette.warning),
+                P::FieldCannotReplace | P::SensitiveField | P::TerminalRouteNoInput => {
+                    (S::Limited, palette.warning)
+                }
                 P::ApplicationDeliveryUnverified
                 | P::OutputUnverified
                 | P::PartialOutput

@@ -172,6 +172,15 @@ impl Strings {
             (Problem::ApplicationDeliveryUnverified, Id) => {
                 "Rute terhubung, tetapi WayExpand belum memverifikasi teks pengganti muncul di aplikasi."
             }
+            (Problem::TerminalRouteNoInput, En) => {
+                "No typing has reached WayExpand since this service started. It only handles your terminal apps."
+            }
+            (Problem::TerminalRouteNoInput, De) => {
+                "Seit dem Start dieses Dienstes hat WayExpand keine Eingabe erhalten. Diese Route funktioniert nur in Ihren Terminal-Apps."
+            }
+            (Problem::TerminalRouteNoInput, Id) => {
+                "Sejak layanan ini dimulai, WayExpand belum menerima ketikan. Rute ini hanya berfungsi di aplikasi terminal Anda."
+            }
             (Problem::OutputUnverified, En) => {
                 "WayExpand recognized the trigger and sent replacement output, but the application’s text was not verified."
             }
@@ -341,6 +350,15 @@ impl Strings {
             }
             (Problem::ApplicationDeliveryUnverified, Id) => {
                 "Jalankan tes mengetik sungguhan di aplikasi yang bermasalah. Pratinjau matcher hanya memeriksa kecocokan aturan, bukan apakah aplikasi menerima teks pengganti."
+            }
+            (Problem::TerminalRouteNoInput, En) => {
+                "Type the test trigger in a configured terminal and confirm the replacement. Browser and editor fields are outside this route; use Quick Picker to copy and paste there."
+            }
+            (Problem::TerminalRouteNoInput, De) => {
+                "Geben Sie den Test-Trigger in einem konfigurierten Terminal ein und prüfen Sie den Ersatz. Browser- und Editorfelder liegen außerhalb dieser Route; nutzen Sie dort den Schnellwähler zum Kopieren und Einfügen."
+            }
+            (Problem::TerminalRouteNoInput, Id) => {
+                "Ketik pemicu uji di terminal yang dikonfigurasi dan pastikan teks pengganti muncul. Kolom browser dan editor tidak tercakup; gunakan Quick Picker untuk menyalin dan menempel di sana."
             }
             (Problem::OutputUnverified, En) => {
                 "Inspect the target field and cursor now. Output was submitted but may not have appeared; do not retry it automatically. Then run one harmless real-application test."

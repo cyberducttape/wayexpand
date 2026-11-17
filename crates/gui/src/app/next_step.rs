@@ -37,6 +37,7 @@ pub(crate) enum Problem {
     FieldCannotReplace,
     SensitiveField,
     ApplicationDeliveryUnverified,
+    TerminalRouteNoInput,
     OutputUnverified,
     PartialOutput,
     OutputNotApplied,
@@ -126,6 +127,11 @@ pub(crate) struct Situation {
     /// desktop session, build, and route. Matcher previews and backend
     /// acknowledgements do not satisfy this condition.
     pub application_delivery_verified: bool,
+    /// The raw-capture route is limited to configured terminal applications.
+    pub terminal_apps_only: bool,
+    /// Events accepted by this daemon since startup, when the status schema
+    /// exposes the counter. Zero is useful evidence only for that interval.
+    pub input_events_total: Option<u64>,
     /// The latest content-free output outcome from the current daemon. This
     /// is deliberately separate from route-level application verification.
     pub recent_outcome: Option<wayexpand_core::OutcomeKind>,
@@ -332,10 +338,15 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
         _ => {}
     }
     match s.route_state {
+        None if terminal_route_has_no_input(s) => {
+            Some((Problem::TerminalRouteNoInput, Action::TestInApplication))
+        }
         None => Some((Problem::RouteStatusUnknown, Action::CheckAgain)),
         Some(R::Connected | R::Degraded) => {
             if !s.replacement_allowed {
                 Some((Problem::ReplacementNotAllowed, Action::ReviewConsent))
+            } else if terminal_route_has_no_input(s) {
+                Some((Problem::TerminalRouteNoInput, Action::TestInApplication))
             } else {
                 field()
             }
@@ -346,6 +357,10 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
         Some(R::Failed | R::Stopped) => Some((Problem::RouteFailed, Action::RunSetup)),
         Some(R::Unsupported) => Some((Problem::Unsupported, Action::QuickPicker)),
     }
+}
+
+fn terminal_route_has_no_input(s: &Situation) -> bool {
+    s.terminal_apps_only && s.input_events_total == Some(0) && !s.application_delivery_verified
 }
 
 impl GuiApp {
@@ -482,6 +497,23 @@ impl GuiApp {
             field_cannot_replace: ibus_route && field_cannot_replace,
             field_sensitive: ibus_route && field_sensitive,
             application_delivery_verified: self.expansion_observed(),
+            terminal_apps_only: {
+                let terminal_only =
+                    runtime::status_field(&self.daemon_status, "terminal_apps_only").as_deref()
+                        == Some("true");
+                let raw_fallback_enabled =
+                    runtime::status_field(&self.daemon_status, "raw_capture_fallback_enabled")
+                        .as_deref()
+                        == Some("true");
+                let raw_capture_app_count =
+                    runtime::status_field(&self.daemon_status, "raw_capture_app_count")
+                        .and_then(|value| value.parse::<usize>().ok());
+                terminal_only
+                    && !(raw_fallback_enabled
+                        && raw_capture_app_count.is_none_or(|count| count > 0))
+            },
+            input_events_total: runtime::status_field(&self.daemon_status, "input_events_total")
+                .and_then(|value| value.parse::<u64>().ok()),
             recent_outcome: self.recent_output_outcome(),
         }
     }
