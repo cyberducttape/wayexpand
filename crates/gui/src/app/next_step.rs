@@ -70,6 +70,10 @@ pub(crate) struct Situation {
     pub daemon_reachable: Option<bool>,
     /// The WayExpand IBus engine is live.
     pub ibus_active: bool,
+    /// IBus' global engine selection, separate from a live engine process.
+    /// A running WayExpand process can remain alive after another engine is
+    /// selected, so process activity alone is not route readiness.
+    pub ibus_selection: IbusCheckState,
     /// The daemon only serves the control socket (the IBus route captures).
     pub control_only: bool,
     /// GNOME, judged by its IBus input source.
@@ -149,6 +153,15 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
         if s.daemon_reachable == Some(true) && s.paused {
             return Some((Problem::Paused, Action::Resume));
         }
+        match s.ibus_selection {
+            IbusCheckState::Fail | IbusCheckState::Warn => {
+                return Some((Problem::InputSourceNotSelected, Action::RunSetup));
+            }
+            IbusCheckState::Unknown | IbusCheckState::Skip => {
+                return Some((Problem::InputStatusPending, Action::CheckAgain));
+            }
+            IbusCheckState::Pass => {}
+        }
         if !s.replacement_allowed {
             return Some((Problem::ReplacementNotAllowed, Action::ReviewConsent));
         }
@@ -200,17 +213,15 @@ impl GuiApp {
             .map_or(IbusCheckState::Unknown, |check| check.state)
     }
 
-    /// Whether the live IBus engine is the selected typing route. On GNOME,
-    /// a live engine process is insufficient; Shell must report the IBus
-    /// source as active. Other IBus desktops use the engine's live status.
+    /// Whether current, process-correlated diagnostics show IBus selected as
+    /// the typing route. A live engine process alone is insufficient.
     pub(crate) fn ibus_route_active(&self) -> bool {
-        if wayexpand_backend_selection::Compositor::detect()
-            == wayexpand_backend_selection::Compositor::Gnome
-        {
-            self.ibus_active && self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass
-        } else {
-            self.ibus_active
-        }
+        self.ibus_active
+            && self.ibus_diagnostics_fresh() == Some(true)
+            && self.ibus_check_state("selected") == IbusCheckState::Pass
+            && (wayexpand_backend_selection::Compositor::detect()
+                != wayexpand_backend_selection::Compositor::Gnome
+                || self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass)
     }
 
     /// The service unit to restart for the running route, when known.
@@ -260,12 +271,17 @@ impl GuiApp {
         Situation {
             daemon_reachable: self.daemon_reachable,
             ibus_active,
+            ibus_selection: if self.ibus_diagnostics_fresh() == Some(true) {
+                self.ibus_check_state("selected")
+            } else {
+                IbusCheckState::Unknown
+            },
             control_only,
             gnome_ibus,
             source_registered: self.ibus_check_state("gnome-source-registered")
                 == IbusCheckState::Pass,
             source_active: self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass,
-            diagnostics_fresh: self.gnome_ibus_diagnostics_fresh(),
+            diagnostics_fresh: self.ibus_diagnostics_fresh(),
             paused: self.paused,
             route_state: self.route_state,
             build: daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status)),
@@ -275,7 +291,10 @@ impl GuiApp {
         }
     }
 
-    fn gnome_ibus_diagnostics_fresh(&self) -> Option<bool> {
+    /// Selection evidence is valid only for the current engine process and
+    /// for one minute. A previous IBus context can remain alive after a
+    /// desktop switches to a different input method.
+    fn ibus_diagnostics_fresh(&self) -> Option<bool> {
         let checked_at = self.diagnostics_checked_at?;
         let recent = checked_at.elapsed() < Duration::from_secs(60);
         if !recent {
@@ -397,7 +416,10 @@ impl GuiApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{gnome_ibus_readiness, next_step, Action, GnomeIbusReadiness, Problem, Situation};
+    use super::{
+        gnome_ibus_readiness, next_step, Action, GnomeIbusReadiness, IbusCheckState, Problem,
+        Situation,
+    };
     use crate::runtime::{DaemonBuildState, RouteState};
 
     fn running(route: RouteState) -> Situation {
@@ -455,6 +477,7 @@ mod tests {
                 Situation {
                     control_only: true,
                     ibus_active: true,
+                    ibus_selection: IbusCheckState::Pass,
                     replacement_allowed: true,
                     ..running(RouteState::Connected)
                 },
@@ -652,6 +675,7 @@ mod tests {
     fn an_app_that_cannot_replace_text_points_to_the_quick_picker() {
         let kde_ibus = Situation {
             ibus_active: true,
+            ibus_selection: IbusCheckState::Pass,
             daemon_reachable: Some(false),
             replacement_allowed: true,
             field_cannot_replace: true,
@@ -669,5 +693,35 @@ mod tests {
             }),
             Some((Problem::RouteFailed, Action::RunSetup))
         );
+    }
+
+    #[test]
+    fn kde_live_engine_is_not_ready_when_another_ibus_engine_is_selected() {
+        let deselected = Situation {
+            ibus_active: true,
+            ibus_selection: IbusCheckState::Fail,
+            daemon_reachable: Some(false),
+            replacement_allowed: true,
+            ..Situation::default()
+        };
+        assert_eq!(
+            next_step(&deselected),
+            Some((Problem::InputSourceNotSelected, Action::RunSetup))
+        );
+
+        let unknown = Situation {
+            ibus_selection: IbusCheckState::Unknown,
+            ..deselected
+        };
+        assert_eq!(
+            next_step(&unknown),
+            Some((Problem::InputStatusPending, Action::CheckAgain))
+        );
+
+        let selected = Situation {
+            ibus_selection: IbusCheckState::Pass,
+            ..deselected
+        };
+        assert_eq!(next_step(&selected), None);
     }
 }

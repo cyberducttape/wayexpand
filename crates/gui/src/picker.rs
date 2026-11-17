@@ -193,12 +193,11 @@ fn serve_picker_requests(
                 if stream
                     .read(&mut request)
                     .is_ok_and(|size| &request[..size] == b"focus")
+                    && sender.try_send(()).is_ok()
                 {
-                    if sender.try_send(()).is_ok() {
-                        if let Ok(context) = repaint_context.lock() {
-                            if let Some(context) = context.as_ref() {
-                                context.request_repaint();
-                            }
+                    if let Ok(context) = repaint_context.lock() {
+                        if let Some(context) = context.as_ref() {
+                            context.request_repaint();
                         }
                     }
                 }
@@ -1282,10 +1281,8 @@ impl eframe::App for PickerApp {
                 input.key_pressed(egui::Key::Escape),
             )
         });
-        if escape {
-            if self.workflow.take().is_none() {
-                self.cancel(&ctx);
-            }
+        if escape && self.workflow.take().is_none() {
+            self.cancel(&ctx);
         }
         // Closing the window follows the same policy as Escape: an insert
         // not yet sent is cancelled and the window closes; one the daemon

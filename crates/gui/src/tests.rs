@@ -2587,7 +2587,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     );
     // The local matcher check above is reported, but never as a desktop
     // verification.
-    assert!(guide_semantics.contains("The trigger works inside WayExpand."));
+    assert!(guide_semantics.contains("Matcher preview matched."));
     assert!(!guide_semantics.contains("Working in tested application"));
     assert!(!guide_semantics.contains("Verified working: yes"));
     // The copy-and-paste fallback is always offered until a real test passes.
@@ -3616,6 +3616,34 @@ fn header_test_app(name: &str) -> GuiApp {
     app
 }
 
+fn live_ibus_reading(
+    pid: u32,
+    started_unix: u64,
+) -> wayexpand_backend_ibus::telemetry::IbusStatusReading {
+    use wayexpand_backend_ibus::telemetry::{IbusStatus, IbusStatusReading, IbusTotals};
+    IbusStatusReading {
+        status: IbusStatus {
+            schema: wayexpand_backend_ibus::telemetry::IBUS_STATUS_SCHEMA,
+            pid,
+            version: "test".into(),
+            started_unix,
+            updated_unix: started_unix,
+            config_generation_diagnostics_available: false,
+            config_generation: 0,
+            config_generation_requested: 0,
+            config_generation_mismatches: 0,
+            config_reload_failures: 0,
+            config_reload_error: None,
+            engines: 1,
+            totals: IbusTotals::default(),
+            recent_fields: Vec::new(),
+            recent_outputs: Vec::new(),
+            last_transaction_id: None,
+        },
+        live: true,
+    }
+}
+
 fn header_semantics(app: &mut GuiApp) -> String {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
@@ -3695,9 +3723,27 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
 
 #[test]
 fn header_reports_a_live_ibus_engine_instead_of_a_stopped_service() {
+    use wayexpand_backend_ibus::chain::{IbusChainReport, IbusCheck, IbusCheckState, IbusDesktop};
+
     let mut app = header_test_app("header-ibus");
+    let pid = 42_420;
+    let started = 1_700_000_000;
     app.daemon_reachable = Some(false);
     app.ibus_active = true;
+    app.ibus_instance = Some(format!("ibus:{pid}:{started}"));
+    app.diagnostics_checked_at = Some(Instant::now());
+    app.ibus_route = Some(IbusChainReport {
+        desktop: IbusDesktop::KdeWayland,
+        checks: vec![IbusCheck {
+            id: "selected",
+            title: "Engine selected",
+            state: IbusCheckState::Pass,
+            problem_id: None,
+            detail: "WayExpand is selected".into(),
+            fix: None,
+        }],
+        activity: Some(live_ibus_reading(pid, started)),
+    });
     let semantics = header_semantics(&mut app);
     assert!(semantics.contains("IBus: Active"), "{semantics}");
     assert!(!semantics.contains("Turn on WayExpand"), "{semantics}");
@@ -3717,6 +3763,50 @@ fn header_reports_a_live_ibus_engine_instead_of_a_stopped_service() {
     );
     // Without a running service the typing-route chip has nothing to say.
     assert!(!semantics.contains("Typing integration"), "{semantics}");
+}
+
+#[test]
+fn kde_header_requires_selected_engine_and_fresh_process_evidence() {
+    use wayexpand_backend_ibus::chain::{IbusChainReport, IbusCheck, IbusCheckState, IbusDesktop};
+
+    let mut app = header_test_app("kde-ibus-selection");
+    let pid = 42_422;
+    let started = 1_700_000_002;
+    app.daemon_reachable = Some(false);
+    app.ibus_active = true;
+    app.ibus_instance = Some(format!("ibus:{pid}:{started}"));
+    app.diagnostics_checked_at = Some(Instant::now());
+    app.ibus_route = Some(IbusChainReport {
+        desktop: IbusDesktop::KdeWayland,
+        checks: vec![IbusCheck {
+            id: "selected",
+            title: "Engine selected",
+            state: IbusCheckState::Warn,
+            problem_id: Some("WX-IBUS-002"),
+            detail: "another engine is selected".into(),
+            fix: Some("select WayExpand".into()),
+        }],
+        activity: Some(live_ibus_reading(pid, started)),
+    });
+    assert!(!app.ibus_route_active());
+    assert_eq!(
+        app.current_next_step(),
+        Some((
+            crate::app::Problem::InputSourceNotSelected,
+            crate::app::NextAction::RunSetup
+        ))
+    );
+
+    app.ibus_route.as_mut().unwrap().checks[0].state = IbusCheckState::Pass;
+    app.diagnostics_checked_at = Some(Instant::now() - std::time::Duration::from_secs(61));
+    assert!(!app.ibus_route_active());
+    assert_eq!(
+        app.current_next_step(),
+        Some((
+            crate::app::Problem::InputStatusPending,
+            crate::app::NextAction::CheckAgain
+        ))
+    );
 }
 
 #[test]
@@ -3740,6 +3830,8 @@ fn gnome_route_readiness_follows_the_engine_not_the_companion_daemon() {
         checks: vec![
             check("gnome-source-registered"),
             check("gnome-source-active"),
+            check("selected"),
+            check("consent"),
         ],
         activity: Some(IbusStatusReading {
             status: IbusStatus {
@@ -4318,7 +4410,7 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
     let mut app = header_test_app("header-readiness");
     let palette = Palette::for_pack(app.colorpack, app.dark_mode);
     let state = |app: &GuiApp| {
-        let ibus_only = app.daemon_reachable != Some(true) && app.ibus_active;
+        let ibus_only = app.daemon_reachable != Some(true) && app.ibus_route_active();
         app.header_state(ibus_only, false, &palette)
     };
 
@@ -4326,22 +4418,57 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
     // that cannot expand, not "Active".
     app.daemon_reachable = Some(false);
     app.ibus_active = true;
+    let pid = 42_421;
+    let started = 1_700_000_001;
+    app.ibus_instance = Some(format!("ibus:{pid}:{started}"));
+    app.diagnostics_checked_at = Some(Instant::now());
     app.ibus_route = Some(IbusChainReport {
         desktop: IbusDesktop::KdeWayland,
-        checks: vec![IbusCheck {
-            id: "consent",
-            title: "",
-            state: IbusCheckState::Fail,
-            problem_id: None,
-            detail: String::new(),
-            fix: None,
-        }],
-        activity: None,
+        checks: vec![
+            IbusCheck {
+                id: "selected",
+                title: "Engine selected",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "WayExpand is selected".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "consent",
+                title: "",
+                state: IbusCheckState::Fail,
+                problem_id: None,
+                detail: String::new(),
+                fix: None,
+            },
+        ],
+        activity: Some(live_ibus_reading(pid, started)),
     });
     assert_eq!(state(&app), (HeaderState::NeedsSetup, palette.warning));
 
     // Nothing wrong, but no expansion confirmed yet: running, not green.
-    app.ibus_route = None;
+    app.ibus_route = Some(IbusChainReport {
+        desktop: IbusDesktop::KdeWayland,
+        checks: vec![
+            IbusCheck {
+                id: "selected",
+                title: "Engine selected",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "WayExpand is selected".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "consent",
+                title: "Replacement allowed",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "allowed for test".into(),
+                fix: None,
+            },
+        ],
+        activity: Some(live_ibus_reading(pid, started)),
+    });
     assert_eq!(
         state(&app),
         (HeaderState::NeedsVerification, palette.accent)
@@ -4355,6 +4482,8 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
         (HeaderState::NeedsVerification, palette.accent)
     );
     app.ibus_instance = Some("ibus:42:100".into());
+    app.diagnostics_checked_at = Some(Instant::now());
+    app.ibus_route.as_mut().unwrap().activity = Some(live_ibus_reading(42, 100));
     app.setup_record = Some(crate::setup_record::SetupRecord::verified(
         "Text editor",
         app.current_route_label(),
@@ -4368,10 +4497,7 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
         app.setup_record_saved = true;
         // The engine restarted under the same route name: not verified.
         app.ibus_instance = Some("ibus:43:200".into());
-        assert_eq!(
-            state(&app),
-            (HeaderState::NeedsVerification, palette.accent)
-        );
+        assert_eq!(state(&app), (HeaderState::Checking, palette.muted));
         app.ibus_instance = Some("ibus:42:100".into());
     } else {
         // No Wayland session to identify (CI): fail closed.
