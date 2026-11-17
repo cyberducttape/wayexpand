@@ -290,7 +290,7 @@ fn report_json(
     daemon_status_compatible: Option<bool>,
     input_method: Option<&InputMethodGuidance>,
 ) -> serde_json::Value {
-    let daemon = daemon.map(|route| {
+    let daemon_json = daemon.map(|route| {
         let diagnosis = &route.diagnosis;
         let verdict = diagnosis.verdict(now);
         serde_json::json!({
@@ -323,10 +323,63 @@ fn report_json(
             "expansions": field.map(|field| field.expansions),
         })
     });
+    // Keep one plain-language conclusion alongside the detailed telemetry.
+    // Consumers should not have to reconstruct an action from empty fields or
+    // infer that a matcher result proves delivery into an application.
+    let diagnosis = if daemon_status_compatible == Some(false) {
+        serde_json::json!({
+            "state": "daemon_schema_incompatible",
+            "answer": "WayExpand cannot trust the running daemon's diagnostics because its status schema is incompatible with this CLI.",
+            "next_action": "Run `wayexpand upgrade --check` and resolve the reported version mismatch before using this diagnosis.",
+            "application_delivery_verified": false,
+        })
+    } else if let Some(guidance) = input_method {
+        serde_json::json!({
+            "state": guidance.state,
+            "answer": guidance.answer,
+            "next_action": guidance.action,
+            "application_delivery_verified": false,
+        })
+    } else if let Some(route) = daemon {
+        let verdict = route.diagnosis.verdict(now);
+        let (answer, next_action) = verdict_text(&route.diagnosis, now);
+        serde_json::json!({
+            "state": verdict.code(),
+            "answer": answer,
+            "next_action": next_action,
+            "application_delivery_verified": false,
+        })
+    } else if let Some(field) = ibus_field {
+        match field {
+            Some(field) => {
+                let verdict = IbusFieldVerdict::of(field);
+                serde_json::json!({
+                    "state": verdict.label(),
+                    "answer": sentence(verdict.explanation()),
+                    "next_action": ibus_field_action(verdict),
+                    "application_delivery_verified": false,
+                })
+            }
+            None => serde_json::json!({
+                "state": "no_input_observed",
+                "answer": "No typing has reached the IBus engine in this login session.",
+                "next_action": "Check that WayExpand is the active input method with `wayexpand ibus status`, then type harmless text while `wayexpand ibus watch --seconds 30` runs.",
+                "application_delivery_verified": false,
+            }),
+        }
+    } else {
+        serde_json::json!({
+            "state": "no_typing_route",
+            "answer": "Text expansion is unavailable because no WayExpand typing route is running.",
+            "next_action": "Run `wayexpand setup`, then `wayexpand doctor`. For immediate manual insertion, open `wayexpand-gui --picker --copy-only` and paste the selected snippet.",
+            "application_delivery_verified": false,
+        })
+    };
     serde_json::json!({
+        "diagnosis": diagnosis,
         "daemon_status_schema": daemon_status_schema,
         "daemon_status_compatible": daemon_status_compatible,
-        "daemon": daemon,
+        "daemon": daemon_json,
         "ibus": ibus,
         "desktop_input_route": input_method.map(|guidance| serde_json::json!({
             "state": guidance.state,
@@ -367,7 +420,8 @@ fn print_report(
         && daemon_status_compatible != Some(false)
     {
         println!("No WayExpand typing route is running, so nothing can expand.");
-        println!("Fix: run `wayexpand setup`, then `wayexpand doctor`.");
+        println!("Next: run `wayexpand setup`, then `wayexpand doctor`.");
+        println!("For manual insertion meanwhile: open `wayexpand-gui --picker --copy-only` and paste the selected snippet.");
         return;
     }
     if let Some(guidance) = input_method {
@@ -666,6 +720,10 @@ mod tests {
             None,
         );
         assert_eq!(value["daemon"]["verdict"], "last_stopped");
+        assert_eq!(value["diagnosis"]["state"], "last_stopped");
+        assert!(value["diagnosis"]["answer"].is_string());
+        assert!(value["diagnosis"]["next_action"].is_string());
+        assert_eq!(value["diagnosis"]["application_delivery_verified"], false);
         assert_eq!(value["daemon"]["last_outcome"], "interrupted_by_typing");
         assert_eq!(
             value["daemon"]["recent"][0]["outcome"],
@@ -675,8 +733,19 @@ mod tests {
         let no_field = report_json(None, Some(&None), 5, None, None, None);
         assert!(no_field["daemon"].is_null());
         assert!(no_field["ibus"]["verdict"].is_null());
+        assert_eq!(no_field["diagnosis"]["state"], "no_input_observed");
+        assert!(no_field["diagnosis"]["next_action"].is_string());
         assert!(no_field["daemon_status_schema"].is_null());
         assert!(no_field["daemon_status_compatible"].is_null());
+
+        let no_route = report_json(None, None, 5, None, None, None);
+        assert_eq!(no_route["diagnosis"]["state"], "no_typing_route");
+        assert!(no_route["diagnosis"]["answer"].is_string());
+        assert!(no_route["diagnosis"]["next_action"].is_string());
+        assert_eq!(
+            no_route["diagnosis"]["application_delivery_verified"],
+            false
+        );
     }
 
     #[test]
@@ -691,6 +760,14 @@ mod tests {
         let stale_report = report_json(None, None, 5, stale.status_schema(), Some(false), None);
         assert_eq!(stale_report["daemon"], serde_json::Value::Null);
         assert_eq!(stale_report["daemon_status_compatible"], false);
+        assert_eq!(
+            stale_report["diagnosis"]["state"],
+            "daemon_schema_incompatible"
+        );
+        assert!(stale_report["diagnosis"]["next_action"]
+            .as_str()
+            .unwrap()
+            .contains("wayexpand upgrade --check"));
 
         let compatible = DaemonStatus::parse(&format!(
             "running\nstatus_schema={CONTROL_STATUS_SCHEMA}\nsource=evdev\nbackend=libei\n\
@@ -755,6 +832,12 @@ mod tests {
         assert!(guidance.action.contains("--copy-only"));
 
         let value = report_json(None, None, 0, None, None, Some(&guidance));
+        assert_eq!(value["diagnosis"]["state"], "not_selected");
+        assert!(value["diagnosis"]["next_action"]
+            .as_str()
+            .unwrap()
+            .contains("Settings → Keyboard"));
+        assert_eq!(value["diagnosis"]["application_delivery_verified"], false);
         assert_eq!(value["desktop_input_route"]["state"], "not_selected");
         assert_eq!(value["matcher_preview_proves_application_delivery"], false);
         assert_eq!(value["application_delivery_verified"], false);
