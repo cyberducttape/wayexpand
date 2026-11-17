@@ -236,8 +236,7 @@ impl GuiApp {
     /// `wayexpand-control.service` is deliberately not a substitute for the
     /// GNOME IBus engine.
     pub(crate) fn gnome_ibus_route_ready(&self) -> bool {
-        super::next_step::gnome_ibus_readiness(&self.situation())
-            == super::next_step::GnomeIbusReadiness::Ready
+        super::next_step::gnome_ibus_route_configured(&self.situation())
     }
 
     pub(crate) fn render_first_run(&mut self, ui: &mut egui::Ui, palette: &Palette) {

@@ -134,6 +134,16 @@ pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
     GnomeIbusReadiness::Ready
 }
 
+/// Capture and engine setup are complete even when the user has not granted
+/// non-atomic replacement consent. Keep that policy gate separate so first
+/// run can say "configured, awaiting consent/test" instead of "setup failed".
+pub(crate) fn gnome_ibus_route_configured(s: &Situation) -> bool {
+    matches!(
+        gnome_ibus_readiness(s),
+        GnomeIbusReadiness::Ready | GnomeIbusReadiness::ReplacementNotAllowed
+    )
+}
+
 /// The most important problem and its action, or `None` only when a real
 /// application insertion has been confirmed for the current route.
 pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
@@ -142,6 +152,18 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     let field = || {
         if s.field_cannot_replace {
             Some((Problem::FieldCannotReplace, Action::QuickPicker))
+        } else if matches!(
+            s.recent_outcome,
+            Some(O::Partial | O::Unknown | O::Expanded | O::ExpandedCursorMisplaced)
+        ) {
+            Some((
+                if s.recent_outcome == Some(O::Partial) {
+                    Problem::PartialOutput
+                } else {
+                    Problem::OutputUnverified
+                },
+                Action::InspectText,
+            ))
         } else if !s.application_delivery_verified {
             Some((
                 Problem::ApplicationDeliveryUnverified,
@@ -151,16 +173,10 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             None
         }
     };
-    // A fresh transaction result answers the user's question more directly
-    // than general readiness. In particular, an old successful setup test
-    // must not hide a newer partial or uncertain write.
-    match s.recent_outcome {
-        Some(O::Partial) => return Some((Problem::PartialOutput, Action::InspectText)),
-        Some(O::Unknown | O::Expanded | O::ExpandedCursorMisplaced) => {
-            return Some((Problem::OutputUnverified, Action::InspectText));
-        }
-        _ => {}
-    }
+    // Route failures take priority over old output history. Once the current
+    // route is ready, a fresh output outcome takes priority over general
+    // route-level verification so a partial write is never hidden by an old
+    // successful setup test.
     if s.gnome_ibus {
         return match gnome_ibus_readiness(s) {
             GnomeIbusReadiness::Ready => field(),

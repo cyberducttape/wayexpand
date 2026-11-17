@@ -8,9 +8,9 @@ texts! {
         "Funktioniert in der getesteten Anwendung",
         "Berfungsi di aplikasi yang diuji";
     outcome_safe_fallback =>
-        "Connected, not tested yet",
-        "Verbunden, noch nicht getestet",
-        "Terhubung, belum diuji";
+        "Configured, insertion not verified",
+        "Konfiguriert, Einfügen nicht verifiziert",
+        "Dikonfigurasi, penyisipan belum diverifikasi";
     outcome_setup_incomplete =>
         "Setup incomplete",
         "Einrichtung unvollständig",
