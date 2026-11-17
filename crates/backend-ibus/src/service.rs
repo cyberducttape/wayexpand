@@ -1560,7 +1560,7 @@ replacement = "signature"
     fn app_filtered_expansion_is_bound_to_each_ibus_context_across_focus_changes() {
         let harness = Harness::start(
             "[settings]\ncompatibility_mode = 'tracked-focus'\n\
-             [[expansion]]\ntrigger = ';ok'\nreplacement = 'editor-only'\n\
+             [[expansion]]\ntrigger = ';ok'\nreplacement = 'editor'\n\
              app_filter = ['app_id_exact:org.gnome.TextEditor']\n",
         );
         let editor = WindowContext {
@@ -1639,7 +1639,7 @@ replacement = "signature"
         assert!(!harness
             .commits(Duration::from_millis(100))
             .iter()
-            .any(|text| text == "editor-only"));
+            .any(|text| text == "editor"));
 
         // The same IBus context may later focus the allowed editor. A fresh
         // FocusIn binds the new tracker identity and permits the expansion.
@@ -1655,9 +1655,9 @@ replacement = "signature"
             harness.deletions.recv_timeout(Duration::from_secs(2)),
             Ok(2)
         );
-        let commits = harness.commits_through("editor-only", Duration::from_secs(2));
+        let commits = harness.commits_through("editor", Duration::from_secs(2));
         assert!(
-            commits.iter().any(|text| text == "editor-only"),
+            commits.iter().any(|text| text == "editor"),
             "the allowed app-filtered result was not committed: {commits:?}"
         );
     }

@@ -36,6 +36,37 @@ fn configure_cli_task_command(command: &mut std::process::Command, config_path: 
     command.env("WAYEXPAND_CONFIG", config_path);
 }
 
+pub(super) fn current_guided_setup_backend(
+    daemon_reachable: Option<bool>,
+    daemon_status: &str,
+    route_plan: Option<&wayexpand_backend_selection::RoutePlan>,
+) -> Option<&'static str> {
+    if daemon_reachable != Some(true) {
+        return None;
+    }
+    let status = wayexpand_core::DaemonStatus::parse(daemon_status);
+    if status.status_schema() != Some(wayexpand_core::CONTROL_STATUS_SCHEMA)
+        || !status.field_is_unique("source")
+    {
+        return None;
+    }
+    let backend = match status.field("source")? {
+        "evdev" => "evdev",
+        "input-method" | "input-method-v2" => "input-method",
+        // The control-only service is not a typing route. IBus readiness and
+        // the GNOME source checks determine that path separately.
+        "stdin" => return None,
+        _ => return None,
+    };
+    let route_is_available = route_plan?.routes.iter().any(|route| {
+        route.contract.setup_backend == backend
+            && route.assessment.policy_allowed
+            && route.standing != wayexpand_backend_selection::RouteStanding::BlockedByPolicy
+            && route.standing != wayexpand_backend_selection::RouteStanding::Unavailable
+    });
+    route_is_available.then_some(backend)
+}
+
 fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), String> {
     let fd = stream.as_raw_fd();
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -259,21 +290,26 @@ fn run_user_systemctl(
 }
 
 impl GuiApp {
-    /// Run the safe recommended setup off the UI thread. The additional flag
-    /// is included only after the user explicitly accepts IBus replacement
-    /// and the possible system-wide IBus manifest registration.
+    /// Run setup off the UI thread. The additional IBus flags are included
+    /// only after the user explicitly accepts replacement and, when needed,
+    /// system-wide manifest registration.
     pub(crate) fn start_setup(&mut self) {
         self.desktop_test_verified = false;
         self.desktop_test_verified_application = None;
-        self.start_setup_with_replacement_consent(false, false);
+        self.start_setup_with_replacement_consent(false, false, None);
     }
 
     fn start_setup_with_replacement_consent(
         &mut self,
         replacement_consent: bool,
         system_integration_consent: bool,
+        backend: Option<&str>,
     ) {
         let mut arguments = vec!["setup".into(), "--yes".into()];
+        if let Some(backend) = backend {
+            arguments.push("--backend".into());
+            arguments.push(backend.into());
+        }
         if replacement_consent {
             arguments.push("--accept-non-atomic-replacement".into());
         }
@@ -288,6 +324,16 @@ impl GuiApp {
     }
 
     pub(crate) fn start_guided_setup(&mut self) {
+        let current_backend = current_guided_setup_backend(
+            self.daemon_reachable,
+            &self.daemon_status,
+            self.route_plan.as_ref(),
+        );
+        if let Some(backend) = current_backend.filter(|backend| *backend != "ibus") {
+            self.guided_setup_waiting_for_route = false;
+            self.start_setup_with_replacement_consent(false, false, Some(backend));
+            return;
+        }
         let ibus_route = self.gnome_setup_resume_pending
             || self
                 .recommended_route
@@ -1000,6 +1046,7 @@ impl GuiApp {
                 ("tools", self.strings.setup_check_tools()),
                 ("component", self.strings.setup_check_component()),
                 ("registered", self.strings.setup_check_registered()),
+                ("manifest-scope", self.strings.setup_check_manifest_scope()),
                 (
                     "gnome-source-registered",
                     self.strings.setup_check_gnome_registered(),
@@ -1097,6 +1144,7 @@ impl GuiApp {
                         replacement_consent,
                         self.setup_system_integration_required
                             && self.setup_system_integration_acknowledged,
+                        Some("ibus"),
                     );
                 }
                 if ui.button(self.strings.cancel()).clicked() {

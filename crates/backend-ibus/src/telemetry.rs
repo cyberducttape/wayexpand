@@ -613,7 +613,7 @@ impl IbusFieldVerdict {
                 "the app's reported text did not end with the trigger (cursor moved, selection, or autocorrect), so the replacement was refused"
             }
             Self::Policy => {
-                "organization policy or `compatibility_mode` refused the replacement; see `wayexpand doctor --security`"
+                "organization policy, compatibility consent, or the hard non-atomic output-length limit refused the replacement; see `wayexpand doctor --security` and use Quick Picker copy/paste for longer text"
             }
             Self::Idle => "no keys were seen in this field",
         }

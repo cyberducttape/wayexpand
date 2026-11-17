@@ -1174,8 +1174,8 @@ mod tests {
             std::fs::write(
                 &path,
                 "[[expansion]]\ntrigger = \":x\"\nreplacement = \"value\"\n\
-                 [[expansion]]\ntrigger = \".ssl\"\nreplacement = \"Apache rewrite configuration\"\n\
-                 [[expansion]]\ntrigger = \".clarity\"\nreplacement = \"ran updates, sent welcome email, setup\"\n",
+                 [[expansion]]\ntrigger = \".ssl\"\nreplacement = \"rewrites\"\n\
+                 [[expansion]]\ntrigger = \".clarity\"\nreplacement = \"complete\"\n",
             )
             .unwrap();
             std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
@@ -1532,9 +1532,9 @@ mod tests {
             *harness.calls.lock().unwrap(),
             [
                 "erase:.ssl",
-                "insert:Apache rewrite configuration",
+                "insert:rewrites",
                 "erase:.clarity",
-                "insert:ran updates, sent welcome email, setup",
+                "insert:complete",
             ],
             "each queued trigger must produce exactly one output transaction"
         );
@@ -1591,7 +1591,7 @@ mod tests {
         harness.run_until_resolved();
         assert_eq!(
             *harness.calls.lock().unwrap(),
-            ["erase:.ssl", "insert:Apache rewrite configuration"]
+            ["erase:.ssl", "insert:rewrites"]
         );
     }
 
@@ -1603,7 +1603,7 @@ mod tests {
             .daemon
             .start_output(
                 OutputOrigin::Typed,
-                vec![OutputJob::Expansion(result(":slow", "replacement"))],
+                vec![OutputJob::Expansion(result(":slow", "replace"))],
                 Vec::new(),
             )
             .unwrap();
@@ -1621,7 +1621,7 @@ mod tests {
         );
         assert_eq!(
             *harness.calls.lock().unwrap(),
-            ["erase::slow", "insert:replacement"],
+            ["erase::slow", "insert:replace"],
             "a discarded captured event must not start another output transaction"
         );
     }
@@ -1681,7 +1681,7 @@ mod tests {
             .daemon
             .start_output(
                 OutputOrigin::Typed,
-                vec![OutputJob::Expansion(result(":x", "replacement"))],
+                vec![OutputJob::Expansion(result(":x", "replace"))],
                 Vec::new(),
             )
             .unwrap();
@@ -1780,7 +1780,7 @@ mod tests {
             .daemon
             .start_output(
                 OutputOrigin::Typed,
-                vec![OutputJob::Expansion(result(":x", "replacement"))],
+                vec![OutputJob::Expansion(result(":x", "replace"))],
                 Vec::new(),
             )
             .unwrap();
@@ -1794,7 +1794,7 @@ mod tests {
         // consumed its acknowledgement. A real key may have arrived before
         // the final synthetic key and only become visible in this turn.
         harness.open_gate();
-        while harness.delivered.lock().unwrap().as_str() != "replacement" {
+        while harness.delivered.lock().unwrap().as_str() != "replace" {
             assert!(
                 Instant::now() < deadline,
                 "backend did not finish insertion"
@@ -1832,17 +1832,9 @@ mod tests {
         harness.run_until_resolved();
         assert_eq!(
             *harness.calls.lock().unwrap(),
-            [
-                "erase::x",
-                "insert:replacement",
-                "erase::next",
-                "insert:second"
-            ]
+            ["erase::x", "insert:replace", "erase::next", "insert:second"]
         );
-        assert_eq!(
-            harness.delivered.lock().unwrap().as_str(),
-            "replacementsecond"
-        );
+        assert_eq!(harness.delivered.lock().unwrap().as_str(), "replacesecond");
     }
 
     #[test]
@@ -1857,7 +1849,7 @@ mod tests {
             .daemon
             .start_output(
                 OutputOrigin::Command,
-                vec![OutputJob::Expansion(result(":x", "replacement"))],
+                vec![OutputJob::Expansion(result(":x", "replace"))],
                 Vec::new(),
             )
             .unwrap();

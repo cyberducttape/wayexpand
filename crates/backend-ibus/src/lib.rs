@@ -819,6 +819,20 @@ impl IbusEngineAdapter {
                         policy_blocked = true;
                         continue;
                     }
+                    let replacement_chars = result.insert.chars().count()
+                        + usize::from(result.reinsert_after.is_some());
+                    if replacement_chars > wayexpand_core::MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS
+                    {
+                        self.note(|telemetry, field| telemetry.refusal(field, IbusRefusal::Policy));
+                        warn!(
+                            replacement_chars,
+                            limit = wayexpand_core::MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS,
+                            "IBus non-atomic replacement refused by the output safety limit"
+                        );
+                        self.engine.restore_deferred_match(&result.matched_text);
+                        policy_blocked = true;
+                        continue;
+                    }
                     if injector_capabilities()
                         .replacement_admission(self.engine.compatibility_mode())
                         == ReplacementAdmission::Refused
@@ -1340,7 +1354,7 @@ compatibility_mode = "tracked-focus"
 
 [[expansion]]
 trigger = ":sig"
-replacement = "signature"
+replacement = "sigtext"
 "#,
         )
         .unwrap();
@@ -1352,7 +1366,7 @@ replacement = "signature"
     #[test]
     fn default_policy_refuses_non_atomic_replacement() {
         let config: Config =
-            toml::from_str("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\n")
+            toml::from_str("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"sigtext\"\n")
                 .unwrap();
         let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
         adapter.focus_in();
@@ -1361,6 +1375,24 @@ replacement = "signature"
         let mut client = Client::default();
         client.type_text(&mut adapter, ":sig");
         assert_eq!(client.text(), ":sig");
+        assert_eq!(adapter.last_expansion_outcome(), None);
+    }
+
+    #[test]
+    fn long_nonatomic_replacement_is_refused_before_deleting_the_trigger() {
+        let config =
+            Config::parse("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"123456789\"\n")
+                .unwrap();
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
+        let mut client = Client::default();
+        let actions = client.type_text(&mut adapter, ":sig");
+
+        assert_eq!(client.text(), ":sig");
+        assert!(!actions
+            .iter()
+            .any(|action| matches!(action, IbusAction::DeleteSurroundingText { .. })));
         assert_eq!(adapter.last_expansion_outcome(), None);
     }
 
@@ -1429,7 +1461,7 @@ undo_chord = "Ctrl+Z"
 
 [[expansion]]
 trigger = ":sig"
-replacement = "signature"
+replacement = "sigtext"
 match_mode = "word-boundary"
 "#,
         )
@@ -1443,7 +1475,7 @@ match_mode = "word-boundary"
         let config: Config = toml::from_str(
             r#"[[expansion]]
 trigger = ":sig"
-replacement = "signature"
+replacement = "sigtext"
 "#,
         )
         .unwrap();
@@ -1701,10 +1733,10 @@ replacement = "signature"
             &actions[actions.len() - 2..],
             &[
                 IbusAction::DeleteSurroundingText { nchars: 3 },
-                IbusAction::CommitText("signature".into())
+                IbusAction::CommitText("sigtext".into())
             ]
         );
-        assert_eq!(client.text(), "xsignature");
+        assert_eq!(client.text(), "xsigtext");
     }
 
     #[test]
@@ -1764,7 +1796,7 @@ replacement = "世界 🌍"
 
             [[expansion]]
             trigger = ":sig"
-            replacement = "signature"
+            replacement = "sigtext"
             "#,
         )
         .unwrap();
@@ -1792,10 +1824,10 @@ replacement = "世界 🌍"
             &actions[actions.len() - 2..],
             &[
                 IbusAction::DeleteSurroundingText { nchars: 4 },
-                IbusAction::CommitText("signature ".into())
+                IbusAction::CommitText("sigtext ".into())
             ]
         );
-        assert_eq!(client.text(), "signature ");
+        assert_eq!(client.text(), "sigtext ");
         assert!(adapter
             .engine()
             .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
@@ -1815,7 +1847,7 @@ replacement = ""
 match_mode = "word-boundary"
 [expansion.command]
 program = "/bin/sh"
-args = ["-c", "printf signature"]
+args = ["-c", "printf sigtext"]
 timeout_ms = 1000
 "#,
         )
@@ -1830,7 +1862,7 @@ timeout_ms = 1000
             .any(|action| matches!(action, IbusAction::DeleteSurroundingText { .. })));
         assert!(!typed_actions.iter().any(|action| matches!(
             action,
-            IbusAction::CommitText(text) if text.contains("signature")
+            IbusAction::CommitText(text) if text.contains("sigtext")
         )));
         assert!(adapter.drain_completed_commands_for_test().is_empty());
     }
@@ -1861,10 +1893,10 @@ timeout_ms = 1000
             result.actions,
             vec![
                 IbusAction::DeleteSurroundingText { nchars: 3 },
-                IbusAction::CommitText("signature".into())
+                IbusAction::CommitText("sigtext".into())
             ]
         );
-        assert_eq!(client.text(), "signature");
+        assert_eq!(client.text(), "sigtext");
     }
 
     #[test]
@@ -1886,7 +1918,7 @@ timeout_ms = 1000
         let result = client.key(&mut adapter, 'g' as u32, 0);
         assert!(result
             .actions
-            .contains(&IbusAction::CommitText("signature".into())));
+            .contains(&IbusAction::CommitText("sigtext".into())));
     }
 
     #[test]
@@ -1931,7 +1963,7 @@ timeout_ms = 1000
                 .actions,
             vec![
                 IbusAction::DeleteSurroundingText { nchars: 4 },
-                IbusAction::CommitText("signature ".into())
+                IbusAction::CommitText("sigtext ".into())
             ]
         );
     }
@@ -1952,7 +1984,7 @@ timeout_ms = 1000
         let completed = first_client.key(&mut first, 'g' as u32, 0);
         assert!(completed
             .actions
-            .contains(&IbusAction::CommitText("signature".into())));
+            .contains(&IbusAction::CommitText("sigtext".into())));
     }
 
     #[test]
@@ -1977,7 +2009,7 @@ timeout_ms = 1000
         });
         let mut client = Client::default();
         client.type_text(&mut adapter, ":sig");
-        assert_eq!(client.text(), "signature");
+        assert_eq!(client.text(), "sigtext");
     }
 
     #[test]
@@ -1998,7 +2030,7 @@ timeout_ms = 1000
         });
         let mut client = Client::default();
         client.type_text(&mut adapter, ":sig");
-        assert_eq!(client.text(), "signature");
+        assert_eq!(client.text(), "sigtext");
     }
 
     #[test]
@@ -2021,7 +2053,7 @@ timeout_ms = 1000
         assert!(adapter.capability_block().is_none());
         let mut client = Client::default();
         client.type_text(&mut adapter, ":sig");
-        assert_eq!(client.text(), "signature");
+        assert_eq!(client.text(), "sigtext");
     }
 
     #[test]
@@ -2055,7 +2087,7 @@ timeout_ms = 1000
 
     fn unfocused_adapter() -> IbusEngineAdapter {
         let config: Config =
-            toml::from_str("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\n")
+            toml::from_str("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"sigtext\"\n")
                 .unwrap();
         IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap())
     }
@@ -2244,8 +2276,7 @@ timeout_ms = 1000
     #[test]
     fn greek_trigger_typed_with_legacy_keysyms_expands() {
         let config: Config =
-            toml::from_str("[[expansion]]\ntrigger = \";αβ\"\nreplacement = \"alpha beta\"\n")
-                .unwrap();
+            toml::from_str("[[expansion]]\ntrigger = \";αβ\"\nreplacement = \"Greek\"\n").unwrap();
         let mut adapter = focused(IbusEngineAdapter::new(
             ExpansionEngine::new(config).unwrap(),
         ));
@@ -2253,7 +2284,7 @@ timeout_ms = 1000
         client.key(&mut adapter, ';' as u32, 0);
         client.key(&mut adapter, 0x07e1, 0); // Greek_alpha
         client.key(&mut adapter, 0x07e2, 0); // Greek_beta
-        assert_eq!(client.text(), "alpha beta");
+        assert_eq!(client.text(), "Greek");
     }
 
     #[test]
@@ -2295,10 +2326,10 @@ timeout_ms = 1000
         let mut adapter = focused(adapter);
         let mut client = Client::default();
         let actions = client.type_text(&mut adapter, ":sig");
-        assert_eq!(client.text(), "signature");
+        assert_eq!(client.text(), "sigtext");
         assert!(actions.iter().any(|action| matches!(
             action,
-            IbusAction::CommitText(text) if text == "signature"
+            IbusAction::CommitText(text) if text == "sigtext"
         )));
     }
 

@@ -2652,7 +2652,7 @@ impl GuiApp {
             // The verdict first, in words; the evidence grid behind it is for
             // troubleshooting and starts collapsed.
             let control_only = compact_status_value(&self.daemon_status, "source") == Some("stdin");
-            let ibus_only = self.daemon_reachable != Some(true) && self.ibus_active;
+            let ibus_only = self.daemon_reachable != Some(true) && self.ibus_route_active();
             let (state, state_color) = self.header_state(ibus_only, control_only, palette);
             let password_fields_detected =
                 capabilities.and_then(|caps| caps.capture_sensitive_focus) == Some(true);

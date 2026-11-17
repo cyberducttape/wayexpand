@@ -25,6 +25,8 @@ pub(crate) enum Problem {
     BuildUnknown,
     InputSourceNotSetUp,
     InputSourceNotSelected,
+    IbusEngineUnavailable,
+    InputStatusStale,
     ReplacementNotAllowed,
     Connecting,
     RouteFailed,
@@ -45,6 +47,21 @@ pub(crate) enum Action {
     QuickPicker,
 }
 
+/// One authoritative interpretation of GNOME IBus evidence. Both the
+/// first-run guide and the next-step adviser use this result so they cannot
+/// disagree about whether the route is ready.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GnomeIbusReadiness {
+    Ready,
+    Paused,
+    DiagnosticsPending,
+    DiagnosticsStale,
+    SourceNotSetUp,
+    SourceNotSelected,
+    EngineUnavailable,
+    ReplacementNotAllowed,
+}
+
 /// The facts `next_step` decides from, gathered from the GUI's last status
 /// and diagnostics.
 #[derive(Clone, Copy, Debug, Default)]
@@ -58,6 +75,9 @@ pub(crate) struct Situation {
     pub gnome_ibus: bool,
     pub source_registered: bool,
     pub source_active: bool,
+    /// None means no diagnostics have arrived yet; false means the report is
+    /// old or belongs to a different IBus engine process.
+    pub diagnostics_fresh: Option<bool>,
     pub paused: bool,
     pub route_state: Option<runtime::RouteState>,
     pub build: Option<runtime::DaemonBuildState>,
@@ -65,6 +85,30 @@ pub(crate) struct Situation {
     pub replacement_allowed: bool,
     /// The last normal field refused replacement (no surrounding text).
     pub field_cannot_replace: bool,
+}
+
+pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
+    if s.paused {
+        return GnomeIbusReadiness::Paused;
+    }
+    match s.diagnostics_fresh {
+        None => return GnomeIbusReadiness::DiagnosticsPending,
+        Some(false) => return GnomeIbusReadiness::DiagnosticsStale,
+        Some(true) => {}
+    }
+    if !s.source_registered {
+        return GnomeIbusReadiness::SourceNotSetUp;
+    }
+    if !s.source_active {
+        return GnomeIbusReadiness::SourceNotSelected;
+    }
+    if !s.ibus_active {
+        return GnomeIbusReadiness::EngineUnavailable;
+    }
+    if !s.replacement_allowed {
+        return GnomeIbusReadiness::ReplacementNotAllowed;
+    }
+    GnomeIbusReadiness::Ready
 }
 
 /// The most important problem and its action, or `None` when expansion
@@ -76,19 +120,26 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             .then_some((Problem::FieldCannotReplace, Action::QuickPicker))
     };
     if s.gnome_ibus {
-        if s.daemon_reachable.is_none() && !s.ibus_active {
-            return None;
-        }
-        if !s.source_registered {
-            return Some((Problem::InputSourceNotSetUp, Action::RunSetup));
-        }
-        if !s.source_active {
-            return Some((Problem::InputSourceNotSelected, Action::SelectInputSource));
-        }
-        if !s.replacement_allowed {
-            return Some((Problem::ReplacementNotAllowed, Action::ReviewConsent));
-        }
-        return field();
+        return match gnome_ibus_readiness(s) {
+            GnomeIbusReadiness::Ready => field(),
+            GnomeIbusReadiness::Paused => Some((Problem::Paused, Action::Resume)),
+            GnomeIbusReadiness::DiagnosticsPending => None,
+            GnomeIbusReadiness::DiagnosticsStale => {
+                Some((Problem::InputStatusStale, Action::CheckAgain))
+            }
+            GnomeIbusReadiness::SourceNotSetUp => {
+                Some((Problem::InputSourceNotSetUp, Action::RunSetup))
+            }
+            GnomeIbusReadiness::SourceNotSelected => {
+                Some((Problem::InputSourceNotSelected, Action::SelectInputSource))
+            }
+            GnomeIbusReadiness::EngineUnavailable => {
+                Some((Problem::IbusEngineUnavailable, Action::RunSetup))
+            }
+            GnomeIbusReadiness::ReplacementNotAllowed => {
+                Some((Problem::ReplacementNotAllowed, Action::ReviewConsent))
+            }
+        };
     }
     // The IBus route without a typing daemon (KDE): the engine is the route.
     if s.ibus_active && (s.daemon_reachable != Some(true) || s.control_only) {
@@ -146,6 +197,19 @@ impl GuiApp {
             .map_or(IbusCheckState::Unknown, |check| check.state)
     }
 
+    /// Whether the live IBus engine is the selected typing route. On GNOME,
+    /// a live engine process is insufficient; Shell must report the IBus
+    /// source as active. Other IBus desktops use the engine's live status.
+    pub(crate) fn ibus_route_active(&self) -> bool {
+        if wayexpand_backend_selection::Compositor::detect()
+            == wayexpand_backend_selection::Compositor::Gnome
+        {
+            self.ibus_active && self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass
+        } else {
+            self.ibus_active
+        }
+    }
+
     /// The service unit to restart for the running route, when known.
     pub(crate) fn active_service_unit(&self) -> Option<&'static str> {
         match runtime::status_field(&self.daemon_status, "source").as_deref() {
@@ -160,14 +224,23 @@ impl GuiApp {
         let daemon_running = self.daemon_reachable == Some(true);
         let control_only =
             runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin");
+        let active_daemon_source = daemon_running
+            .then(|| runtime::status_field(&self.daemon_status, "source"))
+            .flatten();
         let gnome_ibus = super::first_run::uses_gnome_ibus_route(
             wayexpand_backend_selection::Compositor::detect()
                 == wayexpand_backend_selection::Compositor::Gnome,
-            self.ibus_active,
+            self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass,
+            self.ibus_check_state("gnome-source-registered") == IbusCheckState::Pass,
             self.recommended_route
                 .is_some_and(|route| route.setup_backend() == "ibus"),
+            self.daemon_reachable,
+            active_daemon_source.as_deref(),
         );
-        let ibus_route = gnome_ibus || self.ibus_active && (!daemon_running || control_only);
+        // Keep process health separate from source selection: GNOME can have
+        // the source selected while its engine process has crashed.
+        let ibus_active = self.ibus_active;
+        let ibus_route = gnome_ibus || ibus_active && (!daemon_running || control_only);
         let replacement_allowed = if ibus_route {
             // Unknown until diagnostics run; only an explicit refusal counts.
             self.ibus_check_state("consent") != IbusCheckState::Fail
@@ -182,12 +255,13 @@ impl GuiApp {
         };
         Situation {
             daemon_reachable: self.daemon_reachable,
-            ibus_active: self.ibus_active,
+            ibus_active,
             control_only,
             gnome_ibus,
             source_registered: self.ibus_check_state("gnome-source-registered")
                 == IbusCheckState::Pass,
             source_active: self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass,
+            diagnostics_fresh: self.gnome_ibus_diagnostics_fresh(),
             paused: self.paused,
             route_state: self.route_state,
             build: daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status)),
@@ -195,6 +269,33 @@ impl GuiApp {
             field_cannot_replace: ibus_route
                 && self.ibus_check_state("surrounding-text") == IbusCheckState::Fail,
         }
+    }
+
+    fn gnome_ibus_diagnostics_fresh(&self) -> Option<bool> {
+        let checked_at = self.diagnostics_checked_at?;
+        let recent = checked_at.elapsed() < Duration::from_secs(60);
+        if !recent {
+            return Some(false);
+        }
+        // A live process identity changes on every engine restart. Do not
+        // reuse source-selection evidence collected from the previous run.
+        if self.ibus_active {
+            let same_instance = self
+                .ibus_route
+                .as_ref()
+                .and_then(|report| report.activity.as_ref())
+                .filter(|activity| activity.live)
+                .map(|activity| {
+                    format!(
+                        "ibus:{}:{}",
+                        activity.status.pid, activity.status.started_unix
+                    )
+                })
+                .as_deref()
+                == self.ibus_instance.as_deref();
+            return Some(same_instance);
+        }
+        Some(true)
     }
 
     pub(crate) fn current_next_step(&self) -> Option<(Problem, Action)> {
@@ -206,7 +307,8 @@ impl GuiApp {
     /// copy-only picker.
     pub(crate) fn perform_next_step(&mut self, action: Action) {
         match action {
-            Action::TurnOn | Action::RunSetup | Action::ReviewConsent => self.start_guided_setup(),
+            Action::TurnOn | Action::RunSetup => self.start_guided_setup(),
+            Action::ReviewConsent => self.review_replacement_consent(),
             Action::Resume => self.toggle_pause(),
             Action::Restart => match self.active_service_unit() {
                 Some(unit) => {
@@ -218,6 +320,37 @@ impl GuiApp {
             Action::SelectInputSource => self.retry_gnome_source_activation(),
             Action::CheckAgain => self.refresh_diagnostics(true),
             Action::QuickPicker => self.open_copy_only_picker(),
+        }
+    }
+
+    /// Send consent to the control that governs the selected route. IBus
+    /// consent belongs in its guided registration flow; keystroke-route
+    /// consent belongs in Engine settings. An organization-policy refusal
+    /// belongs in diagnostics because a user preference cannot override it.
+    pub(crate) fn review_replacement_consent(&mut self) {
+        let situation = self.situation();
+        let configured_backend = super::setup::current_guided_setup_backend(
+            self.daemon_reachable,
+            &self.daemon_status,
+            self.route_plan.as_ref(),
+        );
+        let ibus_route = configured_backend.is_none()
+            && (situation.gnome_ibus
+                || situation.ibus_active
+                    && (situation.daemon_reachable != Some(true) || situation.control_only)
+                || self
+                    .recommended_route
+                    .is_some_and(|route| route.setup_backend() == "ibus"));
+        let policy_blocked =
+            runtime::status_field(&self.daemon_status, "matching_unavailable_reason").as_deref()
+                == Some("organization_policy_route_incompatible");
+        if policy_blocked {
+            self.diagnostics_open = true;
+            self.refresh_diagnostics(false);
+        } else if ibus_route {
+            self.start_guided_setup();
+        } else {
+            self.open_compatibility_settings();
         }
     }
 
@@ -260,7 +393,7 @@ impl GuiApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{next_step, Action, Problem, Situation};
+    use super::{gnome_ibus_readiness, next_step, Action, GnomeIbusReadiness, Problem, Situation};
     use crate::runtime::{DaemonBuildState, RouteState};
 
     fn running(route: RouteState) -> Situation {
@@ -369,6 +502,7 @@ mod tests {
             gnome_ibus: true,
             ibus_active: true,
             replacement_allowed: true,
+            diagnostics_fresh: Some(true),
             ..Situation::default()
         };
         assert_eq!(
@@ -395,6 +529,98 @@ mod tests {
             }),
             Some((Problem::FieldCannotReplace, Action::QuickPicker))
         );
+    }
+
+    #[test]
+    fn gnome_engine_crash_is_not_reported_as_ready() {
+        let crashed = Situation {
+            gnome_ibus: true,
+            ibus_active: false,
+            source_registered: true,
+            source_active: true,
+            diagnostics_fresh: Some(true),
+            replacement_allowed: true,
+            ..Situation::default()
+        };
+        assert_eq!(
+            gnome_ibus_readiness(&crashed),
+            GnomeIbusReadiness::EngineUnavailable
+        );
+        assert_eq!(
+            next_step(&crashed),
+            Some((Problem::IbusEngineUnavailable, Action::RunSetup))
+        );
+    }
+
+    #[test]
+    fn gnome_source_deselection_has_a_corrective_action() {
+        let deselected = Situation {
+            gnome_ibus: true,
+            ibus_active: true,
+            source_registered: true,
+            source_active: false,
+            diagnostics_fresh: Some(true),
+            replacement_allowed: true,
+            ..Situation::default()
+        };
+        assert_eq!(
+            gnome_ibus_readiness(&deselected),
+            GnomeIbusReadiness::SourceNotSelected
+        );
+        assert_eq!(
+            next_step(&deselected),
+            Some((Problem::InputSourceNotSelected, Action::SelectInputSource))
+        );
+    }
+
+    #[test]
+    fn stale_gnome_diagnostics_request_a_refresh_instead_of_claiming_ready() {
+        let stale = Situation {
+            gnome_ibus: true,
+            ibus_active: true,
+            source_registered: true,
+            source_active: true,
+            diagnostics_fresh: Some(false),
+            replacement_allowed: true,
+            ..Situation::default()
+        };
+        assert_eq!(
+            gnome_ibus_readiness(&stale),
+            GnomeIbusReadiness::DiagnosticsStale
+        );
+        assert_eq!(
+            next_step(&stale),
+            Some((Problem::InputStatusStale, Action::CheckAgain))
+        );
+    }
+
+    #[test]
+    fn gnome_engine_restart_requires_fresh_diagnostics_before_ready() {
+        let mut state = Situation {
+            gnome_ibus: true,
+            source_registered: true,
+            source_active: true,
+            diagnostics_fresh: Some(true),
+            replacement_allowed: true,
+            ..Situation::default()
+        };
+        // The process poll detects the crash even if the selected source is
+        // still configured.
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::IbusEngineUnavailable, Action::RunSetup))
+        );
+        // A new process has appeared, but the previous source diagnostics
+        // belong to the old process and need to be refreshed first.
+        state.ibus_active = true;
+        state.diagnostics_fresh = Some(false);
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::InputStatusStale, Action::CheckAgain))
+        );
+        state.diagnostics_fresh = Some(true);
+        assert_eq!(gnome_ibus_readiness(&state), GnomeIbusReadiness::Ready);
+        assert_eq!(next_step(&state), None);
     }
 
     #[test]

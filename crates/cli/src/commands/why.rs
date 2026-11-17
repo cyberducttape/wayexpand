@@ -27,6 +27,21 @@ struct DaemonRoute {
     diagnosis: ExpansionDiagnosis,
 }
 
+fn daemon_route(status: &DaemonStatus) -> Option<DaemonRoute> {
+    if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) {
+        return None;
+    }
+    // The control-only service (stdin source) captures no typing.
+    if status.field("source") == Some("stdin") {
+        return None;
+    }
+    Some(DaemonRoute {
+        source: status.field("source").unwrap_or_default().to_owned(),
+        backend: status.field("backend").unwrap_or_default().to_owned(),
+        diagnosis: ExpansionDiagnosis::from_status(status),
+    })
+}
+
 pub(crate) fn why_command(args: Args) -> Result<()> {
     let mut rest: Vec<String> = args.collect();
     let json = take_json_flag(&mut rest);
@@ -36,19 +51,14 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
     let status = control_operation(wayexpand_core::DaemonOperation::Status)
         .ok()
         .map(|body| DaemonStatus::parse(&body));
-    // The control-only service (stdin source) captures no typing.
-    let daemon = status
+    // Never interpret counters or outcome labels from an unknown status
+    // schema. In particular, stale daemon counters must not look like a
+    // diagnosis of the trigger the user just typed.
+    let daemon_status_schema = status.as_ref().and_then(DaemonStatus::status_schema);
+    let daemon_status_compatible = status
         .as_ref()
-        .filter(|status| {
-            status
-                .field("source")
-                .is_some_and(|source| source != "stdin")
-        })
-        .map(|status| DaemonRoute {
-            source: status.field("source").unwrap_or_default().to_owned(),
-            backend: status.field("backend").unwrap_or_default().to_owned(),
-            diagnosis: ExpansionDiagnosis::from_status(status),
-        });
+        .map(|status| status.status_schema() == Some(CONTROL_STATUS_SCHEMA));
+    let daemon = status.as_ref().and_then(daemon_route);
     let ibus_field = telemetry::read_status()
         .filter(|reading| reading.live)
         .map(|reading| newest_typed_field(&reading.status.recent_fields).cloned());
@@ -59,10 +69,33 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&report_json(daemon.as_ref(), ibus_field.as_ref(), now))?
+            serde_json::to_string_pretty(&report_json(
+                daemon.as_ref(),
+                ibus_field.as_ref(),
+                now,
+                daemon_status_schema,
+                daemon_status_compatible,
+            ))?
         );
     } else {
-        print_report(daemon.as_ref(), ibus_field.as_ref(), now);
+        print_report(
+            daemon.as_ref(),
+            ibus_field.as_ref(),
+            now,
+            daemon_status_schema,
+            daemon_status_compatible,
+        );
+    }
+    if daemon_status_compatible == Some(false) {
+        return Err(classified_error(
+            CliErrorKind::Daemon,
+            format!(
+                "WX-VERSION-001: the running daemon status schema {} is incompatible with this CLI (expected {CONTROL_STATUS_SCHEMA}); run `wayexpand upgrade --check` before trusting this diagnosis",
+                daemon_status_schema
+                    .map(|schema| schema.to_string())
+                    .unwrap_or_else(|| "unknown".into())
+            ),
+        ));
     }
     if daemon.is_none() && ibus_field.is_none() {
         return Err(classified_error(
@@ -83,6 +116,8 @@ fn report_json(
     daemon: Option<&DaemonRoute>,
     ibus_field: Option<&Option<IbusFieldActivity>>,
     now: u64,
+    daemon_status_schema: Option<u32>,
+    daemon_status_compatible: Option<bool>,
 ) -> serde_json::Value {
     let daemon = daemon.map(|route| {
         let diagnosis = &route.diagnosis;
@@ -116,15 +151,37 @@ fn report_json(
             "expansions": field.map(|field| field.expansions),
         })
     });
-    serde_json::json!({ "daemon": daemon, "ibus": ibus })
+    serde_json::json!({
+        "daemon_status_schema": daemon_status_schema,
+        "daemon_status_compatible": daemon_status_compatible,
+        "daemon": daemon,
+        "ibus": ibus
+    })
 }
 
 fn print_report(
     daemon: Option<&DaemonRoute>,
     ibus_field: Option<&Option<IbusFieldActivity>>,
     now: u64,
+    daemon_status_schema: Option<u32>,
+    daemon_status_compatible: Option<bool>,
 ) {
-    if daemon.is_none() && ibus_field.is_none() {
+    if daemon_status_compatible == Some(false) {
+        println!("Keyboard route");
+        println!(
+            "  Cannot diagnose: daemon status schema {} is incompatible with this CLI (expected {CONTROL_STATUS_SCHEMA}).",
+            daemon_status_schema
+                .map(|schema| schema.to_string())
+                .unwrap_or_else(|| "unknown".into())
+        );
+        println!("  Fix: run `wayexpand upgrade --check` before trusting route diagnostics.");
+        if ibus_field.is_some() {
+            println!();
+        } else {
+            return;
+        }
+    }
+    if daemon.is_none() && ibus_field.is_none() && daemon_status_compatible != Some(false) {
         println!("No WayExpand typing route is running, so nothing can expand.");
         println!("Fix: run `wayexpand setup`, then `wayexpand doctor`.");
         return;
@@ -173,7 +230,9 @@ fn print_report(
         }
         println!();
     }
-    println!("To check one trigger: wayexpand explain 'the text you typed'");
+    if daemon_status_compatible != Some(false) || ibus_field.is_some() {
+        println!("To check one trigger: wayexpand explain 'the text you typed'");
+    }
 }
 
 /// The answer for the keyboard route and, when there is one, what to do.
@@ -376,7 +435,13 @@ mod tests {
                  recent_expansion_outcomes=[{\"at_unix\":4,\"completion\":\"input arrived before output\"}]\n",
             ),
         };
-        let value = report_json(Some(&route), None, 5);
+        let value = report_json(
+            Some(&route),
+            None,
+            5,
+            Some(CONTROL_STATUS_SCHEMA),
+            Some(true),
+        );
         assert_eq!(value["daemon"]["verdict"], "last_stopped");
         assert_eq!(value["daemon"]["last_outcome"], "interrupted_by_typing");
         assert_eq!(
@@ -384,9 +449,32 @@ mod tests {
             "interrupted_by_typing"
         );
         assert!(value["ibus"].is_null());
-        let no_field = report_json(None, Some(&None), 5);
+        let no_field = report_json(None, Some(&None), 5, None, None);
         assert!(no_field["daemon"].is_null());
         assert!(no_field["ibus"]["verdict"].is_null());
+        assert!(no_field["daemon_status_schema"].is_null());
+        assert!(no_field["daemon_status_compatible"].is_null());
+    }
+
+    #[test]
+    fn incompatible_daemon_schema_never_produces_a_route_verdict() {
+        let stale = DaemonStatus::parse(&format!(
+            "running\nstatus_schema={}\nsource=evdev\nbackend=libei\n\
+             matching_unavailable_reason=none\ninput_events_total=9\n\
+             recent_expansion_outcomes=[{{\"at_unix\":4,\"completion\":\"applied\"}}]\n",
+            CONTROL_STATUS_SCHEMA - 1
+        ));
+        assert!(daemon_route(&stale).is_none());
+        let stale_report = report_json(None, None, 5, stale.status_schema(), Some(false));
+        assert_eq!(stale_report["daemon"], serde_json::Value::Null);
+        assert_eq!(stale_report["daemon_status_compatible"], false);
+
+        let compatible = DaemonStatus::parse(&format!(
+            "running\nstatus_schema={CONTROL_STATUS_SCHEMA}\nsource=evdev\nbackend=libei\n\
+             matching_unavailable_reason=none\ninput_events_total=9\n\
+             recent_expansion_outcomes=[{{\"at_unix\":4,\"completion\":\"applied\"}}]\n"
+        ));
+        assert!(daemon_route(&compatible).is_some());
     }
 
     #[test]

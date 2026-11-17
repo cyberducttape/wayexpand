@@ -98,6 +98,10 @@ texts! {
         "IBus engine registered",
         "IBus-Engine registriert",
         "Engine IBus terdaftar";
+    setup_check_manifest_scope =>
+        "Shared IBus engine uses a protected system executable",
+        "Die gemeinsame IBus-Engine nutzt eine geschützte Systemdatei",
+        "Engine IBus bersama memakai executable sistem yang terlindungi";
     setup_check_gnome_registered =>
         "GNOME input source registered",
         "GNOME-Eingabequelle registriert",

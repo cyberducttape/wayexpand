@@ -1311,7 +1311,7 @@ mod tests {
             snippet_id: String::new().into(),
             trigger: ":t".into(),
             matched_text: ":t".into(),
-            insert: "x".repeat(200).into(),
+            insert: "x".repeat(8).into(),
             cursor_offset: None,
             reinsert_after: None,
             command_backed: false,
@@ -1319,7 +1319,7 @@ mod tests {
             folded_suffix_chars: 0,
         };
         let transaction = submitter.submit(result).unwrap();
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(25));
         submitter.cancel_for_physical_input();
         let typed_at_cancel = typed.lock().unwrap().len();
 
@@ -1336,7 +1336,7 @@ mod tests {
             typed_after <= typed_at_cancel + 1,
             "{typed_at_cancel} -> {typed_after}"
         );
-        assert!(typed_after < 200);
+        assert!(typed_after < 8);
     }
 
     #[test]
@@ -1373,7 +1373,7 @@ mod tests {
             snippet_id: String::new().into(),
             trigger: ":x".into(),
             matched_text: ":x".into(),
-            insert: "replacement".into(),
+            insert: "replace".into(),
             cursor_offset: None,
             reinsert_after: None,
             command_backed: false,

@@ -188,22 +188,22 @@ impl Strings {
 
     pub fn keystroke_limit(&self) -> &'static str {
         match self.lang {
-            Language::English => "Longest keystroke-typed replacement",
-            Language::German => "Längste per Tastenanschlag getippte Ersetzung",
-            Language::Indonesian => "Penggantian terpanjang yang diketik per tombol",
+            Language::English => "Insert-only keysym output limit",
+            Language::German => "Ausgabelimit für reine Keysym-Einfügungen",
+            Language::Indonesian => "Batas keluaran keysym khusus penyisipan",
         }
     }
 
     pub fn keystroke_limit_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Characters (1–5000). When text must be typed key by key (the libei keysym fallback, about 83 characters a second), longer replacements are refused. The default limit is 8 characters (about 100 ms). Longer output is refused unless you raise the limit explicitly; copy and paste or generate a file for bulk text."
+                "Characters (1–5000). This setting controls insert-only keysym output. Automatic replacement on any non-atomic route is always limited to 8 output characters, even with compatibility consent, because delivered text cannot be rolled back. Longer replacements are refused before deleting the trigger; use Quick Picker copy/paste or generate a file."
             }
             Language::German => {
-                "Zeichen (1–5000). Muss Text Taste für Taste getippt werden (libei-Keysym-Fallback, etwa 83 Zeichen pro Sekunde), werden längere Ersetzungen abgelehnt. Der Standardwert beträgt 8 Zeichen (etwa 100 ms). Längere Ausgabe wird abgelehnt, sofern Sie das Limit nicht ausdrücklich erhöhen; kopieren und einfügen oder erzeugen Sie eine Datei für größere Texte."
+                "Zeichen (1–5000). Diese Einstellung gilt für reine Keysym-Ausgabe. Automatische Ersetzungen auf nicht-atomaren Wegen sind unabhängig von der Zustimmung immer auf 8 Ausgabezeichen begrenzt, da bereits gesendeter Text nicht zurückgenommen werden kann. Längere Ersetzungen werden vor dem Löschen des Triggers abgelehnt; Quick Picker zum Kopieren und Einfügen oder Dateierstellung verwenden."
             }
             Language::Indonesian => {
-                "Karakter (1–5000). Jika teks harus diketik tombol demi tombol (fallback keysym libei, sekitar 83 karakter per detik), penggantian yang lebih panjang ditolak. Batas bawaan adalah 8 karakter (sekitar 100 ms). Keluaran lebih panjang ditolak kecuali batas dinaikkan secara eksplisit; salin dan tempel atau buat berkas untuk teks besar."
+                "Karakter (1–5000). Pengaturan ini mengatur keluaran keysym khusus penyisipan. Penggantian otomatis pada rute non-atomik selalu dibatasi 8 karakter keluaran, meskipun kompatibilitas diizinkan, karena teks yang sudah terkirim tidak dapat dibatalkan. Penggantian lebih panjang ditolak sebelum pemicu dihapus; gunakan Quick Picker untuk salin-tempel atau buat berkas."
             }
         }
     }

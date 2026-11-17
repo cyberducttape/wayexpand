@@ -907,9 +907,14 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
         wayexpand_core::Config::load(wayexpand_core::default_config_path())
             .ok()
             .is_some_and(|config| crate::commands::system::setup_test_trigger(&config).is_some());
-    let daemon_status = crate::doctor::status::read_daemon_status()
-        .ok()
-        .and_then(|response| crate::doctor::status::status_as_json(&response).ok());
+    let daemon_status_response = crate::doctor::status::read_daemon_status().ok();
+    let configured_backend = daemon_status_response.as_deref().and_then(|response| {
+        crate::commands::system::existing_setup_backend_from_status(response, &policy)
+    });
+    let setup_backend = configured_backend.unwrap_or(recommendation.backend.as_str());
+    let daemon_status = daemon_status_response
+        .as_deref()
+        .and_then(|response| crate::doctor::status::status_as_json(response).ok());
     let terminal_only_runtime = daemon_status
         .as_ref()
         .and_then(|status| status.get("terminal_apps_only"))
@@ -919,7 +924,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     let integration = integrated_checks(&ibus_report);
     let operational = operational_checks(&ibus_readiness, daemon_status.as_ref());
     let installed = rows.iter().all(|r| r.status != "fail");
-    let route_ready = recommendation.backend != "unavailable";
+    let route_ready = configured_backend.is_some() || recommendation.backend != "unavailable";
     let terminal_match_required = terminal_only_runtime;
     let terminal_match_ok = terminal_match
         .get("status")
@@ -946,7 +951,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                 },
             "installation_ready":installed, "route_ready":route_ready,
                 "installation_checks":rows,
-                "desktop":{"session":crate::doctor::backends::session_description(),"recommended_input":recommendation.label,"recommended_backend":recommendation.backend,"reason":recommendation.detail},
+                "desktop":{"session":crate::doctor::backends::session_description(),"recommended_input":recommendation.label,"recommended_backend":recommendation.backend,"configured_backend":configured_backend,"setup_backend":setup_backend,"setup_backend_reason":if configured_backend.is_some() {"preserve_configured_route"} else {"automatic_recommendation"},"reason":recommendation.detail},
                 "route_assessments":route_plan.routes.iter().map(|planned| serde_json::json!({
                     "id":planned.contract.id,
                     "standing":planned.standing.as_str(),
@@ -1029,6 +1034,26 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
             (
                 "Recommended:",
                 format!("{} ({})", recommendation.label, recommendation.detail),
+            ),
+            (
+                "Configured route:",
+                configured_backend.unwrap_or("none").to_owned(),
+            ),
+            (
+                "Setup will use:",
+                if configured_backend.is_some() {
+                    format!("existing {setup_backend}")
+                } else {
+                    format!("recommended {setup_backend}")
+                },
+            ),
+            (
+                "Switch route:",
+                if configured_backend.is_some() && configured_backend != Some(recommendation.backend.as_str()) {
+                    "wayexpand setup --mode recommended".to_owned()
+                } else {
+                    "not needed".to_owned()
+                },
             ),
             (
                 "Preflight:",

@@ -294,7 +294,23 @@ impl ExpansionEngine {
         let capabilities = injector.capabilities();
         // Checked first and before anything is typed, so a refusal is a clean
         // "not applied" rather than an uncertain partial write.
-        injector.admit(!result.matched_text.is_empty() || result.reinsert_after.is_some())?;
+        let erases = !result.matched_text.is_empty() || result.reinsert_after.is_some();
+        injector.admit(erases)?;
+        let replacement_chars =
+            result.insert.chars().count() + usize::from(result.reinsert_after.is_some());
+        if erases
+            && !capabilities.has_atomic_replacement_contract()
+            && replacement_chars > crate::MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS
+        {
+            return Err(InjectorError {
+                backend: injector.name(),
+                message: format!(
+                    "automatic non-atomic replacement is limited to {} characters; use Quick Picker clipboard/manual paste or an atomic route for longer text",
+                    crate::MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS
+                ),
+                retryable: false,
+            });
+        }
         let preflight_owned = result.reinsert_after.map(|character| {
             let mut text = String::with_capacity(result.insert.len() + character.len_utf8());
             text.push_str(&result.insert);

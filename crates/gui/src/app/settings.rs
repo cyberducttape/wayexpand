@@ -15,6 +15,11 @@ impl GuiApp {
         self.settings_open = true;
     }
 
+    pub(crate) fn open_compatibility_settings(&mut self) {
+        self.open_settings();
+        self.settings_tab = SettingsTab::Engine;
+    }
+
     pub(crate) fn set_dark_mode(&mut self, ctx: &egui::Context, dark: bool) {
         self.dark_mode = dark;
         ctx.set_theme(if dark {

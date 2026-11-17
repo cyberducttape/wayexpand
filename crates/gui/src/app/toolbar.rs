@@ -522,10 +522,11 @@ impl GuiApp {
         // has no typing route to report.
         let control_only =
             runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin");
-        let ibus_only = self.daemon_reachable != Some(true) && self.ibus_active;
+        let ibus_route_active = self.ibus_route_active();
+        let ibus_only = self.daemon_reachable != Some(true) && ibus_route_active;
         let (state, state_color) = self.header_state(ibus_only, control_only, palette);
         let mut details = Vec::new();
-        if ibus_only || self.ibus_active {
+        if ibus_only || ibus_route_active {
             details.push(format!(
                 "{} — {}",
                 self.strings.ibus_active_status(),
@@ -718,10 +719,12 @@ impl GuiApp {
                 | P::BuildUnknown
                 | P::InputSourceNotSetUp
                 | P::InputSourceNotSelected
+                | P::IbusEngineUnavailable
+                | P::InputStatusStale
                 | P::ReplacementNotAllowed => (S::NeedsSetup, palette.warning),
             };
         }
-        let ibus_route = ibus_only || control_only && self.ibus_active;
+        let ibus_route = ibus_only || control_only && self.ibus_route_active();
         if !ibus_route {
             match self.daemon_reachable {
                 None => return (S::Checking, palette.muted),
@@ -771,8 +774,8 @@ impl GuiApp {
     /// unknown.
     pub(crate) fn current_route_label(&self) -> Option<String> {
         let situation = self.situation();
-        if situation.gnome_ibus
-            || self.ibus_active && (self.daemon_reachable != Some(true) || situation.control_only)
+        if self.ibus_route_active()
+            && (self.daemon_reachable != Some(true) || situation.control_only)
         {
             return Some("ibus".into());
         }

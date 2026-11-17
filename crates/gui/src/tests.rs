@@ -48,8 +48,14 @@ fn route_recommendation_preserves_ibus_topology() {
         .expect("IBus is recommended when it is the only route");
     assert_eq!(shared_route.id(), "ibus");
     let plan = wayexpand_backend_selection::plan_routes(&ibus_only, true, |_| true);
-    let route = route_recommendation(shared_route, Some(&plan))
-        .expect("the IBus route contract is supported");
+    let route = route_recommendation(
+        shared_route.contract(),
+        Some(&plan),
+        Some(&ibus_only),
+        &[],
+        None,
+    )
+    .expect("the IBus route contract is supported");
     assert_eq!(route.capture, wayexpand_core::BackendKind::InputMethodV2);
     assert_eq!(route.injection, wayexpand_core::BackendKind::InputMethodV2);
     assert_eq!(route.capture_label, "ibus");
@@ -61,6 +67,8 @@ fn route_recommendation_preserves_ibus_topology() {
     );
     assert_eq!(route.output_transaction, "separate_delete_and_commit");
     assert_eq!(route.application_result, "unobservable");
+    assert_eq!(route.capture_state, BackendState::Available);
+    assert_eq!(route.injection_state, BackendState::Available);
 
     let capabilities = Capabilities {
         has_dev_input: true,
@@ -70,6 +78,159 @@ fn route_recommendation_preserves_ibus_topology() {
     assert!(
         wayexpand_backend_selection::recommended_route(&capabilities, false, |_| true).is_none()
     );
+}
+
+#[test]
+fn ibus_capture_and_insertion_readiness_use_their_own_checks() {
+    use wayexpand_backend_ibus::chain::{IbusChainReport, IbusCheck, IbusCheckState, IbusDesktop};
+
+    let capabilities = Capabilities::default();
+    let route = wayexpand_backend_selection::route_contract_by_id("ibus").unwrap();
+    let plan = wayexpand_backend_selection::plan_routes(&capabilities, true, |_| true);
+    let mut report = IbusChainReport {
+        desktop: IbusDesktop::Gnome,
+        checks: vec![
+            IbusCheck {
+                id: "component",
+                title: "IBus component installed",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "installed".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "daemon",
+                title: "IBus daemon running",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "running".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "registered",
+                title: "Engine registered",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "registered".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "selected",
+                title: "Engine selected",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "selected".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "engine",
+                title: "Engine running",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "running".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "consent",
+                title: "Replacement consent",
+                state: IbusCheckState::Fail,
+                problem_id: Some("WX-POLICY-001"),
+                detail: "replacement is disabled".into(),
+                fix: Some("review compatibility mode".into()),
+            },
+        ],
+        activity: None,
+    };
+    let route =
+        route_recommendation(route, Some(&plan), Some(&capabilities), &[], Some(&report)).unwrap();
+
+    assert_eq!(route.capture_state, BackendState::Available);
+    assert_eq!(route.injection_state, BackendState::RequiresPermission);
+
+    report
+        .checks
+        .iter_mut()
+        .find(|check| check.id == "selected")
+        .unwrap()
+        .state = IbusCheckState::Unknown;
+    let route = route_recommendation(
+        wayexpand_backend_selection::route_contract_by_id("ibus").unwrap(),
+        Some(&plan),
+        Some(&capabilities),
+        &[],
+        Some(&report),
+    )
+    .unwrap();
+    assert_eq!(route.capture_state, BackendState::Implemented);
+    assert_eq!(route.injection_state, BackendState::RequiresPermission);
+}
+
+#[test]
+fn route_recommendation_reports_capture_and_insertion_independently() {
+    use wayexpand_backend_selection::{Compositor, RouteContract};
+
+    let evdev_libei = wayexpand_backend_selection::route_contract_by_id("kde-evdev-libei")
+        .expect("catalog contains the KDE compatibility route");
+    let kde = Capabilities {
+        has_dev_input: true,
+        compositor: Compositor::KdePlasma,
+        ..Capabilities::default()
+    };
+    let kde_plan = wayexpand_backend_selection::plan_routes(&kde, false, |_| true);
+    let route = route_recommendation(evdev_libei, Some(&kde_plan), Some(&kde), &[], None).unwrap();
+    assert_eq!(route.capture_state, BackendState::Available);
+    assert_eq!(route.injection_state, BackendState::RequiresPermission);
+
+    let wlroots_route: &'static RouteContract =
+        wayexpand_backend_selection::route_contract_by_id("sway-evdev-wlroots").unwrap();
+    let sway = Capabilities {
+        has_dev_input: true,
+        compositor: Compositor::Sway,
+        ..Capabilities::default()
+    };
+    let sway_plan = wayexpand_backend_selection::plan_routes(&sway, false, |_| true);
+    let route =
+        route_recommendation(wlroots_route, Some(&sway_plan), Some(&sway), &[], None).unwrap();
+    assert_eq!(route.capture_state, BackendState::Available);
+    assert_eq!(route.injection_state, BackendState::Unavailable);
+
+    let unsupported = Capabilities {
+        compositor: Compositor::Sway,
+        ..Capabilities::default()
+    };
+    let unsupported_plan = wayexpand_backend_selection::plan_routes(&unsupported, false, |_| true);
+    let route = route_recommendation(
+        wayexpand_backend_selection::route_contract_by_id("input-method-v2").unwrap(),
+        Some(&unsupported_plan),
+        Some(&unsupported),
+        &[],
+        None,
+    )
+    .unwrap();
+    assert_eq!(route.capture_state, BackendState::Unavailable);
+    assert_eq!(route.injection_state, BackendState::Unavailable);
+}
+
+#[test]
+fn route_recommendation_preserves_evdev_permission_evidence() {
+    let route = wayexpand_backend_selection::route_contract_by_id("kde-evdev-libei").unwrap();
+    let capabilities = Capabilities {
+        has_direct_libei_socket: true,
+        compositor: wayexpand_backend_selection::Compositor::KdePlasma,
+        ..Capabilities::default()
+    };
+    let plan = wayexpand_backend_selection::plan_routes(&capabilities, false, |_| true);
+    let status = wayexpand_core::BackendStatus {
+        kind: wayexpand_core::BackendKind::Evdev,
+        state: BackendState::RequiresPermission,
+        detail: "device access required".into(),
+    };
+    let route =
+        route_recommendation(route, Some(&plan), Some(&capabilities), &[status], None).unwrap();
+    assert_eq!(route.capture_state, BackendState::RequiresPermission);
+    // Direct EIS is available for insertion, but that does not grant access
+    // to the raw keyboard devices used for capture.
+    assert_eq!(route.injection_state, BackendState::Available);
 }
 
 #[test]
@@ -3451,6 +3612,56 @@ fn header_semantics(app: &mut GuiApp) -> String {
 }
 
 #[test]
+fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
+    use wayexpand_backend_ibus::chain::{IbusChainReport, IbusCheck, IbusCheckState, IbusDesktop};
+
+    let mut app = header_test_app("ibus-manifest-consent");
+    app.setup_consent_open = true;
+    app.setup_system_integration_required = true;
+    app.ibus_route = Some(IbusChainReport {
+        desktop: IbusDesktop::KdeWayland,
+        checks: vec![IbusCheck {
+            id: "manifest-scope",
+            title: "",
+            state: IbusCheckState::Fail,
+            problem_id: Some("WX-IBUS-MANIFEST-SCOPE-001"),
+            detail: "shared manifest refers to a home-directory executable".into(),
+            fix: None,
+        }],
+        activity: None,
+    });
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let output = run_gui_test_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 700.0),
+            )),
+            ..Default::default()
+        },
+        |ui| app.render_setup_consent(ui.ctx()),
+    );
+    let semantics = format!(
+        "{:?}",
+        output
+            .platform_output
+            .accesskit_update
+            .expect("setup consent is accessible")
+            .nodes
+    );
+    assert!(
+        semantics.contains("Shared IBus engine uses a protected system executable"),
+        "unsafe shared registration must be visible in the consent dialog: {semantics}"
+    );
+    assert!(
+        semantics.contains("Will be addressed during setup"),
+        "the dialog must explain that the unsafe scope will be repaired: {semantics}"
+    );
+}
+
+#[test]
 fn header_reports_a_live_ibus_engine_instead_of_a_stopped_service() {
     let mut app = header_test_app("header-ibus");
     app.daemon_reachable = Some(false);
@@ -3479,6 +3690,7 @@ fn header_reports_a_live_ibus_engine_instead_of_a_stopped_service() {
 #[test]
 fn gnome_route_readiness_follows_the_engine_not_the_companion_daemon() {
     use wayexpand_backend_ibus::chain::{IbusChainReport, IbusCheck, IbusCheckState, IbusDesktop};
+    use wayexpand_backend_ibus::telemetry::{IbusStatus, IbusStatusReading, IbusTotals};
 
     let check = |id| IbusCheck {
         id,
@@ -3489,14 +3701,38 @@ fn gnome_route_readiness_follows_the_engine_not_the_companion_daemon() {
         fix: None,
     };
     let mut app = header_test_app("gnome-route-ready");
+    let engine_pid = 42_424;
+    let engine_started = 1_700_000_000;
     app.ibus_route = Some(IbusChainReport {
         desktop: IbusDesktop::Gnome,
         checks: vec![
             check("gnome-source-registered"),
             check("gnome-source-active"),
         ],
-        activity: None,
+        activity: Some(IbusStatusReading {
+            status: IbusStatus {
+                schema: wayexpand_backend_ibus::telemetry::IBUS_STATUS_SCHEMA,
+                pid: engine_pid,
+                version: "test".into(),
+                started_unix: engine_started,
+                updated_unix: engine_started,
+                config_generation_diagnostics_available: false,
+                config_generation: 0,
+                config_generation_requested: 0,
+                config_generation_mismatches: 0,
+                config_reload_failures: 0,
+                config_reload_error: None,
+                engines: 1,
+                totals: IbusTotals::default(),
+                recent_fields: Vec::new(),
+                recent_outputs: Vec::new(),
+                last_transaction_id: None,
+            },
+            live: true,
+        }),
     });
+    app.ibus_instance = Some(format!("ibus:{engine_pid}:{engine_started}"));
+    app.diagnostics_checked_at = Some(Instant::now());
 
     for (ibus_active, daemon_reachable, expected) in [
         (true, Some(true), true),
@@ -3512,6 +3748,14 @@ fn gnome_route_readiness_follows_the_engine_not_the_companion_daemon() {
             "ibus_active={ibus_active} daemon_reachable={daemon_reachable:?}"
         );
     }
+
+    // A restarted engine is a new session even if the old report still says
+    // that GNOME had selected the source. Its report must be refreshed before
+    // first-run can claim the route is ready.
+    app.ibus_active = true;
+    app.ibus_instance = Some("ibus:42_425:1_700_000_001".into());
+    app.daemon_reachable = Some(false);
+    assert!(!app.gnome_ibus_route_ready());
 }
 
 #[test]

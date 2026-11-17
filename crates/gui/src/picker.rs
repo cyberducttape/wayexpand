@@ -11,12 +11,19 @@
 
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    fs,
+    io::{Read, Write},
+    os::unix::{
+        fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt},
+        net::{UnixListener, UnixStream},
+    },
+    path::{Path, PathBuf},
     sync::{
-        mpsc::{self, Receiver, TryRecvError},
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender, TryRecvError},
         Arc, Mutex,
     },
-    thread,
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -44,6 +51,234 @@ const PREVIEW_CONTEXT_REFRESH: Duration = Duration::from_secs(1);
 const MAX_RESULTS: usize = 60;
 /// Sinks an unusable snippet below every usable match.
 const UNAVAILABLE_PENALTY: i64 = 1_000_000;
+const PICKER_SOCKET_NAME: &str = "wayexpand-picker.sock";
+const PICKER_SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// Owns the one picker instance for this login session. Its lifetime also
+/// anchors Wayland clipboard ownership; closing the picker releases both.
+struct PickerInstance {
+    focus_requests: Receiver<()>,
+    repaint_context: Arc<Mutex<Option<egui::Context>>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+    socket: PickerSocket,
+}
+
+struct PickerSocket {
+    path: PathBuf,
+    socket_device: u64,
+    socket_inode: u64,
+}
+
+impl Drop for PickerSocket {
+    fn drop(&mut self) {
+        // Do not unlink a replacement socket if the path changed while this
+        // picker was starting or running.
+        if fs::symlink_metadata(&self.path).is_ok_and(|metadata| {
+            metadata.dev() == self.socket_device && metadata.ino() == self.socket_inode
+        }) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+impl PickerInstance {
+    /// Returns `None` after asking an existing picker to focus itself.
+    fn acquire() -> anyhow::Result<Option<Self>> {
+        let runtime_dir = picker_runtime_dir()?;
+        Self::acquire_at(&runtime_dir.join(PICKER_SOCKET_NAME))
+    }
+
+    fn acquire_at(socket_path: &Path) -> anyhow::Result<Option<Self>> {
+        validate_private_runtime_dir(
+            socket_path
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("picker socket has no parent directory"))?,
+        )?;
+
+        for _ in 0..2 {
+            if request_existing_picker(socket_path)? {
+                return Ok(None);
+            }
+
+            let listener = match UnixListener::bind(socket_path) {
+                Ok(listener) => listener,
+                Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => continue,
+                Err(error) => return Err(error.into()),
+            };
+            let metadata = match fs::symlink_metadata(socket_path) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    drop(listener);
+                    let _ = fs::remove_file(socket_path);
+                    return Err(error.into());
+                }
+            };
+            let socket = PickerSocket {
+                path: socket_path.to_owned(),
+                socket_device: metadata.dev(),
+                socket_inode: metadata.ino(),
+            };
+            fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600))?;
+            let metadata = fs::symlink_metadata(socket_path)?;
+            if !metadata.file_type().is_socket()
+                || metadata.uid() != unsafe { libc::geteuid() }
+                || metadata.permissions().mode() & 0o077 != 0
+            {
+                anyhow::bail!("picker socket was replaced during startup");
+            }
+
+            let (sender, focus_requests) = mpsc::sync_channel(4);
+            let stop = Arc::new(AtomicBool::new(false));
+            let worker_stop = Arc::clone(&stop);
+            let repaint_context = Arc::new(Mutex::new(None));
+            let worker_context = Arc::clone(&repaint_context);
+            let worker = thread::Builder::new()
+                .name("wayexpand-picker-singleton".into())
+                .spawn(move || {
+                    serve_picker_requests(listener, sender, worker_stop, worker_context)
+                })?;
+            return Ok(Some(Self {
+                focus_requests,
+                repaint_context,
+                stop,
+                worker: Some(worker),
+                socket,
+            }));
+        }
+
+        // A competing launch won the bind race. Ask it to focus and exit.
+        request_existing_picker(socket_path).map(|_| None)
+    }
+
+    fn take_focus_request(&self) -> bool {
+        let mut received = false;
+        while self.focus_requests.try_recv().is_ok() {
+            received = true;
+        }
+        received
+    }
+
+    fn set_repaint_context(&self, context: egui::Context) {
+        if let Ok(mut slot) = self.repaint_context.lock() {
+            *slot = Some(context);
+        }
+    }
+}
+
+impl Drop for PickerInstance {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        // The listener blocks in accept() while idle. A local connection wakes
+        // it so teardown joins the worker without a polling loop.
+        let _ = UnixStream::connect(&self.socket.path);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn serve_picker_requests(
+    listener: UnixListener,
+    sender: SyncSender<()>,
+    stop: Arc<AtomicBool>,
+    repaint_context: Arc<Mutex<Option<egui::Context>>>,
+) {
+    while !stop.load(Ordering::Acquire) {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = stream.set_read_timeout(Some(PICKER_SOCKET_READ_TIMEOUT));
+                let mut request = [0u8; 8];
+                if stream
+                    .read(&mut request)
+                    .is_ok_and(|size| &request[..size] == b"focus")
+                {
+                    if sender.try_send(()).is_ok() {
+                        if let Ok(context) = repaint_context.lock() {
+                            if let Some(context) = context.as_ref() {
+                                context.request_repaint();
+                            }
+                        }
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+}
+
+fn picker_runtime_dir() -> anyhow::Result<PathBuf> {
+    let uid = unsafe { libc::geteuid() };
+    if let Some(path) = std::env::var_os("XDG_RUNTIME_DIR") {
+        let path = PathBuf::from(path);
+        validate_private_runtime_dir(&path)?;
+        return Ok(path);
+    }
+
+    // Some launchers omit XDG_RUNTIME_DIR. Create a per-UID private fallback
+    // under the system temporary directory rather than using a shared socket
+    // pathname directly in /tmp.
+    let path = std::env::temp_dir().join(format!("wayexpand-runtime-{uid}"));
+    if !path.exists() {
+        let mut builder = fs::DirBuilder::new();
+        builder.mode(0o700).create(&path)?;
+    }
+    validate_private_runtime_dir(&path)?;
+    Ok(path)
+}
+
+fn validate_private_runtime_dir(path: &Path) -> anyhow::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.permissions().mode() & 0o077 != 0
+        || metadata.permissions().mode() & 0o700 != 0o700
+    {
+        anyhow::bail!("picker runtime directory must be a private directory owned by this user");
+    }
+    Ok(())
+}
+
+fn remove_stale_picker_socket(path: &Path) -> anyhow::Result<()> {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+    if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
+        anyhow::bail!("refusing to replace an unexpected file at the picker socket path");
+    }
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+fn request_existing_picker(socket_path: &Path) -> anyhow::Result<bool> {
+    match UnixStream::connect(socket_path) {
+        Ok(mut stream) => {
+            stream.set_write_timeout(Some(PICKER_SOCKET_READ_TIMEOUT))?;
+            stream.write_all(b"focus")?;
+            Ok(true)
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            remove_stale_picker_socket(socket_path)?;
+            Ok(false)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Focus the existing picker without launching a helper process. Returns
+/// false when the caller should start the first picker instance.
+pub(crate) fn focus_existing_picker() -> anyhow::Result<bool> {
+    let runtime_dir = picker_runtime_dir()?;
+    let socket_path = runtime_dir.join(PICKER_SOCKET_NAME);
+    validate_private_runtime_dir(&runtime_dir)?;
+    request_existing_picker(&socket_path)
+}
 
 /// Rank `entry` against `query` (both compared case-insensitively). A
 /// trigger match beats a description match, an earlier match beats a later
@@ -197,6 +432,9 @@ pub(crate) struct PickerApp {
     show_unavailable: bool,
     /// Debug builds only: capture the window and exit (see `screenshot`).
     screenshot: Option<crate::screenshot::ScreenshotCapture>,
+    /// Owns the per-session singleton socket and therefore this picker's
+    /// clipboard lifetime. Tests and embedded instances leave this empty.
+    picker_instance: Option<PickerInstance>,
 }
 
 enum InsertState {
@@ -267,6 +505,7 @@ impl PickerApp {
             focus_requested: false,
             target_focus,
             screenshot: None,
+            picker_instance: None,
             insert_state: InsertState::Ready,
             show_unavailable: true,
         }
@@ -590,6 +829,21 @@ fn bring_back(ctx: &egui::Context) {
 impl eframe::App for PickerApp {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
+        if let Some(instance) = self.picker_instance.as_ref() {
+            instance.set_repaint_context(ctx.clone());
+        }
+        if self
+            .picker_instance
+            .as_ref()
+            .is_some_and(PickerInstance::take_focus_request)
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Informational,
+            ));
+            ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("picker_search")));
+        }
         let palette = self.palette;
         if let Some(capture) = self.screenshot.as_mut() {
             // `search` stages a query so the capture shows ranked results.
@@ -1223,6 +1477,12 @@ fn focus_returned_to_target(target: &FocusTarget, current: &FocusTarget) -> bool
 /// Run the picker. Insertion remains inside the picker until the guarded
 /// focus handoff succeeds, so a safe failure remains visible to the user.
 pub(crate) fn run(path: PathBuf, copy_only: bool) -> anyhow::Result<()> {
+    // A second launcher raises the live picker and exits. Keeping one process
+    // per session is also necessary for clipboard managers that request the
+    // Wayland selection after the copy operation has completed.
+    let Some(picker_instance) = PickerInstance::acquire()? else {
+        return Ok(());
+    };
     let policy = wayexpand_core::load_organization_policy()
         .map_err(|error| anyhow::anyhow!("could not load organization policy: {error}"))?;
     let loaded = Config::load_versioned(&path)
@@ -1290,6 +1550,7 @@ pub(crate) fn run(path: PathBuf, copy_only: bool) -> anyhow::Result<()> {
                 target_focus,
             );
             app.screenshot = crate::screenshot::ScreenshotCapture::from_env();
+            app.picker_instance = Some(picker_instance);
             Ok(Box::new(app))
         }),
     )
@@ -1481,6 +1742,7 @@ fn top_ranked_into(ranked: &mut Vec<(i64, usize)>, limit: usize, result: &mut Ve
 
 #[cfg(test)]
 mod tests {
+    use super::PickerInstance;
     use super::PickerMessage;
     use super::{
         clipboard_fallback_allowed_by_policy, copy_snippet, delivery_verdict,
@@ -1488,6 +1750,47 @@ mod tests {
         picker_expansion_is_eligible, picker_focus_state, picker_needs_daemon_focus, score,
         top_ranked, top_ranked_into, FocusInfo, FocusTarget, SearchEntry, MAX_RESULTS,
     };
+
+    #[test]
+    fn picker_launches_focus_the_single_live_instance_and_cleanup_releases_ownership() {
+        use std::{
+            fs,
+            os::unix::fs::PermissionsExt,
+            path::PathBuf,
+            thread,
+            time::{Duration, Instant},
+        };
+
+        let dir: PathBuf = std::env::temp_dir().join(format!(
+            "wayexpand-picker-singleton-test-{}-{}",
+            unsafe { libc::geteuid() },
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = dir.join("picker.sock");
+
+        let primary = PickerInstance::acquire_at(&socket)
+            .unwrap()
+            .expect("first launch owns the picker");
+        assert!(PickerInstance::acquire_at(&socket).unwrap().is_none());
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut got_focus_request = false;
+        while !got_focus_request && Instant::now() < deadline {
+            got_focus_request = primary.take_focus_request();
+            if got_focus_request {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(got_focus_request, "second launch notifies the live picker");
+
+        drop(primary);
+        assert!(!socket.exists(), "closing the picker removes its socket");
+        fs::remove_dir(&dir).unwrap();
+    }
 
     #[test]
     fn top_ranked_matches_a_full_sort() {

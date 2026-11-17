@@ -23,7 +23,7 @@ use std::{
 
 use wayexpand_core::{
     form_fields, render_template_with_cursor, ExpansionConfig, FormField, FormFieldKind,
-    TemplateContext,
+    FormFieldValidation, TemplateContext,
 };
 use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
@@ -460,72 +460,250 @@ impl ArtifactValidator for Http503ChecklistValidator {
             bail!("HTTP 503 checklist validation requires a generated file");
         };
         let contents = fs::read_to_string(path)?;
-        for required in ["Terminal session (operator-confirmed):", "Expected host:"] {
-            if !contents.contains(required) {
-                bail!("generated checklist is missing required review content: {required}");
-            }
+        validate_http503_checklist(&contents)
+    }
+}
+
+fn http503_field(contents: &str, label: &str, validation: FormFieldValidation) -> Result<String> {
+    let prefix = format!("{label}: ");
+    let mut values = contents
+        .lines()
+        .filter_map(|line| line.strip_prefix(&prefix));
+    let value = values.next().ok_or_else(|| {
+        anyhow::anyhow!("generated checklist is missing required review content: {label}:")
+    })?;
+    if values.next().is_some() {
+        bail!("generated checklist contains duplicate review content: {label}");
+    }
+    let field = FormField {
+        key: label.to_owned(),
+        label: label.to_owned(),
+        kind: FormFieldKind::Text {
+            default: String::new(),
+        },
+        required: true,
+        free_text: false,
+        min_chars: None,
+        max_chars: Some(match validation {
+            FormFieldValidation::Hostname => 253,
+            FormFieldValidation::Port => 5,
+            FormFieldValidation::SystemdUnit => 255,
+            _ => unreachable!("HTTP 503 validator only uses host, port, and unit fields"),
+        }),
+        validation: Some(validation),
+    };
+    field
+        .validate_value(value)
+        .map_err(|error| anyhow::anyhow!("generated checklist has an invalid {label}: {error}"))?;
+    Ok(value.to_owned())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Http503Command {
+    Hostname,
+    ServiceStatus,
+    ServiceJournal,
+    SocketList,
+    HostProbe,
+    ProxyJournal,
+    NginxCheck,
+}
+
+/// Tokenize the constrained command subset used by this checklist. This is
+/// intentionally not a general shell parser: shell operators, expansions,
+/// escapes, and glob syntax are rejected outright. Quoting only groups argv
+/// characters; it never causes shell evaluation here.
+fn http503_argv(line: &str) -> Option<Vec<String>> {
+    #[derive(Clone, Copy)]
+    enum Quote {
+        Single,
+        Double,
+    }
+
+    if !line.is_ascii() {
+        return None;
+    }
+    let mut args = Vec::new();
+    let mut word = String::new();
+    let mut started = false;
+    let mut quote = None;
+    for character in line.chars() {
+        if character.is_control() {
+            return None;
         }
-        let mut in_commands = false;
-        let mut hostname_check = false;
-        let mut service_status = false;
-        let mut journal_checks = 0usize;
-        let mut socket_check = false;
-        let mut host_probe = false;
-        let mut nginx_check = false;
-        for line in contents.lines() {
-            let line = line.trim();
-            if line == "```sh" {
-                if in_commands {
-                    bail!("generated checklist has nested shell code fences");
+        match quote {
+            Some(Quote::Single) => {
+                if character == '\'' {
+                    quote = None;
+                } else {
+                    word.push(character);
                 }
-                in_commands = true;
-                continue;
             }
-            if line == "```" {
-                if !in_commands {
-                    bail!("generated checklist has an unmatched shell code fence");
+            Some(Quote::Double) => match character {
+                '"' => quote = None,
+                '$' | '`' | '\\' | ';' | '&' | '|' | '<' | '>' | '(' | ')' => return None,
+                _ => word.push(character),
+            },
+            None => match character {
+                '\'' => {
+                    quote = Some(Quote::Single);
+                    started = true;
+                }
+                '"' => {
+                    quote = Some(Quote::Double);
+                    started = true;
+                }
+                '\\' | '$' | '`' | ';' | '&' | '|' | '<' | '>' | '(' | ')' | '{' | '}' | '*'
+                | '?' | '[' | ']' | '~' => return None,
+                ' ' => {
+                    if started {
+                        args.push(std::mem::take(&mut word));
+                        started = false;
+                    }
+                }
+                _ => {
+                    word.push(character);
+                    started = true;
+                }
+            },
+        }
+    }
+    if quote.is_some() {
+        return None;
+    }
+    if started {
+        args.push(word);
+    }
+    (!args.is_empty()).then_some(args)
+}
+
+/// Accept only the exact argument vectors used by the built-in checklist.
+/// Equality against complete argv rejects extra options and arguments as
+/// well as shell syntax that could turn a diagnostic into another command.
+fn parse_http503_command(
+    line: &str,
+    expected_host: &str,
+    service: &str,
+    proxy: &str,
+    port: &str,
+) -> Option<Http503Command> {
+    let args = http503_argv(line)?;
+    if args == ["hostname", "-f"] {
+        return Some(Http503Command::Hostname);
+    }
+    if args.len() == 5
+        && args[0] == "systemctl"
+        && args[1] == "status"
+        && args[2] == "--no-pager"
+        && args[3] == "--"
+        && args[4] == service
+    {
+        return Some(Http503Command::ServiceStatus);
+    }
+    if args.len() == 6
+        && args[0] == "journalctl"
+        && args[1] == "-u"
+        && args[2] == service
+        && args[3] == "-n"
+        && args[4] == "100"
+        && args[5] == "--no-pager"
+    {
+        return Some(Http503Command::ServiceJournal);
+    }
+    if args == ["ss", "-lntp"] {
+        return Some(Http503Command::SocketList);
+    }
+    if args.len() == 11
+        && args[0] == "curl"
+        && args[1] == "-sS"
+        && args[2] == "-I"
+        && args[3] == "--connect-timeout"
+        && args[4] == "3"
+        && args[5] == "--max-time"
+        && args[6] == "5"
+        && args[7] == "-H"
+        && args[8] == format!("Host: {expected_host}")
+        && args[9] == "--"
+        && args[10] == format!("http://127.0.0.1:{port}/")
+    {
+        return Some(Http503Command::HostProbe);
+    }
+    if args.len() == 6
+        && args[0] == "journalctl"
+        && args[1] == "-u"
+        && args[2] == proxy
+        && args[3] == "-n"
+        && args[4] == "100"
+        && args[5] == "--no-pager"
+    {
+        return Some(Http503Command::ProxyJournal);
+    }
+    if args == ["sudo", "nginx", "-t"] {
+        return Some(Http503Command::NginxCheck);
+    }
+    None
+}
+
+fn validate_http503_checklist(contents: &str) -> Result<()> {
+    if !contents
+        .lines()
+        .any(|line| line.starts_with("Terminal session (operator-confirmed): "))
+    {
+        bail!("generated checklist is missing required review content: Terminal session (operator-confirmed):");
+    }
+    let expected_host = http503_field(contents, "Expected host", FormFieldValidation::Hostname)?;
+    let service = http503_field(contents, "Service", FormFieldValidation::SystemdUnit)?;
+    let proxy = http503_field(
+        contents,
+        "Reverse proxy unit",
+        FormFieldValidation::SystemdUnit,
+    )?;
+    let port = http503_field(contents, "Local service port", FormFieldValidation::Port)?;
+    let mut in_commands = false;
+    let mut commands = Vec::new();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.starts_with("```") || line.starts_with("~~~") {
+            if in_commands {
+                if line != "```" {
+                    bail!("generated checklist has an unexpected code fence");
                 }
                 in_commands = false;
-                continue;
+            } else if line == "```sh" {
+                in_commands = true;
+            } else {
+                bail!("generated checklist has an unexpected code fence");
             }
-            if !in_commands || line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let readonly = [
-                "hostname -f",
-                "systemctl status --no-pager -- ",
-                "journalctl -u ",
-                "ss -lntp",
-                "curl -sS -I --connect-timeout 3 --max-time 5 -H \"Host: ",
-                "sudo nginx -t",
-            ]
-            .iter()
-            .any(|prefix| line.starts_with(prefix));
-            if !readonly {
-                bail!("generated checklist contains an unapproved shell command");
-            }
-            hostname_check |= line.starts_with("hostname -f");
-            service_status |= line.starts_with("systemctl status --no-pager -- ");
-            journal_checks += usize::from(line.starts_with("journalctl -u "));
-            socket_check |= line.starts_with("ss -lntp");
-            host_probe |=
-                line.starts_with("curl -sS -I --connect-timeout 3 --max-time 5 -H \"Host: ");
-            nginx_check |= line.starts_with("sudo nginx -t");
+            continue;
         }
-        if in_commands {
-            bail!("generated checklist has an unclosed shell code fence");
+        if !in_commands || line.is_empty() || line.starts_with('#') {
+            continue;
         }
-        if !(hostname_check
-            && service_status
-            && journal_checks >= 2
-            && socket_check
-            && host_probe
-            && nginx_check)
-        {
-            bail!("generated checklist is missing one or more required read-only commands");
-        }
-        Ok(())
+        let command = parse_http503_command(line, &expected_host, &service, &proxy, &port)
+            .ok_or_else(|| {
+                anyhow::anyhow!("generated checklist contains an unapproved shell command")
+            })?;
+        commands.push(command);
     }
+    if in_commands {
+        bail!("generated checklist has an unclosed shell code fence");
+    }
+    let required = [
+        Http503Command::Hostname,
+        Http503Command::ServiceStatus,
+        Http503Command::ServiceJournal,
+        Http503Command::SocketList,
+        Http503Command::HostProbe,
+        Http503Command::ProxyJournal,
+        Http503Command::NginxCheck,
+    ];
+    if required
+        .iter()
+        .any(|command| commands.iter().filter(|actual| *actual == command).count() != 1)
+    {
+        bail!("generated checklist is missing one or more required read-only commands");
+    }
+    Ok(())
 }
 
 impl ArtifactValidator for KubeconformValidator {
@@ -1720,6 +1898,77 @@ fn sync_parent_directory(path: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    const HTTP503_EXAMPLE: &str =
+        include_str!("../../../../packs/ops-triage/examples/http503-checklist.md");
+
+    #[test]
+    fn http503_validator_accepts_the_reviewed_read_only_example() {
+        validate_http503_checklist(HTTP503_EXAMPLE)
+            .expect("the checked-in HTTP 503 example should satisfy its validator");
+    }
+
+    #[test]
+    fn http503_validator_rejects_command_suffixes_and_shell_syntax() {
+        let alterations = [
+            (
+                "   hostname -f\n",
+                "   hostname -f; printf test\n",
+                "command separator appended to an approved prefix",
+            ),
+            (
+                "systemctl status --no-pager -- 'api.service'",
+                "systemctl status --no-pager -- 'api.service'; touch /tmp/wayexpand-validator-bypass",
+                "separator appended after a validated argument",
+            ),
+            (
+                "systemctl status --no-pager -- 'api.service'",
+                "systemctl status --no-pager -- 'api.service' --help",
+                "extra argument appended to an approved command",
+            ),
+            (
+                "ss -lntp",
+                "ss -lntp > /tmp/wayexpand-validator-bypass",
+                "redirection appended to a read-only command",
+            ),
+            (
+                "curl -sS -I --connect-timeout 3 --max-time 5 -H \"Host: web-01.example.net\" -- 'http://127.0.0.1:8080/'",
+                "curl -sS -I --connect-timeout 3 --max-time 5 -H \"Host: web-01.example.net$(id)\" -- 'http://127.0.0.1:8080/'",
+                "command substitution embedded in a quoted header",
+            ),
+            (
+                "sudo nginx -t",
+                "sudo nginx -t | sh",
+                "pipe appended to an approved privileged diagnostic",
+            ),
+            (
+                "Service: api.service",
+                "Service: api.service; touch /tmp/wayexpand-validator-bypass",
+                "shell syntax inserted into displayed form data",
+            ),
+        ];
+
+        for (needle, replacement, reason) in alterations {
+            let altered = HTTP503_EXAMPLE.replacen(needle, replacement, 1);
+            assert_ne!(
+                altered, HTTP503_EXAMPLE,
+                "test case did not alter fixture: {reason}"
+            );
+            assert!(
+                validate_http503_checklist(&altered).is_err(),
+                "validator accepted {reason}"
+            );
+        }
+
+        let extra_shell_fence = HTTP503_EXAMPLE.replace(
+            "5. Compare proxy/upstream health",
+            "```bash\nrm -rf /tmp/wayexpand-validator-bypass\n```\n\n5. Compare proxy/upstream health",
+        );
+        assert!(
+            validate_http503_checklist(&extra_shell_fence).is_err(),
+            "validator accepted an additional shell code block"
+        );
+    }
 
     #[test]
     fn validator_registry_is_fixed_to_supported_artifact_types() {

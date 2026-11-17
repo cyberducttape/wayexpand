@@ -81,7 +81,7 @@ pub use expansion_diagnosis::{
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use insertion_plan::{
     paced_output_duration_ms, paced_replacement_event_count, plan_insertion, plan_replacement,
-    InsertionRouteCapabilities, InsertionStrategy,
+    InsertionRouteCapabilities, InsertionStrategy, MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS,
 };
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::{Matcher, MatcherBuildError};

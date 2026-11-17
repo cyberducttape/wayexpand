@@ -900,42 +900,57 @@ impl Strings {
         let Some(route) = recommendation else {
             return match self.lang {
                 Language::English => (
-                    "No complete safe route detected yet".into(),
-                    "Refresh diagnostics after starting the desktop session".into(),
+                    "No usable route was detected".into(),
+                    "Open Diagnostics to see whether a protocol is unavailable or organization policy blocks every route; choose an allowed route and refresh checks.".into(),
                 ),
                 Language::Indonesian => (
-                    "Belum terdeteksi rute aman yang lengkap".into(),
-                    "Segarkan diagnostik setelah sesi desktop dimulai".into(),
+                    "Tidak ada jalur yang dapat digunakan".into(),
+                    "Buka Diagnostik untuk melihat protokol yang tidak tersedia atau rute yang diblokir kebijakan organisasi; pilih jalur yang diizinkan lalu segarkan pemeriksaan.".into(),
                 ),
                 Language::German => (
-                    "Noch kein vollständiger sicherer Weg erkannt".into(),
-                    "Diagnose nach dem Start der Desktop-Sitzung aktualisieren".into(),
+                    "Kein nutzbarer Weg erkannt".into(),
+                    "In der Diagnose prüfen, ob ein Protokoll fehlt oder die Organisationsrichtlinie alle Wege blockiert; einen erlaubten Weg wählen und erneut prüfen.".into(),
                 ),
             };
         };
-        let state = if matches!(
-            (route.capture_state, route.injection_state),
-            (BackendState::Available, BackendState::Available)
-        ) {
+        let label = match self.lang {
+            Language::English if route.blocked_by_policy => {
+                "Blocked by organization policy".to_owned()
+            }
+            Language::Indonesian if route.blocked_by_policy => {
+                "Diblokir kebijakan organisasi".to_owned()
+            }
+            Language::German if route.blocked_by_policy => {
+                "Durch Organisationsrichtlinie blockiert".to_owned()
+            }
+            Language::English if route.recommended => "Recommended integration".to_owned(),
+            Language::English => "Route capability check".to_owned(),
+            Language::Indonesian if route.recommended => {
+                "Integrasi yang direkomendasikan".to_owned()
+            }
+            Language::Indonesian => "Pemeriksaan kemampuan jalur".to_owned(),
+            Language::German if route.recommended => "Empfohlene Integration".to_owned(),
+            Language::German => "Prüfung der Routenkapazität".to_owned(),
+        };
+        let policy_detail = if route.blocked_by_policy {
             match self.lang {
-                Language::English => "Detected on this machine",
-                Language::Indonesian => "Terdeteksi di mesin ini",
-                Language::German => "Auf diesem Rechner erkannt",
+                Language::English => "Organization policy blocks this route; ask the administrator to allow a supported route or choose an allowed one.",
+                Language::Indonesian => "Kebijakan organisasi memblokir jalur ini; minta administrator mengizinkan jalur yang didukung atau pilih jalur yang diizinkan.",
+                Language::German => "Die Organisationsrichtlinie blockiert diesen Weg; die Administration um Freigabe eines unterstützten Wegs bitten oder einen erlaubten Weg wählen.",
             }
         } else {
-            match self.lang {
-                Language::English => "Permission required before setup",
-                Language::Indonesian => "Perlu izin sebelum penyiapan",
-                Language::German => "Vor der Einrichtung ist eine Berechtigung nötig",
-            }
-        };
-        let label = match self.lang {
-            Language::English => "Recommended integration".to_owned(),
-            Language::Indonesian => "Integrasi yang direkomendasikan".to_owned(),
-            Language::German => "Empfohlene Integration".to_owned(),
+            ""
         };
         let detail = format!(
-            "{state} · {} · focus tracking {}",
+            "{}{}{} · {} · {} · focus tracking {}",
+            policy_detail,
+            if policy_detail.is_empty() { "" } else { " · " },
+            self.onboarding_route_component_detail(true, route.capture_label, route.capture_state,),
+            self.onboarding_route_component_detail(
+                false,
+                route.injection_label,
+                route.injection_state,
+            ),
             self.route_trust_status(RouteTrustDetails {
                 route: route.capture_label,
                 maturity: if route.certified {
@@ -964,6 +979,132 @@ impl Strings {
             }
         );
         (label, detail)
+    }
+
+    /// Describe capture and insertion independently, including a remedy for
+    /// each state. `Implemented` is deliberately worded as unknown rather than
+    /// as either unsupported or requiring permission.
+    pub fn onboarding_route_component_detail(
+        &self,
+        capture: bool,
+        backend: &str,
+        state: BackendState,
+    ) -> String {
+        use BackendState as S;
+        let (stage, state_label, action) = match self.lang {
+            Language::English => (
+                if capture { "Capture" } else { "Insertion" },
+                match state {
+                    S::Available => "available",
+                    S::RequiresPermission => "action needed",
+                    S::Implemented => "not yet checked",
+                    S::Unavailable => "unsupported in this session",
+                    S::NotImplemented => "not implemented",
+                },
+                match (capture, state) {
+                    (_, S::Available) => "test this stage in a normal text field",
+                    (true, S::RequiresPermission) => {
+                        match backend {
+                            "ibus" => "complete guided IBus registration and source selection; this is not raw-device access",
+                            "input-method-v2" => "complete the compositor's guided input-method setup, then recheck support",
+                            _ => "check input-device access and follow the guided permission steps",
+                        }
+                    }
+                    (false, S::RequiresPermission) => {
+                        match backend {
+                            "ibus" => "review and explicitly allow compatibility replacement in Engine settings",
+                            "input-method-v2" => "complete the compositor's input-method setup, then recheck insertion support",
+                            "libei" => "request desktop portal access; portal support is not confirmed yet",
+                            _ => "complete the required output authorization, then recheck insertion",
+                        }
+                    }
+                    (_, S::Implemented) => "refresh diagnostics to check support",
+                    (_, S::Unavailable) => match backend {
+                        "ibus" => "install and register the IBus component in guided Setup, then retry",
+                        "input-method-v2" => "this compositor lacks input-method-v2; choose another integration in Setup",
+                        "libei" => "no usable EIS injection route was detected; choose another output route",
+                        "wlroots-virtual-keyboard" => "this compositor lacks wlroots virtual-keyboard; choose another output route",
+                        _ => "choose another integration in Setup, then refresh",
+                    },
+                    (_, S::NotImplemented) => "choose a different integration in Setup",
+                },
+            ),
+            Language::Indonesian => (
+                if capture { "Tangkapan" } else { "Penyisipan" },
+                match state {
+                    S::Available => "tersedia",
+                    S::RequiresPermission => "perlu tindakan",
+                    S::Implemented => "belum diperiksa",
+                    S::Unavailable => "tidak didukung di sesi ini",
+                    S::NotImplemented => "belum diimplementasikan",
+                },
+                match (capture, state) {
+                    (_, S::Available) => "uji tahap ini di kolom teks biasa",
+                    (true, S::RequiresPermission) => {
+                        match backend {
+                            "ibus" => "selesaikan pendaftaran IBus dan pemilihan sumber terpandu; ini bukan akses perangkat mentah",
+                            "input-method-v2" => "selesaikan penyiapan input-method terpandu dari compositor, lalu periksa dukungan kembali",
+                            _ => "periksa akses perangkat input dan ikuti langkah izin terpandu",
+                        }
+                    }
+                    (false, S::RequiresPermission) => {
+                        match backend {
+                            "ibus" => "tinjau dan izinkan penggantian kompatibilitas secara eksplisit di Pengaturan Engine",
+                            "input-method-v2" => "selesaikan penyiapan input-method compositor, lalu periksa dukungan penyisipan kembali",
+                            "libei" => "minta akses portal desktop; dukungan portal belum dipastikan",
+                            _ => "selesaikan otorisasi keluaran yang diperlukan, lalu periksa penyisipan kembali",
+                        }
+                    }
+                    (_, S::Implemented) => "segarkan diagnostik untuk memeriksa dukungan",
+                    (_, S::Unavailable) => match backend {
+                        "ibus" => "pasang dan daftarkan komponen IBus melalui Penyiapan, lalu coba lagi",
+                        "input-method-v2" => "compositor ini tidak menyediakan input-method-v2; pilih integrasi lain",
+                        "libei" => "rute injeksi EIS yang dapat digunakan tidak terdeteksi; pilih keluaran lain",
+                        "wlroots-virtual-keyboard" => "compositor ini tidak menyediakan wlroots virtual-keyboard; pilih keluaran lain",
+                        _ => "pilih integrasi lain di Penyiapan, lalu segarkan",
+                    },
+                    (_, S::NotImplemented) => "pilih integrasi lain di Penyiapan",
+                },
+            ),
+            Language::German => (
+                if capture { "Erfassung" } else { "Einfügen" },
+                match state {
+                    S::Available => "verfügbar",
+                    S::RequiresPermission => "Aktion erforderlich",
+                    S::Implemented => "noch nicht geprüft",
+                    S::Unavailable => "in dieser Sitzung nicht unterstützt",
+                    S::NotImplemented => "nicht implementiert",
+                },
+                match (capture, state) {
+                    (_, S::Available) => "diesen Schritt in einem normalen Textfeld testen",
+                    (true, S::RequiresPermission) => {
+                        match backend {
+                            "ibus" => "die geführte IBus-Registrierung und Quellenauswahl abschließen; dies ist kein Rohgerätezugriff",
+                            "input-method-v2" => "die geführte Eingabemethode des Compositors einrichten und die Unterstützung erneut prüfen",
+                            _ => "Eingabegerätezugriff prüfen und den geführten Berechtigungsschritten folgen",
+                        }
+                    }
+                    (false, S::RequiresPermission) => {
+                        match backend {
+                            "ibus" => "die Kompatibilitätsersetzung in den Engine-Einstellungen prüfen und ausdrücklich erlauben",
+                            "input-method-v2" => "die Eingabemethode des Compositors einrichten und die Einfügeunterstützung erneut prüfen",
+                            "libei" => "Desktop-Portalzugriff anfordern; Portalunterstützung ist noch unbestätigt",
+                            _ => "die erforderliche Ausgabeautorisierung abschließen und das Einfügen erneut prüfen",
+                        }
+                    }
+                    (_, S::Implemented) => "Diagnose aktualisieren, um die Unterstützung zu prüfen",
+                    (_, S::Unavailable) => match backend {
+                        "ibus" => "IBus-Komponente über die geführte Einrichtung installieren und registrieren, dann erneut versuchen",
+                        "input-method-v2" => "dieser Compositor bietet input-method-v2 nicht an; eine andere Integration wählen",
+                        "libei" => "kein nutzbarer EIS-Ausgabeweg erkannt; einen anderen Ausgabeweg wählen",
+                        "wlroots-virtual-keyboard" => "dieser Compositor bietet wlroots virtual-keyboard nicht an; einen anderen Ausgabeweg wählen",
+                        _ => "in der Einrichtung eine andere Integration wählen und erneut prüfen",
+                    },
+                    (_, S::NotImplemented) => "in der Einrichtung eine andere Integration wählen",
+                },
+            ),
+        };
+        format!("{stage} ({backend}): {state_label}; {action}.")
     }
 
     pub fn onboarding_evdev_setup(&self) -> &'static str {
@@ -1013,6 +1154,73 @@ impl Strings {
 mod route_trust_tests {
     use super::*;
     use crate::lang::Language;
+
+    #[test]
+    fn recommended_route_does_not_turn_unsupported_or_unknown_into_permission_errors() {
+        let strings = Strings::new(Language::English);
+        let unsupported = strings.onboarding_route_component_detail(
+            true,
+            "input-method-v2",
+            crate::BackendState::Unavailable,
+        );
+        assert!(
+            unsupported.contains("unsupported in this session"),
+            "{unsupported}"
+        );
+        assert!(
+            unsupported.contains("choose another integration"),
+            "{unsupported}"
+        );
+        assert!(!unsupported.contains("permission"), "{unsupported}");
+
+        let unknown = strings.onboarding_route_component_detail(
+            false,
+            "libei",
+            crate::BackendState::Implemented,
+        );
+        assert!(unknown.contains("not yet checked"), "{unknown}");
+        assert!(unknown.contains("refresh diagnostics"), "{unknown}");
+        assert!(!unknown.contains("permission"), "{unknown}");
+
+        let authorization = strings.onboarding_route_component_detail(
+            false,
+            "libei",
+            crate::BackendState::RequiresPermission,
+        );
+        assert!(
+            authorization.contains("request desktop portal access"),
+            "{authorization}"
+        );
+        assert!(
+            authorization.contains("not confirmed yet"),
+            "{authorization}"
+        );
+
+        let ibus_consent = strings.onboarding_route_component_detail(
+            false,
+            "ibus",
+            crate::BackendState::RequiresPermission,
+        );
+        assert!(
+            ibus_consent.contains("compatibility replacement"),
+            "{ibus_consent}"
+        );
+        assert!(!ibus_consent.contains("portal"), "{ibus_consent}");
+
+        let unavailable_ibus = strings.onboarding_route_component_detail(
+            false,
+            "ibus",
+            crate::BackendState::Unavailable,
+        );
+        assert!(
+            unavailable_ibus.contains("install and register"),
+            "{unavailable_ibus}"
+        );
+        assert!(
+            !unavailable_ibus.contains("permission"),
+            "{unavailable_ibus}"
+        );
+    }
 
     fn summary(
         language: Language,

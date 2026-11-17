@@ -927,7 +927,7 @@ mod tests {
                 snippet_id: "test".into(),
                 trigger: ":x".into(),
                 matched_text: ":x".into(),
-                insert: "replacement".into(),
+                insert: "replace".into(),
                 cursor_offset: None,
                 reinsert_after: None,
                 command_backed: false,
