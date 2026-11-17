@@ -513,14 +513,10 @@ fn diagnose_input_method_route(
             action: "Focus the affected field, run `wayexpand ibus watch --seconds 30`, type harmless text, and rerun `wayexpand why`. This checks capture only; then run a real expansion test to verify visible delivery. A terminal-only evdev route does not cover browser or editor fields. Use `wayexpand-gui --picker --copy-only` and paste meanwhile.",
         });
     }
-    let field_input = report.check("field-input");
-    if !field_input.is_some_and(|check| check.state == IbusCheckState::Pass) {
-        return Some(InputMethodGuidance {
-            state: "field_input_unverified",
-            answer: if is_gnome { "GNOME selected WayExpand, but no normal text field has yet been confirmed to deliver input to its engine." } else { "KDE selected WayExpand, but no normal text field has yet been confirmed to deliver input to its engine." },
-            action: "Run `wayexpand ibus watch --seconds 30`, focus the affected field, and type harmless text. This checks input delivery only; use a real expansion test to confirm matching and insertion. For now, use `wayexpand-gui --picker --copy-only` and paste manually.",
-        });
-    }
+    // The aggregate chain check requires a currently focused normal field.
+    // recent_field may be unfocused so this remains useful after the user
+    // switches to a terminal to ask for help. Its timestamp is bounded above,
+    // and the report marks focus changes without identifying the application.
     if let Some(field) = recent_field {
         // A fresh no-match verdict is stronger than the general fact that
         // the field supports surrounding text. Keep this aligned with the

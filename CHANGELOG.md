@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand why` now retains content-free IBus evidence for the most recent
+  field that received input for up to five minutes. It remains useful after
+  switching to a terminal to request help, labels the evidence as historical
+  when focus changed, and never identifies the target application from it.
 - Setup diagnostics now recommend the read-only `wayexpand upgrade --check`
   before any upgrade action when the daemon build is stale. Setup preflight
   will not jump directly to `upgrade --apply`.
