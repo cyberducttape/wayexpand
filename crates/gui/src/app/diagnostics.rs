@@ -200,6 +200,23 @@ impl GuiApp {
                 );
                 ui.add(egui::Label::new(RichText::new(answer).color(palette.warning)).wrap());
                 ui.add(egui::Label::new(instruction).wrap());
+                // Keep the highest-priority repair as the single action, but
+                // retain a known route limitation as context. The terminal
+                // scope is a route property, not proof that the user's last
+                // trigger was typed in the currently focused GUI window.
+                if problem != super::Problem::TerminalRouteNoInput
+                    && situation.terminal_apps_only
+                    && situation.input_events_total == Some(0)
+                    && !situation.application_delivery_verified
+                {
+                    ui.add(
+                        egui::Label::new(
+                            self.strings
+                                .problem_text(super::Problem::TerminalRouteNoInput),
+                        )
+                        .wrap(),
+                    );
+                }
                 if ui.button(action_label).clicked() {
                     action_requested = true;
                 }
