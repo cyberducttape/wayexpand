@@ -9,6 +9,7 @@ const DEFAULT_PICKER_SHORTCUT: &str = "Ctrl+Alt+Space";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FirstRunOutcome {
     WorkingInTestedApplication,
+    ConfiguredAwaitingTest,
     SafeFallback,
     SetupIncomplete,
 }
@@ -23,6 +24,8 @@ fn first_run_outcome(
         FirstRunOutcome::SetupIncomplete
     } else if replacement_admitted && test_snippet_available && real_app_test_verified {
         FirstRunOutcome::WorkingInTestedApplication
+    } else if replacement_admitted {
+        FirstRunOutcome::ConfiguredAwaitingTest
     } else {
         FirstRunOutcome::SafeFallback
     }
@@ -31,6 +34,7 @@ fn first_run_outcome(
 fn first_run_outcome_label(strings: &Strings, outcome: FirstRunOutcome) -> &'static str {
     match outcome {
         FirstRunOutcome::WorkingInTestedApplication => strings.outcome_working(),
+        FirstRunOutcome::ConfiguredAwaitingTest => strings.outcome_configured_awaiting_test(),
         FirstRunOutcome::SafeFallback => strings.outcome_safe_fallback(),
         FirstRunOutcome::SetupIncomplete => strings.outcome_setup_incomplete(),
     }
@@ -51,7 +55,8 @@ fn replacement_test_is_admitted(
 
 /// Whether first-run should judge this desktop by its GNOME IBus route. A
 /// companion daemon runs beside the engine, so it never decides this.
-pub(super) fn uses_gnome_ibus_route(
+#[cfg(test)]
+fn uses_gnome_ibus_route(
     is_gnome: bool,
     gnome_source_active: bool,
     gnome_source_registered: bool,
@@ -59,12 +64,34 @@ pub(super) fn uses_gnome_ibus_route(
     daemon_reachable: Option<bool>,
     active_daemon_source: Option<&str>,
 ) -> bool {
+    uses_gnome_ibus_route_with_scope(
+        is_gnome,
+        gnome_source_active,
+        gnome_source_registered,
+        recommends_ibus,
+        daemon_reachable,
+        active_daemon_source,
+        false,
+    )
+}
+
+pub(super) fn uses_gnome_ibus_route_with_scope(
+    is_gnome: bool,
+    gnome_source_active: bool,
+    gnome_source_registered: bool,
+    recommends_ibus: bool,
+    daemon_reachable: Option<bool>,
+    active_daemon_source: Option<&str>,
+    terminal_only_daemon: bool,
+) -> bool {
     // A live engine process can have stale contexts without being selected by
     // GNOME. An active source proves the route; a registered source identifies
-    // the route that needs repair only when no other typing backend is active.
-    // A recommendation likewise must not override an explicit typing route.
+    // the route that needs repair only when no other typing backend is active,
+    // unless that backend is limited to terminal applications. A recommendation
+    // likewise must not override an explicit full-coverage typing route.
     let no_active_typing_daemon = daemon_reachable == Some(false)
-        || daemon_reachable == Some(true) && active_daemon_source == Some("stdin");
+        || daemon_reachable == Some(true) && active_daemon_source == Some("stdin")
+        || terminal_only_daemon;
     is_gnome
         && (gnome_source_active
             || (gnome_source_registered || recommends_ibus) && no_active_typing_daemon)
@@ -88,12 +115,25 @@ fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     })
 }
 
-/// The snippet the first-run test uses by default: the tutorial snippet when
-/// it exists, otherwise any testable snippet. Requiring the tutorial left
-/// users who wrote their own first snippet unable to finish setup, although
-/// the guide tells them a suitable static snippet works.
+/// The snippet the CLI and GUI first-run tests choose in the same order:
+/// tutorial, the standard `;;hello` sample, then any testable snippet.
+/// Requiring the tutorial left users who wrote their own first snippet unable
+/// to finish setup, although the guide tells them a suitable static snippet
+/// works.
 pub(super) fn onboarding_test_snippet(config: &Config) -> Option<&ExpansionConfig> {
-    onboarding_snippet(config).or_else(|| config.expansion.iter().find(|e| desktop_testable(e)))
+    onboarding_snippet(config)
+        .or_else(|| {
+            config
+                .expansion
+                .iter()
+                .find(|expansion| desktop_testable(expansion) && expansion.answers_to(";;hello"))
+        })
+        .or_else(|| {
+            config
+                .expansion
+                .iter()
+                .find(|expansion| desktop_testable(expansion))
+        })
 }
 
 impl GuiApp {
@@ -117,18 +157,33 @@ impl GuiApp {
     }
 
     pub(super) fn start_onboarding_desktop_test(&mut self) {
+        self.open_desktop_test(true);
+    }
+
+    /// Open a real insertion test from troubleshooting without reopening the
+    /// mandatory first-run guide or clearing an existing setup confirmation.
+    pub(crate) fn start_desktop_integration_test(&mut self) {
+        self.open_desktop_test(false);
+    }
+
+    fn open_desktop_test(&mut self, require_onboarding: bool) {
         if !self.select_default_desktop_test() {
             self.status = Status::warning(self.strings.status_create_test_expansion_first());
-            return;
+            if require_onboarding {
+                return;
+            }
         }
-        if let Some(error) = self.require_desktop_test() {
-            self.status = Status::warning(self.strings.status_real_app_test_state_unsaved(&error));
+        if require_onboarding {
+            if let Some(error) = self.require_desktop_test() {
+                self.status =
+                    Status::warning(self.strings.status_real_app_test_state_unsaved(&error));
+            }
         }
         self.test_expansion_dialog_open = true;
     }
 
     pub(crate) fn finish_onboarding(&mut self) {
-        if !self.desktop_test_verified {
+        if !self.expansion_observed() {
             self.onboarding_visible = true;
             self.status = Status::warning(self.strings.status_first_run_not_complete());
             return;
@@ -229,6 +284,14 @@ impl GuiApp {
         self.refresh_diagnostics(false);
     }
 
+    fn cancel_gnome_setup_resume(&mut self) {
+        self.start_cli_task(
+            vec!["setup".into(), "--cancel-resume".into()],
+            self.strings.gnome_resume_title().into(),
+            self.strings.gnome_resume_cancelled().into(),
+        );
+    }
+
     /// Keep the first-run guide available after saving the tutorial snippet.
     /// The preview below checks matching locally; the user separately confirms
     /// whether a real application received the replacement.
@@ -240,6 +303,8 @@ impl GuiApp {
     }
 
     pub(crate) fn render_first_run(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        let gnome_resume_marker_present =
+            wayexpand_core::gnome_ibus_setup_resume_marker_present(&self.path);
         let desktop = env::var("XDG_CURRENT_DESKTOP")
             .or_else(|_| env::var("XDG_SESSION_DESKTOP"))
             .unwrap_or_else(|_| self.strings.unknown_desktop().into());
@@ -281,8 +346,18 @@ impl GuiApp {
             && !control_only
             && !self.paused
             && self.route_state == Some(runtime::RouteState::Connected);
+        // A live input/output connection is not usable when the daemon has
+        // explicitly disabled matching (for example, terminal-only capture
+        // without a verified focused-app identity). Keep connection health
+        // visible in details, but do not mark the first onboarding step ready
+        // or offer a desktop insertion test that the current route will refuse.
+        let daemon_matching_unavailable =
+            runtime::status_field(&self.daemon_status, "matching_available").as_deref()
+                == Some("false");
         let daemon_build = daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status));
-        let gnome_ibus = uses_gnome_ibus_route(
+        let terminal_only_daemon =
+            daemon_running && super::next_step::terminal_route_is_scoped(&self.daemon_status);
+        let gnome_ibus = uses_gnome_ibus_route_with_scope(
             wayexpand_backend_selection::Compositor::detect()
                 == wayexpand_backend_selection::Compositor::Gnome
                 || self.ibus_route.as_ref().is_some_and(|report| {
@@ -304,17 +379,41 @@ impl GuiApp {
                 .is_some_and(|route| route.setup_backend() == "ibus"),
             self.daemon_reachable,
             runtime::status_field(&self.daemon_status, "source").as_deref(),
+            terminal_only_daemon,
         );
+        let kde_ibus = wayexpand_backend_selection::Compositor::detect()
+            == wayexpand_backend_selection::Compositor::KdePlasma
+            && terminal_only_daemon
+            && (self.ibus_active
+                || self.ibus_route.as_ref().is_some_and(|report| {
+                    report.desktop == wayexpand_backend_ibus::chain::IbusDesktop::KdeWayland
+                })
+                || self
+                    .recommended_route
+                    .is_some_and(|route| route.setup_backend() == "ibus"));
         let ibus_only = self.ibus_route_active() && (!daemon_running || control_only);
-        let checking = self.daemon_reachable.is_none() && !ibus_only && !gnome_ibus;
+        let checking = self.daemon_reachable.is_none() && !ibus_only && !gnome_ibus && !kde_ibus;
         // A running IBus engine is only a configured GNOME route when GNOME
         // has registered and actually selected the source. A connection by
         // itself must never look like a working desktop integration.
         let route_ready = if gnome_ibus {
             self.gnome_ibus_route_ready()
+        } else if kde_ibus {
+            self.ibus_route_active()
+                && self.ibus_check_state("manifest-scope")
+                    == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+                && !(self.ibus_route.as_ref().is_some_and(|report| {
+                    report.check("desktop").is_some_and(|check| {
+                        check.problem_id == Some("WX-KWIN-IBUS-001")
+                            && check.state == wayexpand_backend_ibus::chain::IbusCheckState::Fail
+                    })
+                }))
+                && !self.paused
         } else {
             ibus_only && !self.paused
-                || route_connected && daemon_build == Some(runtime::DaemonBuildState::Current)
+                || route_connected
+                    && !daemon_matching_unavailable
+                    && daemon_build == Some(runtime::DaemonBuildState::Current)
         };
         let test_snippet = onboarding_test_snippet(&self.config)
             .map(|expansion| (expansion.trigger.clone(), expansion.replacement.clone()));
@@ -324,9 +423,26 @@ impl GuiApp {
             .unwrap_or_else(|| ONBOARDING_TRIGGER.to_owned());
         let matcher_passed = test_snippet.is_some()
             && self.playground.last_trigger.as_deref() == Some(sample_trigger.as_str())
+            && self.playground.last_match_app.as_deref() == Some(self.preview_app.trim())
             && test_snippet
                 .as_ref()
                 .is_some_and(|(_, replacement)| self.playground.text.contains(replacement));
+        // A pending or stale diagnostic is not yet a setup failure. Keep the
+        // headline aligned with the connection step while it refreshes or
+        // reconnects, and reserve Setup incomplete for an observed blocker.
+        let setup_check_pending = checking
+            || matches!(
+                self.current_next_step().map(|(problem, _)| problem),
+                Some(
+                    super::Problem::InputStatusPending
+                        | super::Problem::InputStatusStale
+                        | super::Problem::GnomeSourceStatusUnavailable
+                        | super::Problem::ReplacementConsentUnknown
+                        | super::Problem::Connecting
+                        | super::Problem::StatusUnknown
+                        | super::Problem::RouteStatusUnknown
+                )
+            );
         let status_value = |key: &str| {
             self.daemon_status
                 .split(" · ")
@@ -355,7 +471,7 @@ impl GuiApp {
         let route_state_detail = match self.route_state {
             _ if self.paused => detail("paused"),
             // A companion's own route state says nothing about the IBus route.
-            _ if ibus_only || gnome_ibus && route_ready => detail("ibus"),
+            _ if ibus_only || (gnome_ibus || kde_ibus) && route_ready => detail("ibus"),
             Some(runtime::RouteState::PermissionRequired) => detail("permission_required"),
             Some(runtime::RouteState::PortalRevoked) => detail("portal_revoked"),
             Some(runtime::RouteState::Unsupported) => detail("unsupported"),
@@ -383,7 +499,10 @@ impl GuiApp {
             .as_ref()
             .and_then(|capabilities| capabilities.replacement_assurance)
             .map(|assurance| self.strings.replacement_explanation(assurance));
-        let replacement_test_admitted = if gnome_ibus {
+        // IBus owns replacement consent on both GNOME and KDE. The
+        // companion control daemon's injection capabilities are unrelated
+        // and may be empty while the selected IBus engine is working.
+        let replacement_test_admitted = if gnome_ibus || kde_ibus || ibus_only {
             route_ready
                 && self
                     .ibus_route
@@ -406,7 +525,7 @@ impl GuiApp {
             route_ready,
             replacement_test_admitted,
             test_snippet.is_some(),
-            self.desktop_test_verified,
+            self.expansion_observed(),
         );
 
         egui::ScrollArea::vertical()
@@ -430,10 +549,35 @@ impl GuiApp {
                         ui.set_width(ui.available_width());
                         ui.colored_label(palette.warning, self.strings.gnome_resume_title());
                         ui.label(self.strings.gnome_resume_body());
-                        if theme::primary_button(ui, palette, self.strings.gnome_resume_button())
+                        ui.horizontal_wrapped(|ui| {
+                            if theme::primary_button(
+                                ui,
+                                palette,
+                                self.strings.gnome_resume_button(),
+                            )
+                            .clicked()
+                            {
+                                self.start_guided_setup();
+                            }
+                            if ui
+                                .button(self.strings.gnome_resume_cancel_button())
+                                .clicked()
+                            {
+                                self.cancel_gnome_setup_resume();
+                            }
+                        });
+                    });
+                    ui.add_space(10.0);
+                } else if gnome_resume_marker_present {
+                    theme::card(ui, palette, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.colored_label(palette.warning, self.strings.gnome_resume_stale_title());
+                        ui.label(self.strings.gnome_resume_stale_body());
+                        if ui
+                            .button(self.strings.gnome_resume_cancel_button())
                             .clicked()
                         {
-                            self.start_guided_setup();
+                            self.cancel_gnome_setup_resume();
                         }
                     });
                     ui.add_space(10.0);
@@ -442,12 +586,20 @@ impl GuiApp {
                     ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
                         ui.label(
-                            RichText::new(first_run_outcome_label(&self.strings, outcome))
-                                .strong()
-                                .color(match outcome {
+                            RichText::new(if setup_check_pending {
+                                self.strings.first_run_checking()
+                            } else {
+                                first_run_outcome_label(&self.strings, outcome)
+                            })
+                            .strong()
+                            .color(if setup_check_pending {
+                                palette.muted
+                            } else {
+                                match outcome {
                                     FirstRunOutcome::WorkingInTestedApplication => palette.success,
                                     _ => palette.warning,
-                                }),
+                                }
+                            }),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.small_button(self.strings.onboarding_defer()).clicked() {
@@ -551,6 +703,16 @@ impl GuiApp {
                                             self.refresh_diagnostics(true);
                                         }
                                     });
+                                    if self.can_offer_recommended_ibus_setup(problem)
+                                        && theme::secondary_button(
+                                            ui,
+                                            palette,
+                                            self.strings.onboarding_set_up_recommended_ibus(),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.start_guided_setup();
+                                    }
                                 }
                                 None => {
                                     ui.colored_label(
@@ -572,6 +734,36 @@ impl GuiApp {
                                         self.refresh_diagnostics(true);
                                     }
                                 }
+                            }
+                        }
+                        // A healthy terminal-scoped route can still be too
+                        // narrow for a user's browser/editor workflow. Keep the
+                        // capability recommendation actionable during first run
+                        // even when the current route itself has no failure.
+                        let current_backend = super::setup::current_guided_setup_backend(
+                            self.daemon_reachable,
+                            &self.daemon_status,
+                            self.route_plan.as_ref(),
+                        );
+                        if route_ready
+                            && self
+                                .recommended_route
+                                .is_some_and(|route| route.setup_backend() == "ibus")
+                            && current_backend.is_some_and(|backend| backend != "ibus")
+                        {
+                            ui.label(
+                                RichText::new(self.strings.onboarding_ibus_field_limitation())
+                                    .small()
+                                    .color(palette.muted),
+                            );
+                            if theme::secondary_button(
+                                ui,
+                                palette,
+                                self.strings.onboarding_set_up_recommended_ibus(),
+                            )
+                            .clicked()
+                            {
+                                self.start_guided_setup();
                             }
                         }
                     });
@@ -641,12 +833,18 @@ impl GuiApp {
                         outcome == FirstRunOutcome::WorkingInTestedApplication,
                     );
                     ui.indent("first_run_test", |ui| {
-                        let mut offer_picker = true;
+                        let mut offer_picker =
+                            self.config.expansion.iter().any(|entry| entry.enabled);
                         if outcome == FirstRunOutcome::WorkingInTestedApplication {
                             offer_picker = false;
+                            let saved_application = self
+                                .verification_status()
+                                .filter(|(_, staleness)| staleness.is_none())
+                                .and_then(|(record, _)| record.application.as_deref());
                             let application = self
                                 .desktop_test_verified_application
                                 .as_deref()
+                                .or(saved_application)
                                 .unwrap_or(self.strings.the_tested_application());
                             ui.colored_label(
                                 palette.success,
@@ -700,7 +898,7 @@ impl GuiApp {
                                     self.strings.first_run_trigger_works_inside(),
                                 );
                             } else if ui.link(self.strings.first_run_try_inside()).clicked() {
-                                self.try_live_open = true;
+                                self.open_onboarding_matcher_preview();
                             }
                         }
                         if offer_picker && ui.link(self.strings.open_quick_picker_copy()).clicked()
@@ -880,7 +1078,7 @@ mod guided_setup_tests {
         );
         assert_eq!(
             first_run_outcome(true, true, true, false),
-            FirstRunOutcome::SafeFallback
+            FirstRunOutcome::ConfiguredAwaitingTest
         );
         assert_eq!(
             first_run_outcome(true, true, true, true),
@@ -893,7 +1091,7 @@ mod guided_setup_tests {
         );
         assert_eq!(
             first_run_outcome(true, true, false, true),
-            FirstRunOutcome::SafeFallback,
+            FirstRunOutcome::ConfiguredAwaitingTest,
             "removing the test snippet invalidates the previous ready state"
         );
     }
@@ -904,6 +1102,10 @@ mod guided_setup_tests {
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::WorkingInTestedApplication),
             "Working in tested application"
+        );
+        assert_eq!(
+            first_run_outcome_label(&strings, FirstRunOutcome::ConfiguredAwaitingTest),
+            "Configured, awaiting test"
         );
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::SafeFallback),

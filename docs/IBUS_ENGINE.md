@@ -180,8 +180,12 @@ does not prove that the target application applied the edit: IBus does not
 receive an acknowledgement of the resulting document text. `ready` therefore
 remains false until target insertion is independently verified. Field verdicts
 distinguish `replacement-context-observed` from `output-emitted-unverified`;
-neither means the target document was changed. Use
-`wayexpand debug --test ';;hello'` and confirm the result in the application.
+neither means the target document was changed. Run `wayexpand debug --test`
+and confirm the result in the application. This uses the known harmless
+tutorial snippet when configured. Otherwise, review an enabled static snippet
+with `wayexpand preview TRIGGER`, then test that exact trigger with
+`wayexpand debug --test 'TRIGGER'`. Setup and verification do not require
+`;;hello`.
 `wayexpand repair --gnome-input-source` repairs the GNOME source list, asks
 GNOME Shell's live input-source manager to select WayExpand, reads that
 manager's selection back, then verifies the IBus engine independently; it
@@ -203,8 +207,10 @@ metadata identity before packaging.
 
 On GNOME Wayland, `wayexpand setup` performs component registration,
 replacement-consent handling, GNOME input-source registration and activation,
-then offers the harmless `;;hello` real-application test. Existing GNOME
-keyboard sources are retained and the engine uses the system keyboard layout.
+then offers a real-application test when an eligible static snippet is
+available. It prefers the harmless tutorial snippet, then `;;hello`, then
+another eligible static snippet. Existing GNOME keyboard sources are retained
+and the engine uses the system keyboard layout.
 The command ends with one explicit state: `WORKING` after the user confirms an
 exact insertion in the tested application, `CONFIGURED, AWAITING TEST` when
 the interactive test was deferred, or `ACTION REQUIRED` when a prerequisite

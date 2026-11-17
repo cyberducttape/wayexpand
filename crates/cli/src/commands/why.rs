@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use wayexpand_backend_ibus::{
     chain::{self, IbusChainReport, IbusCheckState, IbusDesktop},
-    telemetry::{self, IbusFieldActivity},
+    telemetry::{self, IbusFieldActivity, IbusLatestMatch},
     IbusFieldVerdict,
 };
 use wayexpand_core::{
@@ -26,9 +26,22 @@ struct DaemonRoute {
     source: String,
     backend: String,
     diagnosis: ExpansionDiagnosis,
+    capture_app_scope_state: Option<String>,
+    matching_unavailable_reason: Option<String>,
+    window_process_identity_state: Option<String>,
     terminal_paste_last_failure: Option<String>,
+    enabled_expansions: Option<usize>,
 }
 
+/// Content-free IBus telemetry about the most recent field to receive input.
+/// `field.focused` distinguishes current evidence from recent history after
+/// the user switches to the terminal or diagnostics to ask for help.
+struct IbusFieldEvidence {
+    recent_typed: Option<IbusFieldActivity>,
+    keys_seen: u64,
+}
+
+#[derive(Clone, Copy)]
 struct InputMethodGuidance {
     state: &'static str,
     answer: &'static str,
@@ -47,11 +60,51 @@ fn daemon_route(status: &DaemonStatus) -> Option<DaemonRoute> {
         source: status.field("source").unwrap_or_default().to_owned(),
         backend: status.field("backend").unwrap_or_default().to_owned(),
         diagnosis: ExpansionDiagnosis::from_status(status),
+        capture_app_scope_state: status.field("capture_app_scope_state").map(str::to_owned),
+        matching_unavailable_reason: status
+            .field("matching_unavailable_reason")
+            .map(str::to_owned),
+        window_process_identity_state: status
+            .field("window_process_identity_state")
+            .map(str::to_owned),
         terminal_paste_last_failure: status
             .field("terminal_paste_last_failure")
             .filter(|failure| *failure != "none")
             .map(str::to_owned),
+        enabled_expansions: status
+            .field("config_enabled_expansions")
+            .and_then(|count| count.parse::<usize>().ok()),
     })
+}
+
+/// Current focus-scope refusal for a terminal-only route. This is live route
+/// health, not a claim about the identity of an earlier target application.
+fn terminal_scope_guidance(route: &DaemonRoute) -> Option<InputMethodGuidance> {
+    if !route.diagnosis.terminal_apps_only {
+        return None;
+    }
+    match route.matching_unavailable_reason.as_deref() {
+        Some("application_scope_unknown")
+            if route.window_process_identity_state.as_deref() == Some("compositor-process-id") =>
+        {
+            Some(InputMethodGuidance {
+                state: "terminal_compositor_identity",
+                answer: "KWin's focus tracker is connected, but it reported KWin's own process ID instead of the focused terminal's application identity. The terminal-only route therefore blocks matching.",
+                action: "Use `wayexpand-gui --picker --copy-only`, copy the snippet, and paste it in the terminal. This diagnosis already confirms that KWin supplied its own PID; no allowlist setting can make that a trustworthy terminal identity. Do not allowlist `kwin_wayland` or use a window title. Retest automatic expansion only after KWin reports a verified client application ID.",
+            })
+        }
+        Some("application_scope_unknown") => Some(InputMethodGuidance {
+            state: "terminal_focus_unknown",
+            answer: "The terminal-only route is failing closed because the compositor has not supplied a focused application ID. It cannot match expansions until focus tracking identifies the target.",
+            action: "Immediate workaround: run `wayexpand-gui --picker --copy-only`, copy the snippet, and paste it in the terminal. To diagnose the blocked route, focus the terminal and run `wayexpand debug --focused-app-id --json`. If `focused_app_id` is null, follow its problem ID and suggested action; do not allowlist a compositor or window title.",
+        }),
+        Some("application_scope_denied") => Some(InputMethodGuidance {
+            state: "terminal_app_not_allowed",
+            answer: "The currently focused application is outside the configured terminal-only allowlist, so this route will not match there.",
+            action: "If this is a terminal you intend to support, run `wayexpand debug --focused-app-id --json` while it is focused and add only its verified application ID to `[settings].terminal_apps`; then restart the selected service and retest. Browser and editor fields need another route or Quick Picker copy-and-paste.",
+        }),
+        _ => None,
+    }
 }
 
 pub(crate) fn why_command(args: Args) -> Result<()> {
@@ -70,29 +123,125 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
     let daemon_status_compatible = status
         .as_ref()
         .map(|status| status.status_schema() == Some(CONTROL_STATUS_SCHEMA));
+    let daemon_build_state = status.as_ref().map(|status| {
+        let commit = status.field("daemon_commit");
+        let version = status.field("daemon_version");
+        if crate::doctor::status::daemon_build_matches(commit, version) {
+            "current"
+        } else if crate::doctor::status::daemon_build_unknown(commit, version) {
+            "unverified"
+        } else {
+            "restart_required"
+        }
+    });
+    // A matching protocol schema does not make stale daemon telemetry current.
+    // Do not diagnose a KWin focus event or output transaction produced by a
+    // different build as though it described this CLI's behavior.
+    if daemon_status_compatible == Some(true)
+        && daemon_build_state.is_some_and(|state| state != "current")
+    {
+        let state = daemon_build_state.unwrap_or("unverified");
+        let (answer, next_action) = if state == "restart_required" {
+            (
+                "The running WayExpand daemon was built differently from this CLI, so its route and expansion history may be stale.",
+                "Run `wayexpand upgrade --check` with the CLI from the active installation, then apply the reported upgrade or restart and run `wayexpand why` again.",
+            )
+        } else {
+            (
+                "WayExpand cannot verify that the running daemon matches this CLI, so it cannot trust route or expansion history.",
+                "Run `wayexpand upgrade --check` with the CLI from the active installation. Resolve the build identity warning, then run `wayexpand why` again.",
+            )
+        };
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "diagnosis": {
+                        "state": if state == "restart_required" { "daemon_build_mismatch" } else { "daemon_build_unverified" },
+                        "answer": answer,
+                        "next_action": next_action,
+                        "pattern_match": "not_evaluated",
+                        "delivery_status": "not_attempted",
+                        "application_delivery_verified": false,
+                        "matcher_preview_proves_application_delivery": false,
+                    },
+                    "daemon_status_schema": daemon_status_schema,
+                    "daemon_status_compatible": daemon_status_compatible,
+                    "daemon_build_state": state,
+                    "daemon": status.as_ref().map(|status| serde_json::json!({
+                        "source": status.field("source"),
+                        "backend": status.field("backend"),
+                        "version": status.field("daemon_version"),
+                        "commit": status.field("daemon_commit"),
+                    })),
+                    "ibus": serde_json::Value::Null,
+                    "desktop_input_route": serde_json::Value::Null,
+                    "matcher_preview_proves_application_delivery": false,
+                    "application_delivery_verified": false,
+                })
+            );
+        } else {
+            println!("Why expansion did not work: {answer}");
+            println!("Next: {next_action}");
+            println!("Trigger match: not evaluated. Text delivery: not attempted.");
+            println!("A matcher preview does not verify insertion into an application.");
+        }
+        return Err(classified_error(
+            CliErrorKind::Daemon,
+            format!("WX-VERSION-001: {answer} Run `wayexpand upgrade --check` before trusting route diagnostics."),
+        ));
+    }
     let daemon = status.as_ref().and_then(daemon_route);
-    // GNOME and KDE select IBus through desktop input-source controls. Inspect
-    // that route only when there is no other typing daemon to diagnose, so an
-    // unused IBus installation doesn't look broken.
+    let enabled_expansions = status.as_ref().and_then(|status| {
+        (daemon_status_compatible == Some(true) && daemon_build_state == Some("current"))
+            .then(|| status.field("config_enabled_expansions"))
+            .flatten()
+            .and_then(|count| count.parse::<usize>().ok())
+    });
+    // GNOME and KDE select IBus through desktop input-source controls. A
+    // control-only daemon can coexist with the IBus typing engine, and a
+    // terminal-only capture daemon does not cover browser/editor fields. Keep
+    // IBus evidence available in both cases; focused-field evidence determines
+    // which route can explain the latest application input.
     let desktop = IbusDesktop::detect();
-    let input_method_route = (daemon.is_none()
+    let ibus_route_relevant = daemon
+        .as_ref()
+        .is_none_or(|route| route.source == "stdin" || route.diagnosis.terminal_apps_only);
+    let input_method_route = (ibus_route_relevant
         && daemon_status_compatible != Some(false)
         && matches!(desktop, IbusDesktop::Gnome | IbusDesktop::KdeWayland))
     .then(chain::diagnose);
-    let input_method_guidance = input_method_route
-        .as_ref()
-        .and_then(diagnose_input_method_route);
-    let ibus_field = if daemon.is_none() && daemon_status_compatible != Some(false) {
-        telemetry::read_status()
-            .filter(|reading| reading.live)
-            .map(|reading| newest_typed_field(&reading.status.recent_fields).cloned())
-    } else {
-        None
-    };
+    // A control-only daemon does not capture typing, but its pause state also
+    // governs the paired IBus engine. Keep that state for the IBus diagnosis
+    // instead of discarding it with `daemon_route`.
+    let input_method_paused = daemon_status_compatible == Some(true)
+        && daemon_build_state == Some("current")
+        && status
+            .as_ref()
+            .is_some_and(|status| status.field("paused") == Some("true"));
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
-
+    let ibus_field = if ibus_route_relevant && daemon_status_compatible != Some(false) {
+        telemetry::read_status()
+            .filter(|reading| reading.live)
+            .map(|reading| IbusFieldEvidence {
+                recent_typed: newest_typed_field(&reading.status.recent_fields, now).cloned(),
+                keys_seen: reading.status.totals.keys,
+            })
+    } else {
+        None
+    };
+    let input_method_guidance = input_method_route.as_ref().and_then(|report| {
+        diagnose_input_method_route(
+            report,
+            ibus_field
+                .as_ref()
+                .and_then(|evidence| evidence.recent_typed.as_ref()),
+            enabled_expansions,
+            input_method_paused,
+        )
+    });
     if json {
         println!(
             "{}",
@@ -135,13 +284,33 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
     Ok(())
 }
 
-/// The newest field the user typed in: the place the trigger most likely
-/// went. Fields only focused, with no keys, say nothing about it.
-fn newest_typed_field(fields: &[IbusFieldActivity]) -> Option<&IbusFieldActivity> {
-    fields.iter().rev().find(|field| field.keys > 0)
+/// The most recent field that received keys within the bounded diagnostic
+/// window. It may have lost focus while the user opened diagnostics; callers
+/// must use `focused` to avoid attributing its evidence to the current app.
+fn newest_typed_field(fields: &[IbusFieldActivity], now: u64) -> Option<&IbusFieldActivity> {
+    fields
+        .iter()
+        .filter(|field| {
+            field.keys > 0
+                && field.last_key_unix > 0
+                && now.saturating_sub(field.last_key_unix) <= 300
+        })
+        .max_by_key(|field| field.last_key_unix)
 }
 
-fn diagnose_input_method_route(report: &IbusChainReport) -> Option<InputMethodGuidance> {
+fn diagnose_input_method_route(
+    report: &IbusChainReport,
+    recent_field: Option<&IbusFieldActivity>,
+    enabled_expansions: Option<usize>,
+    paused: bool,
+) -> Option<InputMethodGuidance> {
+    if paused {
+        return Some(InputMethodGuidance {
+            state: "paused",
+            answer: "WayExpand is paused, so it will not expand triggers in the selected application.",
+            action: "Run `wayexpand resume`, then rerun `wayexpand why` and perform one harmless live typing test. A matcher preview does not verify application delivery.",
+        });
+    }
     if !matches!(report.desktop, IbusDesktop::Gnome | IbusDesktop::KdeWayland) {
         // Desktop detection can race the IBus report or identify a session
         // outside the currently supported desktop-specific branches. Keep
@@ -209,6 +378,52 @@ fn diagnose_input_method_route(report: &IbusChainReport) -> Option<InputMethodGu
             });
         }
     }
+    if !is_gnome {
+        if let Some(desktop) = report.check("desktop") {
+            match (desktop.problem_id, desktop.state) {
+                (Some("WX-KWIN-IBUS-001"), IbusCheckState::Fail) => {
+                    return Some(InputMethodGuidance {
+                        state: "kwin_ibus_route_unavailable",
+                        answer: "KWin is not routing keyboard input through IBus, so WayExpand cannot receive typing on this route.",
+                        action: "Run `wayexpand setup --backend ibus` to configure KWin's IBus Wayland route after reviewing the changes. If setup reports that `kwriteconfig` is unavailable or cannot apply the setting, select IBus Wayland in KDE System Settings → Keyboard → Virtual Keyboard. Then run `wayexpand debug --test` in a disposable text field to verify a real insertion. Use `wayexpand-gui --picker --copy-only` and paste meanwhile.",
+                    });
+                }
+                (Some("WX-KWIN-IBUS-002"), IbusCheckState::Warn) if recent_field.is_none() => {
+                    return Some(InputMethodGuidance {
+                        state: "kwin_ibus_helper_recently_crashed",
+                        answer: "KWin's IBus Wayland helper has crashed recently, although it is running now. Input delivery needs a live test.",
+                        action: "Run `wayexpand debug --test` in a disposable text field; it uses only a known harmless tutorial snippet. If no tutorial is configured, create one with the GUI Test Expansion flow or review a snippet and select its trigger explicitly. If the test sees no input, run `wayexpand ibus watch --seconds 30`, then `coredumpctl info ibus-ui-gtk3` and check for an IBus package update. Use `wayexpand-gui --picker --copy-only` and paste meanwhile.",
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+    // Match the GUI's route-readiness gate: fresh field activity does not make
+    // an unsafe shared registration ready. Keep the repair visible in both
+    // interfaces even when the engine happened to receive recent input.
+    if let Some(scope) = report.check("manifest-scope") {
+        if scope.state != IbusCheckState::Pass {
+            let invalid = scope.state == IbusCheckState::Fail;
+            return Some(InputMethodGuidance {
+                state: if invalid {
+                    "ibus_manifest_scope_invalid"
+                } else {
+                    "ibus_manifest_scope_unknown"
+                },
+                answer: if invalid {
+                    "The shared IBus registration is not safe for multi-user use because it points to a user-owned executable or untrusted shared files."
+                } else {
+                    "WayExpand could not verify that the shared IBus registration and engine are protected for multi-user use."
+                },
+                action: if invalid {
+                    "Run `wayexpand setup --backend ibus --install-system-integration` to install a system-owned engine and manifest, or install the distribution package. Setup may request administrator authorization. Then run `wayexpand ibus status --json` and test in a real application."
+                } else {
+                    "Run `wayexpand ibus status --json` to inspect the shared-registration check. If it fails, run `wayexpand setup --backend ibus --install-system-integration` or install the distribution package; then rerun this diagnosis."
+                },
+            });
+        }
+    }
     let active = report.check(if is_gnome {
         "gnome-source-active"
     } else {
@@ -225,9 +440,9 @@ fn diagnose_input_method_route(report: &IbusChainReport) -> Option<InputMethodGu
                     "Text expansion is unavailable because WayExpand is not the selected IBus input method."
                 },
                 action: if is_gnome {
-                    "Select WayExpand in Settings → Keyboard or the input-source menu. Then run `wayexpand ibus watch --seconds 30` while typing harmless text in a normal field. For now, use `wayexpand-gui --picker --copy-only` and paste manually."
+                    "Select WayExpand in Settings → Keyboard or the input-source menu. Then use the GUI's Test in an app flow with the intended trigger and confirm that the replacement appears in the affected application; `wayexpand ibus watch --seconds 30` checks input capture only, not insertion. For now, use `wayexpand-gui --picker --copy-only` and paste manually."
                 } else {
-                    "Select WayExpand from KDE's input-method controls, then run `wayexpand ibus watch --seconds 30` while typing harmless text in a normal field. For now, use `wayexpand-gui --picker --copy-only` and paste manually."
+                    "Select WayExpand from KDE's input-method controls. Then use the GUI's Test in an app flow with the intended trigger and confirm that the replacement appears in the affected application; `wayexpand ibus watch --seconds 30` checks input capture only, not insertion. For now, use `wayexpand-gui --picker --copy-only` and paste manually."
                 },
             },
             _ => InputMethodGuidance {
@@ -243,24 +458,6 @@ fn diagnose_input_method_route(report: &IbusChainReport) -> Option<InputMethodGu
                     "Run `wayexpand ibus status --json` and follow its first failed or unknown check. You can use `wayexpand-gui --picker --copy-only` and paste manually."
                 },
             },
-        });
-    }
-    let consent = report
-        .check("consent")
-        .map_or(IbusCheckState::Unknown, |check| check.state);
-    if consent != IbusCheckState::Pass {
-        return Some(if consent == IbusCheckState::Fail {
-            InputMethodGuidance {
-                state: "replacement_not_allowed",
-                answer: if is_gnome { "GNOME selected WayExpand, but replacement is disabled by consent or policy." } else { "KDE selected WayExpand, but replacement is disabled by consent or policy." },
-                action: "Review `wayexpand ibus status` and authorize replacement only if you accept its non-atomic behavior; otherwise use `wayexpand-gui --picker --copy-only` and paste manually.",
-            }
-        } else {
-            InputMethodGuidance {
-                state: "replacement_consent_unknown",
-                answer: "WayExpand cannot confirm that IBus replacement is authorized, so it will not claim the route is ready.",
-                action: "Run `wayexpand validate`, then `wayexpand ibus status`. If you accept the non-atomic behavior, authorize it through guided setup; otherwise use `wayexpand-gui --picker --copy-only` and paste manually.",
-            }
         });
     }
     let engine = report.check("engine");
@@ -280,6 +477,42 @@ fn diagnose_input_method_route(report: &IbusChainReport) -> Option<InputMethodGu
             },
         });
     }
+    // A selected source whose engine is not alive cannot receive typing.
+    // Diagnose that earlier pipeline stage before asking the user to review
+    // replacement consent; otherwise two simultaneous problems can produce
+    // a misleading consent-first instruction.
+    let consent = report
+        .check("consent")
+        .map_or(IbusCheckState::Unknown, |check| check.state);
+    if consent != IbusCheckState::Pass {
+        return Some(if consent == IbusCheckState::Fail {
+            InputMethodGuidance {
+                state: "replacement_not_allowed",
+                answer: if is_gnome { "GNOME selected WayExpand, but replacement is disabled by consent or policy." } else { "KDE selected WayExpand, but replacement is disabled by consent or policy." },
+                action: "Review `wayexpand ibus status` and authorize replacement only if you accept its non-atomic behavior; otherwise use `wayexpand-gui --picker --copy-only` and paste manually.",
+            }
+        } else {
+            InputMethodGuidance {
+                state: "replacement_consent_unknown",
+                answer: "WayExpand cannot confirm that IBus replacement is authorized, so it will not claim the route is ready.",
+                action: "Run `wayexpand validate`, then `wayexpand ibus status`. If you accept the non-atomic behavior, authorize it through guided setup; otherwise use `wayexpand-gui --picker --copy-only` and paste manually.",
+            }
+        });
+    }
+    if enabled_expansions == Some(0) && recent_field.is_some() {
+        return Some(InputMethodGuidance {
+            state: "no_enabled_expansions",
+            answer: "WayExpand's input route is ready, but its loaded configuration has no enabled keyboard expansions.",
+            action: "Open WayExpand's snippet library, enable a keyboard expansion or create a text expansion, save, and reload the configuration. Then type that trigger in a real application. A matcher preview alone does not verify delivery.",
+        });
+    }
+    if recent_field.is_none() {
+        return Some(InputMethodGuidance {
+            state: "no_recent_typed_field",
+            answer: "WayExpand has no recent IBus field with typed-input evidence, so it cannot tell whether the affected application sent its trigger to IBus.",
+            action: "Focus the affected field, run `wayexpand ibus watch --seconds 30`, type harmless text, and rerun `wayexpand why`. This checks capture only; then run a real expansion test to verify visible delivery. A terminal-only evdev route does not cover browser or editor fields. Use `wayexpand-gui --picker --copy-only` and paste meanwhile.",
+        });
+    }
     let field_input = report.check("field-input");
     if !field_input.is_some_and(|check| check.state == IbusCheckState::Pass) {
         return Some(InputMethodGuidance {
@@ -287,6 +520,57 @@ fn diagnose_input_method_route(report: &IbusChainReport) -> Option<InputMethodGu
             answer: if is_gnome { "GNOME selected WayExpand, but no normal text field has yet been confirmed to deliver input to its engine." } else { "KDE selected WayExpand, but no normal text field has yet been confirmed to deliver input to its engine." },
             action: "Run `wayexpand ibus watch --seconds 30`, focus the affected field, and type harmless text. This checks input delivery only; use a real expansion test to confirm matching and insertion. For now, use `wayexpand-gui --picker --copy-only` and paste manually.",
         });
+    }
+    if let Some(field) = recent_field {
+        // A fresh no-match verdict is stronger than the general fact that
+        // the field supports surrounding text. Keep this aligned with the
+        // GUI's TriggerNotMatched state: a matcher preview can help inspect
+        // the rule, but it does not test delivery into the application.
+        if field.latest_match == telemetry::IbusLatestMatch::NoMatch {
+            return Some(InputMethodGuidance {
+                state: "trigger_not_matched",
+                answer: "WayExpand received input in a recent IBus field, but no configured trigger matched its latest input.",
+                action: "Check the exact trigger, enabled state, match mode, and application filters with `wayexpand explain 'THE_TRIGGER'`. Then type the trigger in the affected application and verify the visible replacement; a matcher result alone does not prove delivery. Use `wayexpand-gui --picker --copy-only` and paste if this field cannot be replaced safely.",
+            });
+        }
+        let verdict = IbusFieldVerdict::of(field);
+        let specific = match verdict {
+            IbusFieldVerdict::NoSurroundingText => Some((
+                "field_no_surrounding_text",
+                "The most recently observed IBus field does not provide surrounding text, so WayExpand refuses automatic replacement there.",
+            )),
+            IbusFieldVerdict::Sensitive => Some((
+                "sensitive_field",
+                "WayExpand intentionally suppresses expansion in the most recently observed sensitive IBus field.",
+            )),
+            IbusFieldVerdict::OutputEmittedUnverified => Some((
+                "output_submitted_unverified",
+                "WayExpand submitted replacement output in the most recently observed IBus field, but cannot confirm that the application changed its text.",
+            )),
+            IbusFieldVerdict::Mismatch => Some((
+                "surrounding_text_mismatch",
+                "The most recently observed IBus field's surrounding text did not match the trigger context WayExpand expected.",
+            )),
+            IbusFieldVerdict::Policy => Some((
+                "replacement_blocked_by_policy",
+                "Policy blocked replacement in the most recently observed IBus field.",
+            )),
+            IbusFieldVerdict::NoContentType | IbusFieldVerdict::Idle => Some((
+                "field_input_not_observed",
+                "The most recently observed IBus field has not supplied enough normal-field input to diagnose expansion.",
+            )),
+            IbusFieldVerdict::ReplacementContextObserved => Some((
+                "replacement_context_observed",
+                "The most recently observed field provides replacement context, but this does not prove the trigger matched or the application changed its text.",
+            )),
+        };
+        if let Some((state, answer)) = specific {
+            return Some(InputMethodGuidance {
+                state,
+                answer,
+                action: ibus_field_action(verdict, field.latest_match),
+            });
+        }
     }
     Some(InputMethodGuidance {
         state: "input_observed_delivery_unverified",
@@ -297,7 +581,7 @@ fn diagnose_input_method_route(report: &IbusChainReport) -> Option<InputMethodGu
 
 fn report_json(
     daemon: Option<&DaemonRoute>,
-    ibus_field: Option<&Option<IbusFieldActivity>>,
+    ibus_field: Option<&IbusFieldEvidence>,
     now: u64,
     daemon_status_schema: Option<u32>,
     daemon_status_compatible: Option<bool>,
@@ -306,11 +590,26 @@ fn report_json(
     let daemon_json = daemon.map(|route| {
         let diagnosis = &route.diagnosis;
         let verdict = diagnosis.verdict(now);
+        let scope_guidance = terminal_scope_guidance(route);
         serde_json::json!({
             "source": route.source,
             "backend": route.backend,
-            "verdict": verdict.code(),
-            "matching_block": diagnosis.matching_block.map(MatchingBlock::code),
+        "verdict": scope_guidance.as_ref().map_or_else(
+            || {
+                if route.enabled_expansions == Some(0)
+                    && verdict == Verdict::NothingMatched
+                {
+                    "no_enabled_expansions"
+                } else {
+                    verdict.code()
+                }
+            },
+            |guidance| guidance.state,
+        ),
+            "matching_block": scope_guidance.as_ref().map(|guidance| guidance.state).or_else(|| diagnosis.matching_block.map(MatchingBlock::code)),
+            "matching_unavailable_reason": route.matching_unavailable_reason.as_deref(),
+            "capture_app_scope_state": route.capture_app_scope_state.as_deref(),
+            "window_process_identity_state": route.window_process_identity_state.as_deref(),
             "last_outcome": match verdict {
                 Verdict::LastStopped(kind) => Some(kind.code()),
                 Verdict::LastExpanded => diagnosis.recent.first().map(|outcome| outcome.kind.code()),
@@ -325,16 +624,31 @@ fn report_json(
                 "at_unix": outcome.at_unix,
                 "outcome": outcome.kind.code(),
                 "completion": outcome.completion,
+                "pattern_match": recent_pattern_match_status(outcome.kind),
+                "delivery_status": recent_delivery_status(outcome.kind),
+                "application_delivery_verified": false,
             })).collect::<Vec<_>>(),
         })
     });
     let ibus = ibus_field.map(|field| {
-        let field = field.as_ref();
+        let recent_typed = field.recent_typed.as_ref();
+        let focus_state = recent_typed.map_or("none", |field| {
+            if field.focused { "current" } else { "changed_since_input" }
+        });
+        let (pattern_match, delivery_status) = recent_typed
+            .map(ibus_stage_status)
+            .unwrap_or(("unknown", "not_attempted"));
         serde_json::json!({
-            "verdict": field.map(|field| IbusFieldVerdict::of(field).label()),
-            "next_action": field.map(|field| ibus_field_action(IbusFieldVerdict::of(field))),
-            "keys": field.map(|field| field.keys),
-            "expansions": field.map(|field| field.expansions),
+            "verdict": recent_typed.map(|field| IbusFieldVerdict::of(field).label()),
+            "field_focus_state": focus_state,
+            "target_application_identified": false,
+            "next_action": recent_typed.map(|field| ibus_field_action(IbusFieldVerdict::of(field), field.latest_match))
+                .or_else(|| Some(ibus_no_current_field_action(field.keys_seen))),
+            "keys": recent_typed.map(|field| field.keys),
+            "expansions": recent_typed.map(|field| field.expansions),
+            "keys_seen_this_session": field.keys_seen,
+            "pattern_match": pattern_match,
+            "delivery_status": delivery_status,
         })
     });
     // Keep one plain-language conclusion alongside the detailed telemetry.
@@ -347,41 +661,80 @@ fn report_json(
             "next_action": "Run `wayexpand upgrade --check` and resolve the reported version mismatch before using this diagnosis.",
             "application_delivery_verified": false,
         })
+    } else if let Some(guidance) = daemon.and_then(terminal_scope_guidance) {
+        serde_json::json!({
+            "state": guidance.state,
+            "answer": guidance.answer,
+            "next_action": guidance.action,
+            "application_delivery_verified": false,
+            "pattern_match": "blocked_by_focus_identity",
+            "delivery_status": "not_attempted",
+        })
     } else if let Some(guidance) = input_method {
         serde_json::json!({
             "state": guidance.state,
             "answer": guidance.answer,
             "next_action": guidance.action,
             "application_delivery_verified": false,
+            "pattern_match": "not_evaluated",
+            "delivery_status": "not_attempted",
         })
     } else if let Some(route) = daemon {
         let verdict = route.diagnosis.verdict(now);
-        let (answer, next_action) = verdict_text(
-            &route.diagnosis,
-            now,
-            route.terminal_paste_last_failure.as_deref(),
-        );
-        serde_json::json!({
-            "state": verdict.code(),
-            "answer": answer,
-            "next_action": next_action,
-            "application_delivery_verified": false,
-        })
+        if route.enabled_expansions == Some(0) && verdict == Verdict::NothingMatched {
+            serde_json::json!({
+                "state": "no_enabled_expansions",
+                "answer": "WayExpand received input, but the running configuration has no enabled keyboard expansions.",
+                "next_action": "Open WayExpand's snippet library, enable a keyboard expansion or create a text expansion, save, and run `wayexpand reload`. Then type its trigger in the affected application. A matcher preview does not verify delivery.",
+                "application_delivery_verified": false,
+            })
+        } else {
+            let (answer, next_action) = verdict_text(
+                &route.diagnosis,
+                now,
+                route.terminal_paste_last_failure.as_deref(),
+            );
+            serde_json::json!({
+                "state": verdict.code(),
+                "answer": answer,
+                "next_action": next_action,
+                "application_delivery_verified": false,
+            })
+        }
     } else if let Some(field) = ibus_field {
-        match field {
+        match field.recent_typed.as_ref() {
             Some(field) => {
                 let verdict = IbusFieldVerdict::of(field);
+                let (pattern_match, delivery_status) = ibus_stage_status(field);
                 serde_json::json!({
                     "state": verdict.label(),
-                    "answer": sentence(verdict.explanation()),
-                    "next_action": ibus_field_action(verdict),
+                    "answer": if field.focused {
+                        sentence(verdict.explanation())
+                    } else {
+                        format!("{} Focus changed since this input; WayExpand cannot identify the application from this telemetry.", sentence(verdict.explanation()))
+                    },
+                    "next_action": ibus_field_action(verdict, field.latest_match),
+                    "pattern_match": pattern_match,
+                    "delivery_status": delivery_status,
                     "application_delivery_verified": false,
                 })
             }
+            None if field.keys_seen > 0 => serde_json::json!({
+                "state": "no_recent_typed_field",
+                "answer": "IBus received typing in this login session, but has no recent field-level input evidence.",
+                "next_action": ibus_no_current_field_action(field.keys_seen),
+                "keys_seen_this_session": field.keys_seen,
+                "pattern_match": "unknown",
+                "delivery_status": "unknown",
+                "application_delivery_verified": false,
+            }),
             None => serde_json::json!({
                 "state": "no_input_observed",
                 "answer": "No typing has reached the IBus engine in this login session.",
-                "next_action": "Check that WayExpand is the active input method with `wayexpand ibus status`, then type harmless text while `wayexpand ibus watch --seconds 30` runs.",
+                "next_action": ibus_no_current_field_action(field.keys_seen),
+                "keys_seen_this_session": 0,
+                "pattern_match": "no_input_observed",
+                "delivery_status": "not_attempted",
                 "application_delivery_verified": false,
             }),
         }
@@ -397,56 +750,64 @@ fn report_json(
     // A recent outcome can prove that a trigger matched and output was
     // submitted, but WayExpand cannot observe whether the application applied
     // that output. Matcher previews are likewise local checks only.
+    let (pattern_match, delivery_status) = if daemon.and_then(terminal_scope_guidance).is_some() {
+        ("blocked_by_focus_identity", "not_attempted")
+    } else if let Some(guidance) = input_method {
+        input_method_stage_status(guidance, ibus_field)
+    } else if let Some(route) = daemon {
+        if route.enabled_expansions == Some(0)
+            && route.diagnosis.verdict(now) == Verdict::NothingMatched
+        {
+            ("not_matched", "not_attempted")
+        } else {
+            daemon_stage_status(route.diagnosis.verdict(now))
+        }
+    } else if let Some(field) = ibus_field.and_then(|evidence| evidence.recent_typed.as_ref()) {
+        ibus_stage_status(field)
+    } else if ibus_field.is_some_and(|evidence| evidence.keys_seen == 0) {
+        ("no_input_observed", "not_attempted")
+    } else {
+        ("unknown", "unknown")
+    };
     if let Some(object) = diagnosis.as_object_mut() {
         object.insert(
             "pattern_match".into(),
-            serde_json::Value::String("unknown".into()),
+            serde_json::Value::String(pattern_match.into()),
         );
         object.insert(
             "delivery_status".into(),
-            serde_json::Value::String("unknown".into()),
+            serde_json::Value::String(delivery_status.into()),
         );
         object.insert(
             "matcher_preview_proves_application_delivery".into(),
             serde_json::Value::Bool(false),
         );
-    }
-    if let Some(route) = daemon {
-        let verdict = route.diagnosis.verdict(now);
-        let pattern_match = match verdict {
-            Verdict::LastStopped(_) | Verdict::LastExpanded => "confirmed_recently",
-            Verdict::NothingMatched => "not_observed_recently",
-            Verdict::NoTypingSeen => "no_input_observed",
-            Verdict::MatchingOff(_) => "blocked",
-            Verdict::InputStatusUnknown => "unknown",
-        };
-        let delivery = match verdict {
-            Verdict::LastExpanded => "submitted_unverified",
-            Verdict::LastStopped(OutcomeKind::Partial) => "partial_or_uncertain",
-            Verdict::LastStopped(OutcomeKind::Unknown) => "uncertain",
-            Verdict::LastStopped(OutcomeKind::NotApplied) => "not_submitted",
-            Verdict::LastStopped(OutcomeKind::BlockedByPolicy) => "blocked_by_policy",
-            Verdict::LastStopped(OutcomeKind::InterruptedByTyping) => "stopped_before_output",
-            Verdict::LastStopped(OutcomeKind::SnippetActionFailed) => "snippet_action_failed",
-            Verdict::LastStopped(_) => "unknown",
-            Verdict::MatchingOff(_) => "blocked",
-            Verdict::NoTypingSeen | Verdict::NothingMatched | Verdict::InputStatusUnknown => {
-                "not_observed"
+        if let Some(field) = ibus_field.and_then(|evidence| evidence.recent_typed.as_ref()) {
+            object.insert(
+                "ibus_field_focus_state".into(),
+                serde_json::Value::String(
+                    if field.focused {
+                        "current"
+                    } else {
+                        "changed_since_input"
+                    }
+                    .into(),
+                ),
+            );
+            if !field.focused {
+                if let Some(answer) = object
+                    .get("answer")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                {
+                    object.insert(
+                        "answer".into(),
+                        serde_json::Value::String(format!(
+                            "{answer} Focus changed since this input; the application is not identified by this telemetry."
+                        )),
+                    );
+                }
             }
-        };
-        if let Some(object) = diagnosis.as_object_mut() {
-            object.insert(
-                "pattern_match".into(),
-                serde_json::Value::String(pattern_match.into()),
-            );
-            object.insert(
-                "delivery_status".into(),
-                serde_json::Value::String(delivery.into()),
-            );
-            object.insert(
-                "matcher_preview_proves_application_delivery".into(),
-                serde_json::Value::Bool(false),
-            );
         }
     }
     serde_json::json!({
@@ -467,12 +828,13 @@ fn report_json(
 
 fn print_report(
     daemon: Option<&DaemonRoute>,
-    ibus_field: Option<&Option<IbusFieldActivity>>,
+    ibus_field: Option<&IbusFieldEvidence>,
     now: u64,
     daemon_status_schema: Option<u32>,
     daemon_status_compatible: Option<bool>,
     input_method: Option<&InputMethodGuidance>,
 ) {
+    let scope_guidance = daemon.and_then(terminal_scope_guidance);
     if daemon_status_compatible == Some(false) {
         println!("Keyboard route");
         println!(
@@ -491,6 +853,7 @@ fn print_report(
     if daemon.is_none()
         && ibus_field.is_none()
         && input_method.is_none()
+        && scope_guidance.is_none()
         && daemon_status_compatible != Some(false)
     {
         println!("No WayExpand typing route is running, so nothing can expand.");
@@ -498,33 +861,63 @@ fn print_report(
         println!("For manual insertion meanwhile: open `wayexpand-gui --picker --copy-only` and paste the selected snippet.");
         return;
     }
-    if let Some(guidance) = input_method {
-        println!("Desktop input route: {}", guidance.state.replace('_', " "));
+    if let Some(guidance) = scope_guidance.as_ref().or(input_method) {
+        let (pattern_match, delivery_status) = if scope_guidance.is_some() {
+            ("blocked_by_focus_identity", "not_attempted")
+        } else {
+            input_method_stage_status(guidance, ibus_field)
+        };
+        println!(
+            "Why expansion did not work: {}",
+            guidance.state.replace('_', " ")
+        );
         println!("  {}", guidance.answer);
         println!("  Next: {}", guidance.action);
-        println!("  A matcher preview does not verify text insertion into this application.");
+        println!(
+            "  Trigger match: {}. Text delivery: {}.",
+            pattern_match_text(pattern_match),
+            delivery_status_text(delivery_status)
+        );
+        println!("  A matcher preview checks the rule only; it does not verify insertion into this application.");
         println!();
     }
-    if let Some(field) = ibus_field {
-        println!("Apps through IBus");
-        match field {
-            Some(field) => {
-                let verdict = IbusFieldVerdict::of(field);
-                println!(
-                    "  The last field you typed in: {} key(s), {} expansion(s).",
-                    field.keys, field.expansions
-                );
-                println!("  {}", sentence(verdict.explanation()));
-                println!("  Next: {}", ibus_field_action(verdict));
+    // The prioritized route guidance above already includes focused-field
+    // capability when the route is otherwise ready. Showing another field
+    // action here would give users two competing things to do; the JSON keeps
+    // the separate field evidence for diagnostics and automation.
+    if input_method.is_none() && scope_guidance.is_none() {
+        if let Some(field) = ibus_field {
+            println!("Recent input through IBus");
+            match field.recent_typed.as_ref() {
+                Some(field) => {
+                    let verdict = IbusFieldVerdict::of(field);
+                    let (pattern_match, delivery_status) = ibus_stage_status(field);
+                    println!(
+                        "  Recent field totals: {} key(s), {} expansion(s).",
+                        field.keys, field.expansions
+                    );
+                    if !field.focused {
+                        println!("  Focus changed since this input; the application is not identified by this telemetry.");
+                    }
+                    println!(
+                        "  Trigger match: {}. Text delivery: {}.",
+                        pattern_match_text(pattern_match),
+                        delivery_status_text(delivery_status)
+                    );
+                    println!("  {}", sentence(verdict.explanation()));
+                    println!("  Next: {}", ibus_field_action(verdict, field.latest_match));
+                }
+                None if field.keys_seen > 0 => {
+                    println!("  IBus received typing in this login session, but has no recent field-level input evidence.");
+                    println!("  Next: {}", ibus_no_current_field_action(field.keys_seen));
+                }
+                None => {
+                    println!("  No typing has reached the IBus engine in this login session.");
+                    println!("  Next: {}", ibus_no_current_field_action(0));
+                }
             }
-            None => {
-                println!("  No typing has reached the IBus engine yet in this login session.");
-                println!(
-                    "  Check that WayExpand is the active input method: `wayexpand ibus status`."
-                );
-            }
+            println!();
         }
-        println!();
     }
     if let Some(route) = daemon {
         let diagnosis = &route.diagnosis;
@@ -533,26 +926,72 @@ fn print_report(
             print!(", terminal apps only");
         }
         println!(")");
-        let (answer, fix) =
-            verdict_text(diagnosis, now, route.terminal_paste_last_failure.as_deref());
-        println!("  {answer}");
-        if let Some(fix) = fix {
-            println!("  Fix: {fix}");
-        }
-        if !diagnosis.recent.is_empty() {
-            println!("  Recent expansions (newest first; no text is recorded):");
-            for outcome in &diagnosis.recent {
-                println!(
-                    "    {:>8}  {}",
-                    ago(now, outcome.at_unix),
-                    outcome_line(outcome)
-                );
+        if input_method.is_some() || scope_guidance.is_some() {
+            // The IBus finding is the primary diagnosis when the other route
+            // is control-only or terminal-scoped. Keep its scope visible, but
+            // do not present a second diagnosis/action for unrelated events.
+            if scope_guidance.is_some() {
+                println!("  This terminal-only route is blocked until focused-app identity is available.");
+            } else {
+                println!("  This daemon route does not cover browser or editor fields.");
+            }
+        } else {
+            let empty_library = route.enabled_expansions == Some(0)
+                && diagnosis.verdict(now) == Verdict::NothingMatched;
+            let (answer, fix) = if empty_library {
+                (
+                    "WayExpand received input, but the running configuration has no enabled keyboard expansions.".to_owned(),
+                    Some("Open WayExpand's snippet library, enable a keyboard expansion or create a text expansion, save, and run `wayexpand reload`. Then type its trigger in the affected application.".to_owned()),
+                )
+            } else {
+                verdict_text(diagnosis, now, route.terminal_paste_last_failure.as_deref())
+            };
+            let (pattern_match, delivery_status) = if empty_library {
+                ("not_matched", "not_attempted")
+            } else {
+                daemon_stage_status(diagnosis.verdict(now))
+            };
+            println!(
+                "  Trigger match: {}. Text delivery: {}.",
+                pattern_match_text(pattern_match),
+                delivery_status_text(delivery_status)
+            );
+            println!("  {answer}");
+            if let Some(fix) = fix {
+                println!("  Fix: {fix}");
+            }
+            if !diagnosis.recent.is_empty() {
+                println!("  Recent expansions (newest first; no text is recorded):");
+                for outcome in &diagnosis.recent {
+                    println!(
+                        "    {:>8}  {}",
+                        ago(now, outcome.at_unix),
+                        outcome_line(outcome)
+                    );
+                }
             }
         }
         println!();
     }
-    if daemon_status_compatible != Some(false) || ibus_field.is_some() {
-        println!("To check one trigger: wayexpand explain 'the text you typed'");
+    // A terminal-scoped evdev route and desktop-managed IBus are independent
+    // capture paths. When the current terminal scope is unknown, that explains
+    // terminal matching only; do not hide IBus health for a user investigating
+    // a browser or editor field. Label the second diagnosis by route so the
+    // two actions cannot be mistaken for competing explanations of one event.
+    if scope_guidance.is_some() {
+        if let Some(guidance) = input_method {
+            println!("Other text fields (IBus route)");
+            println!("  {}", guidance.answer);
+            if ibus_field
+                .and_then(|evidence| evidence.recent_typed.as_ref())
+                .is_some_and(|field| !field.focused)
+            {
+                println!("  Focus changed since this input; the application is not identified by this telemetry.");
+            }
+            println!("  Next: {}", guidance.action);
+            println!("  Trigger match: not established. Text delivery: not established.");
+            println!("  A matcher preview checks the rule only; it does not verify insertion into the field.");
+        }
     }
 }
 
@@ -686,7 +1125,7 @@ fn verdict_text(
                     ""
                 }
             ),
-            Some("Run `wayexpand explain 'the trigger you typed'` to check the pattern and app filter; this does not test desktop input or insertion. Then run `wayexpand debug --test 'YOUR_TRIGGER'` in the affected app and inspect the visible text.".to_owned()),
+            Some("Run `wayexpand explain 'the trigger you typed'` to check the pattern and app filter; this does not test desktop input or insertion. Then run `wayexpand debug --test` in the affected app and inspect the visible text.".to_owned()),
         ),
         Verdict::LastStopped(kind) => {
             let completion = diagnosis
@@ -699,7 +1138,7 @@ fn verdict_text(
         Verdict::LastExpanded => (
             "WayExpand matched the trigger and submitted replacement output, but cannot verify that the application changed its text."
                 .to_owned(),
-            Some("inspect the field; if the text is missing or wrong, run a harmless real-application test with `wayexpand debug --test 'YOUR_TRIGGER'`; do not retry uncertain output".to_owned()),
+            Some("inspect the field; if the text is missing or wrong, run `wayexpand debug --test` for a harmless real-application test; do not retry uncertain output".to_owned()),
         ),
     }
 }
@@ -777,8 +1216,14 @@ fn sentence(clause: &str) -> String {
     sentence
 }
 
-fn ibus_field_action(verdict: IbusFieldVerdict) -> &'static str {
+fn ibus_field_action(
+    verdict: IbusFieldVerdict,
+    latest_match: telemetry::IbusLatestMatch,
+) -> &'static str {
     use IbusFieldVerdict as V;
+    if latest_match == telemetry::IbusLatestMatch::NoMatch {
+        return "Check the exact trigger, enabled state, match mode, and application filters with `wayexpand explain 'THE_TRIGGER'`. Then type the trigger in the affected application and verify the visible replacement; a matcher result alone does not prove delivery. Use `wayexpand-gui --picker --copy-only` and paste if this field cannot be replaced safely.";
+    }
     match verdict {
         V::OutputEmittedUnverified => {
             "Inspect the field before continuing; if the text is wrong, do not replay it. Run a harmless real-application test after recovery."
@@ -804,6 +1249,146 @@ fn ibus_field_action(verdict: IbusFieldVerdict) -> &'static str {
         V::Idle => {
             "Focus this field, run `wayexpand ibus watch --seconds 30`, and type harmless text to check input delivery."
         }
+    }
+}
+
+/// Report matching separately from delivery. IBus records a match indirectly
+/// as either emitted output or a refusal that occurs only after a trigger
+/// matched; an emitted signal still cannot prove that the application used it.
+fn ibus_stage_status(field: &IbusFieldActivity) -> (&'static str, &'static str) {
+    match field.latest_match {
+        IbusLatestMatch::OutputSubmitted => return ("confirmed_recently", "submitted_unverified"),
+        IbusLatestMatch::Refused => return ("confirmed_recently", "refused_before_output"),
+        IbusLatestMatch::NoMatch => return ("no_match", "not_attempted"),
+        IbusLatestMatch::Unknown => {}
+    }
+    if field.expansions > 0 {
+        // Status created by older IBus builds has only cumulative counters;
+        // preserve that evidence without claiming it describes the latest key.
+        ("confirmed_in_field_history", "submitted_unverified")
+    } else if field.last_refusal.is_some() {
+        ("confirmed_in_field_history", "refused_before_output")
+    } else if field.keys > 0
+        && field.content_type == wayexpand_backend_ibus::telemetry::IbusContentTypeState::Normal
+    {
+        ("not_observed_recently", "not_attempted")
+    } else if field.keys > 0 {
+        ("not_evaluated", "not_attempted")
+    } else {
+        ("not_observed", "not_attempted")
+    }
+}
+
+fn daemon_stage_status(verdict: Verdict) -> (&'static str, &'static str) {
+    match verdict {
+        Verdict::LastStopped(OutcomeKind::Partial) => {
+            ("confirmed_recently", "partial_or_uncertain")
+        }
+        Verdict::LastStopped(OutcomeKind::Unknown) => ("confirmed_recently", "uncertain"),
+        Verdict::LastStopped(OutcomeKind::NotApplied) => ("confirmed_recently", "not_submitted"),
+        Verdict::LastStopped(OutcomeKind::BlockedByPolicy) => {
+            ("confirmed_recently", "blocked_by_policy")
+        }
+        Verdict::LastStopped(OutcomeKind::InterruptedByTyping) => {
+            ("confirmed_recently", "stopped_before_output")
+        }
+        Verdict::LastStopped(OutcomeKind::SnippetActionFailed) => {
+            ("confirmed_recently", "snippet_action_failed")
+        }
+        Verdict::LastStopped(_) => ("confirmed_recently", "unknown"),
+        Verdict::LastExpanded => ("confirmed_recently", "submitted_unverified"),
+        Verdict::NothingMatched => ("not_observed_recently", "not_attempted"),
+        Verdict::NoTypingSeen => ("no_input_observed", "not_attempted"),
+        Verdict::MatchingOff(_) => ("blocked", "not_attempted"),
+        Verdict::InputStatusUnknown => ("unknown", "unknown"),
+    }
+}
+
+/// Per-transaction evidence for JSON consumers. A recorded output completion
+/// necessarily follows a recognized trigger, but never proves the target
+/// application applied the text.
+fn recent_pattern_match_status(kind: OutcomeKind) -> &'static str {
+    match kind {
+        OutcomeKind::Other => "unknown",
+        _ => "confirmed_for_transaction",
+    }
+}
+
+fn recent_delivery_status(kind: OutcomeKind) -> &'static str {
+    match kind {
+        OutcomeKind::Expanded | OutcomeKind::ExpandedCursorMisplaced => "submitted_unverified",
+        OutcomeKind::NotApplied => "not_submitted",
+        OutcomeKind::Unknown => "uncertain",
+        OutcomeKind::Partial => "partial_or_uncertain",
+        OutcomeKind::BlockedByPolicy => "blocked_by_policy",
+        OutcomeKind::InterruptedByTyping => "stopped_before_output",
+        OutcomeKind::SnippetActionFailed => "snippet_action_failed",
+        OutcomeKind::Other => "unknown",
+    }
+}
+
+fn input_method_stage_status(
+    guidance: &InputMethodGuidance,
+    field: Option<&IbusFieldEvidence>,
+) -> (&'static str, &'static str) {
+    let field_specific = matches!(
+        guidance.state,
+        "trigger_not_matched"
+            | "field_no_surrounding_text"
+            | "sensitive_field"
+            | "output_submitted_unverified"
+            | "surrounding_text_mismatch"
+            | "replacement_blocked_by_policy"
+            | "replacement_not_allowed"
+            | "replacement_consent_unknown"
+            | "field_input_not_observed"
+            | "replacement_context_observed"
+    );
+    if field_specific {
+        field
+            .and_then(|evidence| evidence.recent_typed.as_ref())
+            .map(ibus_stage_status)
+            .unwrap_or(("unknown", "unknown"))
+    } else {
+        ("not_evaluated", "not_attempted")
+    }
+}
+
+fn pattern_match_text(status: &str) -> &'static str {
+    match status {
+        "confirmed_recently" => "confirmed recently",
+        "confirmed_in_field_history" => "confirmed earlier in this field",
+        "no_match" => "no trigger matched the latest input",
+        "not_observed_recently" => "not observed recently",
+        "no_input_observed" => "no input observed",
+        "blocked" => "blocked before matching",
+        "blocked_by_focus_identity" => "blocked because focused-app identity is unknown",
+        "not_evaluated" => "not evaluated",
+        "not_observed" => "not observed",
+        _ => "unknown",
+    }
+}
+
+fn delivery_status_text(status: &str) -> &'static str {
+    match status {
+        "submitted_unverified" => "submitted, application result unverified",
+        "refused_before_output" => "refused before output",
+        "partial_or_uncertain" => "possibly partial; inspect the field and do not retry",
+        "uncertain" => "unknown; inspect the field and do not retry",
+        "not_submitted" => "not submitted",
+        "blocked_by_policy" => "blocked by policy",
+        "stopped_before_output" => "stopped before output",
+        "snippet_action_failed" => "snippet action failed before delivery",
+        "not_attempted" => "not attempted",
+        _ => "unknown",
+    }
+}
+
+fn ibus_no_current_field_action(keys_seen: u64) -> &'static str {
+    if keys_seen == 0 {
+        "Check that WayExpand is the active input method with `wayexpand ibus status`, then type harmless text in the affected field while `wayexpand ibus watch --seconds 30` runs."
+    } else {
+        "Focus the affected field, type harmless text while `wayexpand ibus watch --seconds 30` runs, then rerun `wayexpand why`; earlier input from another field does not diagnose this one."
     }
 }
 
@@ -859,7 +1444,11 @@ mod tests {
                 "matching_unavailable_reason=none\ninput_events_total=9\n\
                  recent_expansion_outcomes=[{\"at_unix\":4,\"completion\":\"input arrived before output\"}]\n",
             ),
+            capture_app_scope_state: None,
+            matching_unavailable_reason: None,
+            window_process_identity_state: None,
             terminal_paste_last_failure: None,
+            enabled_expansions: None,
         };
         let value = report_json(
             Some(&route),
@@ -880,7 +1469,17 @@ mod tests {
             "interrupted_by_typing"
         );
         assert!(value["ibus"].is_null());
-        let no_field = report_json(None, Some(&None), 5, None, None, None);
+        let no_field = report_json(
+            None,
+            Some(&IbusFieldEvidence {
+                recent_typed: None,
+                keys_seen: 0,
+            }),
+            5,
+            None,
+            None,
+            None,
+        );
         assert!(no_field["daemon"].is_null());
         assert!(no_field["ibus"]["verdict"].is_null());
         assert_eq!(no_field["diagnosis"]["state"], "no_input_observed");
@@ -974,7 +1573,7 @@ mod tests {
             ],
             activity: None,
         };
-        let guidance = diagnose_input_method_route(&report).unwrap();
+        let guidance = diagnose_input_method_route(&report, None, None, false).unwrap();
         assert_eq!(guidance.state, "not_selected");
         assert!(guidance.answer.contains("has not selected"));
         assert!(guidance.action.contains("Settings → Keyboard"));
@@ -991,5 +1590,39 @@ mod tests {
         assert_eq!(value["desktop_input_route"]["state"], "not_selected");
         assert_eq!(value["matcher_preview_proves_application_delivery"], false);
         assert_eq!(value["application_delivery_verified"], false);
+    }
+
+    #[test]
+    fn ibus_match_and_emitted_output_never_claim_verified_application_delivery() {
+        let field = IbusFieldActivity {
+            focused: true,
+            content_type: telemetry::IbusContentTypeState::Normal,
+            surrounding_capability: true,
+            surrounding_nonempty: true,
+            keys: 8,
+            latest_match: IbusLatestMatch::OutputSubmitted,
+            expansions: 1,
+            ..IbusFieldActivity::default()
+        };
+        let evidence = IbusFieldEvidence {
+            recent_typed: Some(field),
+            keys_seen: 8,
+        };
+        let guidance = InputMethodGuidance {
+            state: "output_submitted_unverified",
+            answer: "WayExpand submitted replacement output, but cannot confirm the application changed its text.",
+            action: "Inspect the field before continuing; if the text is wrong, do not replay it.",
+        };
+
+        let report = report_json(None, Some(&evidence), 0, None, None, Some(&guidance));
+
+        assert_eq!(report["diagnosis"]["pattern_match"], "confirmed_recently");
+        assert_eq!(
+            report["diagnosis"]["delivery_status"],
+            "submitted_unverified"
+        );
+        assert_eq!(report["diagnosis"]["application_delivery_verified"], false);
+        assert_eq!(report["matcher_preview_proves_application_delivery"], false);
+        assert!(report["diagnosis"]["next_action"].is_string());
     }
 }

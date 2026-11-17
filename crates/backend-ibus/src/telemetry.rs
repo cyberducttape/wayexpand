@@ -89,17 +89,38 @@ pub struct IbusFieldActivity {
     pub sequence: u64,
     pub focused: bool,
     pub started_unix: u64,
+    /// Time of the most recent key event in this focus interval. This is
+    /// content-free and lets diagnostics retain useful evidence after the
+    /// user moves to another field to ask for help.
+    #[serde(default)]
+    pub last_key_unix: u64,
     pub content_type: IbusContentTypeState,
     pub surrounding_capability: bool,
     pub surrounding_reports: u64,
     pub surrounding_nonempty: bool,
     pub keys: u64,
+    /// Latest matcher result for this field. The counters below are
+    /// cumulative for the focus interval; this state prevents an earlier
+    /// emitted expansion from being mistaken for the latest attempt.
+    #[serde(default)]
+    pub latest_match: IbusLatestMatch,
     /// Keys passed through untouched because capture was off or sensitive.
     pub keys_without_capture: u64,
     pub expansions: u64,
     pub refusals: IbusRefusalCounts,
     pub last_refusal: Option<IbusRefusal>,
     pub output_failures: u64,
+}
+
+/// Content-free result of the latest captured key evaluated by the matcher.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IbusLatestMatch {
+    #[default]
+    Unknown,
+    NoMatch,
+    Refused,
+    OutputSubmitted,
 }
 
 /// Totals since the engine process started.
@@ -334,6 +355,10 @@ impl IbusTelemetry {
             } else {
                 IbusContentTypeState::Normal
             };
+            // A content-purpose change makes the prior key outcome historical
+            // evidence for a different field state.
+            field.latest_match = IbusLatestMatch::Unknown;
+            field.last_refusal = None;
         });
     }
 
@@ -348,9 +373,16 @@ impl IbusTelemetry {
         self.update(|state| state.status.totals.keys = state.status.totals.keys.saturating_add(1));
         self.update_field(field, |field| {
             field.keys = field.keys.saturating_add(1);
+            field.last_key_unix = now_unix();
             if !captured {
                 field.keys_without_capture = field.keys_without_capture.saturating_add(1);
             }
+            field.latest_match = if captured {
+                IbusLatestMatch::NoMatch
+            } else {
+                IbusLatestMatch::Unknown
+            };
+            field.last_refusal = None;
         });
     }
 
@@ -359,7 +391,8 @@ impl IbusTelemetry {
             state.status.totals.expansions = state.status.totals.expansions.saturating_add(1);
         });
         self.update_field(field, |field| {
-            field.expansions = field.expansions.saturating_add(1)
+            field.expansions = field.expansions.saturating_add(1);
+            field.latest_match = IbusLatestMatch::OutputSubmitted;
         });
     }
 
@@ -402,6 +435,7 @@ impl IbusTelemetry {
         self.update_field(field, |field| {
             field.refusals.add(refusal);
             field.last_refusal = Some(refusal);
+            field.latest_match = IbusLatestMatch::Refused;
         });
     }
 
@@ -557,15 +591,26 @@ pub enum IbusFieldVerdict {
 
 impl IbusFieldVerdict {
     pub fn of(field: &IbusFieldActivity) -> Self {
-        if field.expansions > 0 {
-            return Self::OutputEmittedUnverified;
+        match field.latest_match {
+            IbusLatestMatch::OutputSubmitted => return Self::OutputEmittedUnverified,
+            IbusLatestMatch::NoMatch | IbusLatestMatch::Refused => {}
+            IbusLatestMatch::Unknown if field.expansions > 0 => {
+                // Older status files contain only cumulative counters and
+                // cannot correlate them with the latest key.
+                return Self::OutputEmittedUnverified;
+            }
+            IbusLatestMatch::Unknown => {}
         }
         match field.content_type {
             IbusContentTypeState::Sensitive => return Self::Sensitive,
             IbusContentTypeState::Unknown if field.keys > 0 => return Self::NoContentType,
             _ => {}
         }
-        match field.last_refusal {
+        let latest_refusal = match field.latest_match {
+            IbusLatestMatch::NoMatch => None,
+            _ => field.last_refusal,
+        };
+        match latest_refusal {
             Some(IbusRefusal::Policy) => return Self::Policy,
             Some(IbusRefusal::SurroundingTextMismatch) if field.surrounding_nonempty => {
                 return Self::Mismatch

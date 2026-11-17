@@ -414,9 +414,9 @@ impl Strings {
 
     pub fn compositor_surface_focus_diagnostic(&self) -> &'static str {
         match self.lang {
-            Language::English => "WX-EVDEV-FOCUS-006: KWin reported its own process ID for a compositor surface, not an application. Focus the actual terminal or browser window and refresh diagnostics. Do not allowlist kwin_wayland or use a window title as a substitute for client identity.",
-            Language::Indonesian => "WX-EVDEV-FOCUS-006: KWin melaporkan ID prosesnya sendiri untuk permukaan kompositor, bukan aplikasi. Fokuskan jendela terminal atau browser yang sebenarnya lalu segarkan diagnostik. Jangan izinkan kwin_wayland atau memakai judul jendela sebagai pengganti identitas klien.",
-            Language::German => "WX-EVDEV-FOCUS-006: KWin meldet seine eigene Prozess-ID für eine Compositor-Oberfläche, nicht für eine Anwendung. Fokussieren Sie das eigentliche Terminal- oder Browserfenster und aktualisieren Sie die Diagnose. kwin_wayland nicht freigeben und keinen Fenstertitel als Client-Identität verwenden.",
+            Language::English => "WX-EVDEV-FOCUS-006: KWin reported its own process ID for a compositor surface, not an application. WayExpand cannot safely identify this target, so terminal-only matching stays blocked; there is no allowlist setting that fixes it. Use Quick Picker in copy-only mode and paste manually. Retest only after KWin reports a verified client application ID. Never allowlist kwin_wayland or use a window title as client identity.",
+            Language::Indonesian => "WX-EVDEV-FOCUS-006: KWin melaporkan ID prosesnya sendiri untuk permukaan kompositor, bukan aplikasi. WayExpand tidak dapat mengenali target ini dengan aman, jadi pencocokan khusus terminal tetap diblokir; tidak ada pengaturan daftar izin yang dapat memperbaikinya. Gunakan Quick Picker dalam mode salin saja lalu tempel manual. Uji kembali setelah KWin melaporkan ID aplikasi klien yang terverifikasi. Jangan izinkan kwin_wayland atau memakai judul jendela sebagai identitas klien.",
+            Language::German => "WX-EVDEV-FOCUS-006: KWin meldet seine eigene Prozess-ID für eine Compositor-Oberfläche, nicht für eine Anwendung. WayExpand kann dieses Ziel nicht sicher identifizieren; der Abgleich nur in Terminals bleibt gesperrt und lässt sich nicht durch eine Zulassungsliste beheben. Nutzen Sie den Schnellwähler im Nur-Kopieren-Modus und fügen Sie den Text manuell ein. Testen Sie erst erneut, wenn KWin eine verifizierte Client-Anwendungs-ID meldet. kwin_wayland niemals zulassen und keinen Fenstertitel als Client-Identität verwenden.",
         }
     }
 
@@ -1374,6 +1374,8 @@ impl Strings {
             (Language::Indonesian, BackendState::Available) => "Siap",
             (Language::English, BackendState::RequiresPermission) => "Needs permission",
             (Language::Indonesian, BackendState::RequiresPermission) => "Perlu izin",
+            (Language::English, BackendState::ActionRequired) => "Action needed",
+            (Language::Indonesian, BackendState::ActionRequired) => "Perlu tindakan",
             (Language::English, BackendState::Implemented) => "Not probed",
             (Language::Indonesian, BackendState::Implemented) => "Belum diperiksa",
             (Language::English, BackendState::Unavailable) => "Unavailable",
@@ -1382,6 +1384,7 @@ impl Strings {
             (Language::Indonesian, BackendState::NotImplemented) => "Belum diimplementasikan",
             (Language::German, BackendState::Available) => "Bereit",
             (Language::German, BackendState::RequiresPermission) => "Berechtigung nötig",
+            (Language::German, BackendState::ActionRequired) => "Aktion erforderlich",
             (Language::German, BackendState::Implemented) => "Nicht geprüft",
             (Language::German, BackendState::Unavailable) => "Nicht verfügbar",
             (Language::German, BackendState::NotImplemented) => "Nicht implementiert",

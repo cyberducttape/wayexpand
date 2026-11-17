@@ -99,6 +99,14 @@ impl GuiApp {
     }
 
     pub(crate) fn create_test_snippet(&mut self) {
+        self.create_test_snippet_with_onboarding(true);
+    }
+
+    pub(crate) fn create_diagnostic_test_snippet(&mut self) {
+        self.create_test_snippet_with_onboarding(false);
+    }
+
+    fn create_test_snippet_with_onboarding(&mut self, show_onboarding: bool) {
         let base_trigger = ":wayexpand-test";
         let mut trigger = base_trigger.to_owned();
         let mut suffix = 2;
@@ -128,7 +136,7 @@ impl GuiApp {
             aliases: Vec::new(),
             output_file: None,
         });
-        self.onboarding_visible = true;
+        self.onboarding_visible = show_onboarding;
         self.queue_save_config(candidate, SaveIntent::Created);
     }
 

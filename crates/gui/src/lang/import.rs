@@ -1051,16 +1051,15 @@ impl Strings {
     pub fn try_live_stats(&self, expansions: usize, saved: usize) -> String {
         match self.lang {
             Language::English => format!(
-                "{expansions} expansion{} · {saved} keystrokes saved",
+                "{expansions} local preview match{} · {saved} preview keystrokes saved",
                 if expansions == 1 { "" } else { "s" }
             ),
             // Indonesian nouns do not inflect for plural.
             Language::Indonesian => {
-                format!("{expansions} ekspansi · {saved} ketukan tombol dihemat")
+                format!("{expansions} kecocokan pratinjau lokal · {saved} ketukan pratinjau dihemat")
             }
             Language::German => format!(
-                "{expansions} Erweiterung{} · {saved} Tastenanschläge gespart",
-                if expansions == 1 { "" } else { "en" }
+                "{expansions} lokale Vorschau-Treffer · {saved} Tastenanschläge in der Vorschau gespart"
             ),
         }
     }

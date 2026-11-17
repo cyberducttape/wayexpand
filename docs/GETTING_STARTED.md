@@ -28,14 +28,15 @@ explains permissions before applying changes; it does not enable raw keyboard
 capture automatically. The GUI status distinguishes **Installed**,
 **Configured**, and **Verified working**.
 
-In the editor, select **Add snippet**, enter a trigger such as `;;hello` and a
-replacement such as `Hello, world!`, then save. You can use any enabled,
-harmless static snippet for verification; setup does not require the example
-trigger to exist.
+In the snippet list, select **+ New**, enter a trigger such as `;;hello` and a
+replacement such as `Hello, world!`, then save. You can also choose
+**Create test snippet** for a harmless example. Verification accepts any
+enabled, harmless static snippet; setup does not require a particular sample
+trigger.
 
 ### 3. Verify in a real application
 
-Choose **Desktop Integration Test** and follow the prompt in a disposable,
+Choose **Test in a real application** and follow the prompt in a disposable,
 non-sensitive text field. Inspect the result and confirm only if it exactly
 matches the expected replacement. WayExpand never presses Enter or retries an
 insertion whose outcome is uncertain. Until you confirm an exact result, the

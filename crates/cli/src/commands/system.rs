@@ -400,13 +400,18 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let test_trigger = setup_test_trigger(&test_config);
     let mut desktop_test_result = crate::commands::debug::DesktopTestResult::NotTested;
     if let Some(test_trigger) = test_trigger.as_deref() {
+        let quoted_trigger = crate::commands::shell_single_quote(test_trigger);
+        let preview_command = format!("wayexpand preview {quoted_trigger}");
+        let test_command = format!("wayexpand debug --test {quoted_trigger}");
         if assume_yes {
             println!("Activation completed. Real application insertion: NOT TESTED.");
-            println!("Next: run `wayexpand debug --test {test_trigger:?}` in a disposable text field and confirm the replacement.");
+            println!("Review the expected text first with `{preview_command}`.");
+            println!("Next: run `{test_command}` in a disposable text field and confirm the replacement.");
         } else if crate::prompt_yes_no(
             &format!("Activation checks completed; real insertion is not yet verified. Run the optional test with {test_trigger:?} now? [Y/n] "),
             true,
         )? {
+            println!("Review the expected text first with `{preview_command}`.");
             desktop_test_result = match crate::commands::debug::desktop_test(test_trigger) {
                 Ok(result) => result,
                 Err(error) => {
@@ -416,11 +421,12 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             };
         } else {
             println!("Activation completed. Real application insertion: NOT TESTED.");
-            println!("Next: run `wayexpand debug --test {test_trigger:?}` in a disposable text field and confirm the replacement.");
+            println!("Review the expected text first with `{preview_command}`.");
+            println!("Next: run `{test_command}` in a disposable text field and confirm the replacement.");
         }
     } else {
         println!("Activation completed. No enabled, safe-to-test expansion is configured; real application insertion remains NOT TESTED.");
-        println!("Setup is configured, but insertion is unverified. Add a harmless static expansion and run `wayexpand debug --test TRIGGER` in a disposable text field when ready.");
+        println!("Setup is configured, but insertion is unverified. In the GUI, open Test Expansion to create a dedicated harmless snippet and verify it. From the CLI, review a static snippet with `wayexpand preview TRIGGER`, then run `wayexpand debug --test TRIGGER` in a disposable field.");
     }
     if desktop_test_result == crate::commands::debug::DesktopTestResult::Failed {
         println!("SETUP RESULT: ACTION REQUIRED");
@@ -435,7 +441,13 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     } else {
         println!("SETUP RESULT: CONFIGURED, AWAITING TEST");
         if test_trigger.is_some() {
-            println!("Next: run `wayexpand debug --test {}` in a disposable text field and confirm the replacement.", test_trigger.as_deref().unwrap_or_default());
+            if let Some(test_trigger) = test_trigger.as_deref() {
+                let quoted_trigger = crate::commands::shell_single_quote(test_trigger);
+                println!(
+                    "Review the expected text first with `wayexpand preview {quoted_trigger}`."
+                );
+                println!("Next: run `wayexpand debug --test {quoted_trigger}` in a disposable text field and confirm the replacement.");
+            }
         }
     }
     if backend == "ibus" {
@@ -480,15 +492,30 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
 /// configurations need not keep it. Command-backed and templated entries are
 /// excluded so setup never executes actions or starts an incomplete form.
 pub(crate) fn setup_test_trigger(config: &Config) -> Option<String> {
+    const TUTORIAL_REPLACEMENT: &str = "WayExpand is working!";
     let is_testable = |expansion: &&wayexpand_core::ExpansionConfig| {
         expansion.is_keyboard_matchable()
+            && expansion.app_filter.is_empty()
             && expansion.command.is_none()
             && !expansion.replacement.contains("{{")
     };
     config
         .expansion
         .iter()
-        .find(|expansion| is_testable(expansion) && expansion.answers_to(";;hello"))
+        // Keep CLI setup and the GUI's first-run test on the same harmless
+        // tutorial snippet when it exists. Otherwise setup --check can show
+        // one trigger while the GUI asks the user to test another.
+        .find(|expansion| {
+            is_testable(expansion)
+                && expansion.replacement == TUTORIAL_REPLACEMENT
+                && expansion.tags.iter().any(|tag| tag == "tutorial")
+        })
+        .or_else(|| {
+            config
+                .expansion
+                .iter()
+                .find(|expansion| is_testable(expansion) && expansion.answers_to(";;hello"))
+        })
         .or_else(|| config.expansion.iter().find(is_testable))
         .map(|expansion| expansion.trigger.clone())
 }

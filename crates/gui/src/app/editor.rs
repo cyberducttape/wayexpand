@@ -840,12 +840,19 @@ impl GuiApp {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.label(self.strings.preview_app());
-                ui.add(
-                    TextEdit::singleline(&mut self.preview_app)
-                        .margin(theme::FIELD_MARGIN)
-                        .hint_text(self.strings.preview_app_hint())
-                        .desired_width(300.0),
-                );
+                let app_changed = ui
+                    .add(
+                        TextEdit::singleline(&mut self.preview_app)
+                            .margin(theme::FIELD_MARGIN)
+                            .hint_text(self.strings.preview_app_hint())
+                            .desired_width(300.0),
+                    )
+                    .changed();
+                if app_changed {
+                    // An app-filter preview is evidence only for the app
+                    // context that was tested. Do not carry it across edits.
+                    self.playground.invalidate();
+                }
             });
             ui.add_space(4.0);
             self.render_command_editor(ui, palette);
@@ -1118,8 +1125,8 @@ impl GuiApp {
                                 self.playground.expansions,
                                 self.playground.keystrokes_saved,
                             ),
-                            palette.success,
-                            theme::tint(palette.success, 34),
+                            palette.muted,
+                            theme::tint(palette.muted, 34),
                         );
                     }
                     if self.try_live_open && self.draft_is_dirty() {

@@ -145,7 +145,7 @@ fn ibus_capture_and_insertion_readiness_use_their_own_checks() {
         route_recommendation(route, Some(&plan), Some(&capabilities), &[], Some(&report)).unwrap();
 
     assert_eq!(route.capture_state, BackendState::Available);
-    assert_eq!(route.injection_state, BackendState::RequiresPermission);
+    assert_eq!(route.injection_state, BackendState::ActionRequired);
 
     report
         .checks
@@ -162,7 +162,7 @@ fn ibus_capture_and_insertion_readiness_use_their_own_checks() {
     )
     .unwrap();
     assert_eq!(route.capture_state, BackendState::Implemented);
-    assert_eq!(route.injection_state, BackendState::RequiresPermission);
+    assert_eq!(route.injection_state, BackendState::ActionRequired);
 }
 
 #[test]
@@ -1979,6 +1979,12 @@ fn dismissing_desktop_test_review_leaves_result_unverified() {
         trigger: ";;hello".into(),
         replacement: "Hello from Wayland!".into(),
         application_class: "GTK".into(),
+        route: app.current_route_label(),
+        route_instance: app.current_route_instance(),
+        desktop: crate::setup_record::current_desktop(),
+        session: crate::setup_record::current_session(),
+        build: crate::setup_record::current_build(),
+        config_revision: app.config_revision.fingerprint(),
         capture_activity_observed: true,
         output_activity_observed: true,
     });
@@ -2046,6 +2052,12 @@ fn desktop_test_review_stays_inside_a_small_window_for_long_text() {
         trigger: ";;long".into(),
         replacement: "apiVersion: v1\nkind: ConfigMap\n".repeat(2_000),
         application_class: "GTK".into(),
+        route: app.current_route_label(),
+        route_instance: app.current_route_instance(),
+        desktop: crate::setup_record::current_desktop(),
+        session: crate::setup_record::current_session(),
+        build: crate::setup_record::current_build(),
+        config_revision: app.config_revision.fingerprint(),
         capture_activity_observed: true,
         output_activity_observed: true,
     });
@@ -4512,10 +4524,23 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
     app.ibus_instance = Some("ibus:42:100".into());
     app.diagnostics_checked_at = Some(Instant::now());
     app.ibus_route.as_mut().unwrap().activity = Some(live_ibus_reading(42, 100));
+    let route = app.current_route_label();
+    let route_instance = app.current_route_instance();
+    let desktop = crate::setup_record::current_desktop();
+    let session = crate::setup_record::current_session();
+    let build = crate::setup_record::current_build();
+    let config_revision = app.config_revision.fingerprint();
+    let scope = crate::setup_record::Scope {
+        route: route.as_deref(),
+        route_instance: route_instance.as_deref(),
+        config_revision: Some(&config_revision),
+        desktop: &desktop,
+        session: session.as_deref(),
+        build: &build,
+    };
     app.setup_record = Some(crate::setup_record::SetupRecord::verified(
         "Text editor",
-        app.current_route_label(),
-        app.current_route_instance(),
+        &scope,
     ));
     if crate::setup_record::current_session().is_some() {
         assert_eq!(state(&app), (HeaderState::Working, palette.success));

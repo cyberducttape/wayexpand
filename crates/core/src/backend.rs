@@ -1027,6 +1027,9 @@ pub enum BackendState {
     Unavailable,
     NotImplemented,
     RequiresPermission,
+    /// The backend may be usable, but a configuration or service step is
+    /// needed before it can be used. No permission grant is implied.
+    ActionRequired,
 }
 
 impl fmt::Display for BackendKind {
@@ -1076,6 +1079,7 @@ impl BackendStatus {
     pub fn availability(&self) -> &'static str {
         match self.state {
             BackendState::Unavailable | BackendState::RequiresPermission => "Unavailable",
+            BackendState::ActionRequired => "Unknown",
             BackendState::Implemented => "Unknown",
             BackendState::Available => "Detected",
             BackendState::NotImplemented => "Unknown",
@@ -1096,7 +1100,8 @@ impl BackendStatus {
             BackendState::NotImplemented
             | BackendState::Unavailable
             | BackendState::Implemented
-            | BackendState::Available => "NotApplicable",
+            | BackendState::Available
+            | BackendState::ActionRequired => "NotApplicable",
         }
     }
 }
@@ -1701,6 +1706,7 @@ mod tests {
             BackendState::Unavailable,
             BackendState::NotImplemented,
             BackendState::RequiresPermission,
+            BackendState::ActionRequired,
         ] {
             let status = BackendStatus {
                 kind: BackendKind::Clipboard,

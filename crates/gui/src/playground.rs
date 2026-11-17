@@ -28,6 +28,9 @@ pub(crate) struct Playground {
     /// Characters the user did not have to type (replacement minus trigger).
     pub keystrokes_saved: usize,
     pub last_trigger: Option<String>,
+    /// Application context in which `last_trigger` matched. The preview is
+    /// local matcher evidence only and must not survive a config or app change.
+    pub last_match_app: Option<String>,
     /// True when the current text ends with a form trigger. Forms need the
     /// deferred form overlay and cannot be simulated by this text-only field.
     pub form_detected: bool,
@@ -41,6 +44,8 @@ impl Playground {
     /// Forget the compiled library; it is rebuilt from the next saved config.
     pub fn invalidate(&mut self) {
         self.engine = None;
+        self.last_trigger = None;
+        self.last_match_app = None;
         // Keep the last observed document as the diff baseline. The next
         // edit may already include a fresh keystroke; clearing this would
         // mistake that character for old context and skip matching it.
@@ -56,6 +61,8 @@ impl Playground {
     pub fn clear(&mut self) {
         self.text.clear();
         self.seen.clear();
+        self.last_trigger = None;
+        self.last_match_app = None;
         self.form_detected = false;
         self.explanation = None;
         self.config_error = None;
@@ -141,6 +148,7 @@ impl Playground {
                         .count()
                         .saturating_sub(result.matched_text.chars().count());
                     self.last_trigger = Some(result.trigger.to_string());
+                    self.last_match_app = Some(app.trim().to_owned());
                     engine.commit_applied_expansion(&result);
                 }
             }

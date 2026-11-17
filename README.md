@@ -19,7 +19,9 @@ local, offline, no account, no telemetry.
   expands your saved snippets as you type with the daemon's own matching
   engine — no daemon, permission, or desktop integration needed — and counts
   the keystrokes you saved. It does not exercise desktop capture or insertion;
-  `wayexpand doctor` covers that.
+  `wayexpand doctor` explains the route's current readiness, while the GUI's
+  *Test in a real application* flow is what checks visible insertion. A
+  successful preview alone never means desktop expansion is working.
 - **Quick-insert picker.** Press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> +
   <kbd>Space</kbd> (set up by the first-run guide or `wayexpand shortcut set`
   on KDE Plasma and GNOME), type a few letters, and press Enter. No trigger to

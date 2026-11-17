@@ -50,6 +50,18 @@ use wayexpand_core::{
     MatchMode, OrganizationPolicy, Settings,
 };
 
+/// Use the same compositor and session-type evidence as `wayexpand setup`
+/// when deciding whether a saved GNOME continuation belongs to this login.
+/// `XDG_CURRENT_DESKTOP` is descriptive metadata and may be absent or stale;
+/// it must not make the CLI resume setup while the GUI hides the continuation.
+pub(crate) fn gnome_setup_resume_pending_for_current_session(path: &Path) -> bool {
+    let is_gnome = wayexpand_backend_selection::Compositor::detect()
+        == wayexpand_backend_selection::Compositor::Gnome;
+    let is_wayland =
+        env::var("XDG_SESSION_TYPE").is_ok_and(|session| session.eq_ignore_ascii_case("wayland"));
+    wayexpand_core::gnome_ibus_setup_resume_pending_for_session(path, is_gnome, is_wayland)
+}
+
 /// Stable source for the toolbar search field's id, so Ctrl+F can focus it.
 const SEARCH_FIELD_SALT: &str = "wayexpand-search-field";
 /// Every font scale, in the order the settings dialog offers them.
@@ -129,24 +141,76 @@ fn route_recommendation(
     if route.id == "ibus" {
         if let Some(report) = ibus_report {
             use wayexpand_backend_ibus::chain::IbusCheckState as I;
-            let capture_states = ["component", "registered", "daemon", "selected", "engine"]
-                .map(|id| report.check(id).map_or(I::Unknown, |check| check.state));
-            if capture_states.contains(&I::Fail) {
-                capture_state = BackendState::Unavailable;
-            } else if capture_states.contains(&I::Warn) {
-                capture_state = BackendState::RequiresPermission;
-            } else if capture_states
-                .iter()
-                .any(|state| matches!(state, I::Unknown | I::Skip))
-            {
-                capture_state = BackendState::Implemented;
+            let mut capture_states = ["component", "registered", "daemon", "selected", "engine"]
+                .into_iter()
+                .map(|id| report.check(id).map_or(I::Unknown, |check| check.state))
+                .collect::<Vec<_>>();
+            // A shared component that points into a user's home directory is
+            // not a durable, multi-user-safe setup even if the current engine
+            // happens to be alive. Include this only when the diagnostic is
+            // available so older/minimal reports remain explicitly unknown
+            // through their existing checks rather than being misclassified.
+            if let Some(check) = report.check("manifest-scope") {
+                capture_states.push(check.state);
+            }
+            // GNOME has its own source list and active-source state. An IBus
+            // daemon can be healthy while GNOME has not registered or chosen
+            // WayExpand; don't label capture available in that state.
+            if report.desktop == wayexpand_backend_ibus::chain::IbusDesktop::Gnome {
+                capture_states.extend(
+                    [
+                        "gnome-session",
+                        "gnome-source-registered",
+                        "gnome-source-active",
+                    ]
+                    .into_iter()
+                    .map(|id| report.check(id).map_or(I::Unknown, |check| check.state)),
+                );
+            } else if report.desktop == wayexpand_backend_ibus::chain::IbusDesktop::KdeWayland {
+                // KWin's IBus Wayland helper is an independent link: a live
+                // IBus engine does not prove that KWin is delivering field
+                // input to it. Surface helper failure/recovery in the route
+                // recommendation instead of showing capture as available.
+                if let Some(check) = report.check("desktop") {
+                    capture_states.push(check.state);
+                }
+            }
+            // These IBus checks describe repairable configuration/runtime
+            // steps (register, select, start), not protocol incompatibility.
+            // Keep them separate from permission grants: an administrator
+            // prompt is not required merely because registration or source
+            // selection needs repair.
+            // A failed registration or selection is actionable only when
+            // this route is supported. Never turn an explicit unsupported
+            // assessment into a repair prompt just because IBus itself also
+            // reports a missing component or source.
+            if !matches!(
+                capture_state,
+                BackendState::Unavailable | BackendState::NotImplemented
+            ) {
+                if capture_states.contains(&I::Fail) || capture_states.contains(&I::Warn) {
+                    capture_state = BackendState::ActionRequired;
+                } else if capture_states
+                    .iter()
+                    .any(|state| matches!(state, I::Unknown | I::Skip))
+                {
+                    capture_state = BackendState::Implemented;
+                }
             }
             if let Some(consent) = report.check("consent") {
-                injection_state = match consent.state {
-                    I::Pass => injection_state,
-                    I::Fail | I::Warn => BackendState::RequiresPermission,
-                    I::Unknown | I::Skip => BackendState::Implemented,
-                };
+                if !matches!(
+                    injection_state,
+                    BackendState::Unavailable | BackendState::NotImplemented
+                ) {
+                    injection_state = match consent.state {
+                        I::Pass => injection_state,
+                        // Compatibility consent is an explicit configuration
+                        // decision, not an OS permission grant. Warn means the
+                        // policy/config could not be read, so leave it unknown.
+                        I::Fail => BackendState::ActionRequired,
+                        I::Warn | I::Unknown | I::Skip => BackendState::Implemented,
+                    };
+                }
             }
         }
     }
@@ -180,7 +244,7 @@ fn assessment_evidence_state(
         E::Yes => BackendState::Available,
         E::No => BackendState::Unavailable,
         E::Unknown => BackendState::Implemented,
-        E::RequiresAction => BackendState::RequiresPermission,
+        E::RequiresAction => BackendState::ActionRequired,
     }
 }
 
@@ -239,11 +303,23 @@ fn route_component_state(
                 assessment.and_then(|assessment| assessment.portal.as_ref())
             {
                 match portal.authorization {
-                    wayexpand_backend_selection::PortalAuthorization::NotRequested
-                    | wayexpand_backend_selection::PortalAuthorization::Denied => {
-                        // Authorization is an explicit next step. A candidate
-                        // desktop does not prove that the portal provider is
-                        // installed; the UI says that availability is unknown.
+                    wayexpand_backend_selection::PortalAuthorization::NotRequested => {
+                        // A desktop candidate is discovery evidence only. Do
+                        // not tell users permission is required until the
+                        // portal implementation and interface are observed.
+                        // The explicit injection test performs that probe and
+                        // asks before inserting its harmless marker.
+                        if portal.implementation_discovered
+                            == wayexpand_backend_selection::AssessmentEvidence::Yes
+                            && portal.interface_available
+                                == wayexpand_backend_selection::AssessmentEvidence::Yes
+                        {
+                            BackendState::RequiresPermission
+                        } else {
+                            BackendState::Implemented
+                        }
+                    }
+                    wayexpand_backend_selection::PortalAuthorization::Denied => {
                         BackendState::RequiresPermission
                     }
                     wayexpand_backend_selection::PortalAuthorization::Granted => {
@@ -432,6 +508,7 @@ struct GuiApp {
     evdev_setup_acknowledged: bool,
     setup_consent_open: bool,
     setup_consent_acknowledged: bool,
+    setup_ibus_preflight_report: Option<serde_json::Value>,
     setup_system_integration_required: bool,
     setup_system_integration_acknowledged: bool,
     guided_setup_waiting_for_route: bool,
@@ -702,6 +779,12 @@ struct DesktopTestReview {
     trigger: String,
     replacement: String,
     application_class: String,
+    route: Option<String>,
+    route_instance: Option<String>,
+    desktop: String,
+    session: Option<String>,
+    build: String,
+    config_revision: String,
     capture_activity_observed: bool,
     output_activity_observed: bool,
 }
@@ -781,7 +864,7 @@ impl GuiApp {
         let config_document = persistence::read_config_document(loaded.source())?;
         let config_revision = loaded.revision.clone();
         let config = loaded.config;
-        let gnome_setup_resume_pending = wayexpand_core::gnome_ibus_setup_resume_pending(&path);
+        let gnome_setup_resume_pending = gnome_setup_resume_pending_for_current_session(&path);
         let preview_library_snippets = config.includable_snippets();
         let preview_library_revision = config_revision.clone();
         let search_index = library::SearchIndex::new(&config);
@@ -879,6 +962,7 @@ impl GuiApp {
             evdev_setup_acknowledged: false,
             setup_consent_open: false,
             setup_consent_acknowledged: false,
+            setup_ibus_preflight_report: None,
             setup_system_integration_required: false,
             setup_system_integration_acknowledged: false,
             guided_setup_waiting_for_route: false,
@@ -1106,7 +1190,7 @@ impl eframe::App for GuiApp {
         // First run already has a dedicated, guided matcher/desktop test.
         // Avoid showing a second preview panel until the user reaches the
         // everyday snippet workspace.
-        if !self.onboarding_visible {
+        if !self.onboarding_visible || self.try_live_open {
             self.render_try_live_panel(root, &palette);
         }
         self.render_editor(root, &palette);

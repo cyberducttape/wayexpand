@@ -13,6 +13,10 @@ use std::{
 struct FocusedAppScopeStatus {
     daemon_status_schema: Option<u64>,
     daemon_schema_compatible: Option<bool>,
+    daemon_commit: Option<String>,
+    daemon_version: Option<String>,
+    daemon_build_matches: Option<bool>,
+    daemon_status_trusted: Option<bool>,
     scope_state: Option<String>,
     terminal_apps_only: Option<bool>,
     window_tracker_connected: Option<bool>,
@@ -32,10 +36,27 @@ fn focused_app_scope_from_status(status_response: Option<&str>) -> FocusedAppSco
     let daemon_status_schema = status
         .field("status_schema")
         .and_then(|schema| schema.parse::<u64>().ok());
+    let daemon_commit = status.field("daemon_commit").map(str::to_owned);
+    let daemon_version = status.field("daemon_version").map(str::to_owned);
+    let daemon_schema_compatible =
+        daemon_status_schema.map(|schema| schema == u64::from(crate::CONTROL_STATUS_SCHEMA));
+    let daemon_build_matches = if daemon_commit.is_some() || daemon_version.is_some() {
+        Some(crate::doctor::status::daemon_build_matches(
+            daemon_commit.as_deref(),
+            daemon_version.as_deref(),
+        ))
+    } else {
+        None
+    };
     FocusedAppScopeStatus {
         daemon_status_schema,
-        daemon_schema_compatible: daemon_status_schema
-            .map(|schema| schema == u64::from(crate::CONTROL_STATUS_SCHEMA)),
+        daemon_schema_compatible,
+        daemon_commit,
+        daemon_version,
+        daemon_build_matches,
+        daemon_status_trusted: Some(
+            daemon_schema_compatible == Some(true) && daemon_build_matches == Some(true),
+        ),
         scope_state: status.field("capture_app_scope_state").map(str::to_owned),
         terminal_apps_only: status.bool_field("terminal_apps_only"),
         window_tracker_connected: status.bool_field("window_tracker_connected"),
@@ -98,7 +119,11 @@ fn focused_app_diagnostic(
     match matching_status {
         "daemon_status_incompatible" => Some((
             "WX-VERSION-001",
-            "The running daemon reports a different status protocol schema, so this focus diagnosis may be incomplete. Run `wayexpand upgrade-status` and `wayexpand upgrade --check`; restart or upgrade the daemon before using this result to change application allowlists.",
+            "The running daemon reports an incompatible status schema, so this focus diagnosis may be incomplete. Run `wayexpand upgrade --check` with the CLI from the active installation; follow its reported action, then repeat this focus check before changing application allowlists.",
+        )),
+        "daemon_build_unverified" | "daemon_status_unavailable" => Some((
+            "WX-VERSION-001",
+            "WayExpand cannot verify that focused-app identity came from the current daemon build. Do not change application allowlists from this result. Run `wayexpand upgrade --check` with the CLI from the active installation, follow its report, and retry this diagnostic.",
         )),
         "suppressed_unknown_focus"
             if focus.window_tracker_connected == Some(true)
@@ -108,7 +133,7 @@ fn focused_app_diagnostic(
             if focus.window_process_identity_state.as_deref() == Some("compositor-process-id") {
                 return Some((
                     "WX-EVDEV-FOCUS-006",
-                    "KWin reported its own process ID for the focused compositor surface, not an application process. Focus the actual terminal or browser window and rerun this diagnostic; do not allowlist `kwin_wayland` or use a window title as a substitute for client identity.",
+                    "KWin reported its own process ID for the focused compositor surface, not an application process. WayExpand cannot safely identify this target, so terminal-only matching stays blocked; there is no allowlist setting that fixes this evidence. Use `wayexpand-gui --picker --copy-only` and paste manually. Do not allowlist `kwin_wayland` or substitute a window title. Retest automatic matching only after KWin reports a verified client application identity.",
                 ));
             }
             if focus.window_tracker_identity_source.as_deref() == Some("process-name") {
@@ -186,6 +211,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
     let mut json = false;
     let mut seconds = 60_u64;
     let mut trigger: Option<String> = None;
+    let mut desktop_test_requested = false;
     let mut test_trigger: Option<String> = None;
     let mut test_application_class: Option<String> = None;
     let mut test_focus_confirmed = false;
@@ -236,10 +262,10 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                 values.remove(index);
             }
             "--test" => {
-                if index + 1 >= values.len() {
-                    bail!("--test requires a configured trigger to test");
+                desktop_test_requested = true;
+                if index + 1 < values.len() && !values[index + 1].starts_with("--") {
+                    test_trigger = Some(values.remove(index + 1));
                 }
-                test_trigger = Some(values.remove(index + 1));
                 values.remove(index);
             }
             "--application-class" => {
@@ -263,12 +289,12 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
         }
     }
     if !values.is_empty() {
-        bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --focused-app-id [--json] | --test TRIGGER [--application-class CLASS --focus-confirmed [--observe-only]]");
+        bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --focused-app-id [--json] | --test [TRIGGER] [--application-class CLASS --focus-confirmed [--observe-only]]");
     }
     if focused_app_id {
         if live
             || trigger.is_some()
-            || test_trigger.is_some()
+            || desktop_test_requested
             || test_application_class.is_some()
             || test_focus_confirmed
             || test_observe_only
@@ -285,27 +311,42 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             .lines()
             .find_map(|line| line.strip_prefix("focused_app_id="))
             .ok_or_else(|| anyhow::anyhow!("daemon returned an invalid focused app ID response"))?;
-        let focused_process_executable = process_executable_from_app_identity(app_id);
-        let focused_process_name = process_name_from_app_identity(app_id);
-        let focused_application_id = (app_id != "unavailable"
-            && focused_process_executable.is_none()
-            && focused_process_name.is_none())
-        .then_some(app_id);
         // Read the scope decision beside the identity. This turns the command
         // into a useful diagnosis for terminal-scoped evdev routes instead of
-        // making users compare the ID against configuration by hand. Older
-        // daemons may not publish these fields, so keep them optional.
+        // making users compare the ID against configuration by hand. The
+        // identity is content-free but still version-sensitive: a stale
+        // daemon must not provide an apparently authoritative app ID.
         let status_response =
             crate::control_operation(wayexpand_core::DaemonOperation::Status).ok();
         let focus = focused_app_scope_from_status(status_response.as_deref());
-        let matching_status = focused_app_matching_status(
-            (app_id != "unavailable").then_some(app_id),
-            focus.scope_state.as_deref(),
-            focus.terminal_apps_only,
-            focus.window_tracker_identity_source.as_deref(),
-            focus.daemon_schema_compatible,
-        );
+        let matching_status = if focus.daemon_schema_compatible == Some(false) {
+            "daemon_status_incompatible"
+        } else if focus.daemon_status_trusted == Some(false) {
+            "daemon_build_unverified"
+        } else if focus.daemon_status_trusted.is_none() {
+            "daemon_status_unavailable"
+        } else {
+            focused_app_matching_status(
+                (app_id != "unavailable").then_some(app_id),
+                focus.scope_state.as_deref(),
+                focus.terminal_apps_only,
+                focus.window_tracker_identity_source.as_deref(),
+                focus.daemon_schema_compatible,
+            )
+        };
         let diagnostic = focused_app_diagnostic(matching_status, &focus);
+        let identity_is_trusted = focus.daemon_status_trusted == Some(true);
+        let focused_process_executable = identity_is_trusted
+            .then(|| process_executable_from_app_identity(app_id))
+            .flatten();
+        let focused_process_name = identity_is_trusted
+            .then(|| process_name_from_app_identity(app_id))
+            .flatten();
+        let focused_application_id = (identity_is_trusted
+            && app_id != "unavailable"
+            && focused_process_executable.is_none()
+            && focused_process_name.is_none())
+        .then_some(app_id);
         if json {
             println!(
                 "{}",
@@ -315,27 +356,43 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                     "focused_process_name": focused_process_name,
                     "daemon_status_schema": focus.daemon_status_schema,
                     "daemon_schema_compatible": focus.daemon_schema_compatible,
-                    "capture_app_scope_state": focus.scope_state,
-                    "terminal_apps_only": focus.terminal_apps_only,
-                    "window_tracker_connected": focus.window_tracker_connected,
-                    "window_context_available": focus.window_context_available,
-                    "window_app_id_available": focus.window_app_id_available,
-                    "window_process_executable_available": focus.window_process_executable_available,
-                    "window_process_name_available": focus.window_process_name_available,
-                    "window_tracker_identity_source": focus.window_tracker_identity_source,
-                    "window_process_identity_state": focus.window_process_identity_state,
+                    "daemon_commit": focus.daemon_commit,
+                    "daemon_version": focus.daemon_version,
+                    "daemon_build_matches": focus.daemon_build_matches,
+                    "daemon_status_trusted": focus.daemon_status_trusted,
+                    "capture_app_scope_state": focus.scope_state.as_deref().filter(|_| identity_is_trusted),
+                    "terminal_apps_only": focus.terminal_apps_only.filter(|_| identity_is_trusted),
+                    "window_tracker_connected": focus.window_tracker_connected.filter(|_| identity_is_trusted),
+                    "window_context_available": focus.window_context_available.filter(|_| identity_is_trusted),
+                    "window_app_id_available": focus.window_app_id_available.filter(|_| identity_is_trusted),
+                    "window_process_executable_available": focus.window_process_executable_available.filter(|_| identity_is_trusted),
+                    "window_process_name_available": focus.window_process_name_available.filter(|_| identity_is_trusted),
+                    "window_tracker_identity_source": focus.window_tracker_identity_source.as_deref().filter(|_| identity_is_trusted),
+                    "window_process_identity_state": focus.window_process_identity_state.as_deref().filter(|_| identity_is_trusted),
                     "matching_status": matching_status,
                     "problem_id": diagnostic.map(|(id, _)| id),
                     "suggested_action": diagnostic.map(|(_, action)| action),
                 })
             );
-        } else if matching_status == "daemon_status_incompatible" {
-            println!("The running daemon uses an incompatible status schema.");
+        } else if matches!(
+            matching_status,
+            "daemon_status_incompatible" | "daemon_build_unverified" | "daemon_status_unavailable"
+        ) {
             println!(
-                "Reported schema: {}",
+                "Focused application identity could not be verified against the active daemon."
+            );
+            println!(
+                "Daemon schema: {} · build: {}",
                 focus
                     .daemon_status_schema
-                    .map_or_else(|| "unknown".into(), |schema| schema.to_string())
+                    .map_or_else(|| "unknown".into(), |schema| schema.to_string()),
+                if focus.daemon_build_matches == Some(true) {
+                    "current"
+                } else if focus.daemon_build_matches == Some(false) {
+                    "mismatch"
+                } else {
+                    "unverified"
+                }
             );
             if let Some((problem_id, suggested_action)) = diagnostic {
                 println!("Problem: {problem_id}");
@@ -410,7 +467,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             || live
             || json
             || trigger.is_some()
-            || test_trigger.is_some()
+            || desktop_test_requested
             || test_application_class.is_some()
             || test_focus_confirmed
             || test_observe_only
@@ -419,16 +476,28 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
         }
         return gnome_interactive_test();
     }
-    if test_trigger.is_some() && (live || json || trigger.is_some()) {
+    if desktop_test_requested && (live || json || trigger.is_some()) {
         bail!("--test cannot be combined with --json, --trigger, or --live");
     }
     validate_desktop_test_options(
-        test_trigger.is_some(),
+        desktop_test_requested,
         test_application_class.as_deref(),
         test_focus_confirmed,
         test_observe_only,
     )?;
-    if let Some(trigger) = test_trigger {
+    if desktop_test_requested {
+        let trigger = match test_trigger {
+            Some(trigger) => trigger,
+            None => {
+                let config = wayexpand_core::Config::load(wayexpand_core::default_config_path())
+                    .map_err(|error| {
+                        anyhow::anyhow!("configuration check failed: {}", error.safe_summary())
+                    })?;
+                safe_default_desktop_test_trigger(&config).ok_or_else(|| {
+                    anyhow::anyhow!("no dedicated harmless test snippet is available; create one with the WayExpand GUI Test Expansion flow, or review a specific snippet with `wayexpand preview TRIGGER` and select it explicitly with `wayexpand debug --test TRIGGER`")
+                })?
+            }
+        };
         return desktop_test_for(
             &trigger,
             false,
@@ -452,13 +521,33 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
     Ok(())
 }
 
+/// The argument-free test may only choose a known harmless tutorial. Arbitrary
+/// user snippets can contain private or surprising text, so they require an
+/// explicit trigger choice even when they are otherwise static and global.
+fn safe_default_desktop_test_trigger(config: &wayexpand_core::Config) -> Option<String> {
+    config
+        .expansion
+        .iter()
+        .find(|expansion| {
+            expansion.is_keyboard_matchable()
+                && expansion.app_filter.is_empty()
+                && expansion.command.is_none()
+                && !expansion.replacement.contains("{{")
+                && (expansion.tags.iter().any(|tag| tag == "tutorial")
+                    && expansion.replacement == "WayExpand is working!"
+                    || expansion.answers_to(";;hello")
+                        && expansion.replacement == "Hello from Wayland!")
+        })
+        .map(|expansion| expansion.trigger.clone())
+}
+
 fn validate_desktop_test_options(
-    has_test_trigger: bool,
+    test_requested: bool,
     application_class: Option<&str>,
     focus_confirmed: bool,
     observe_only: bool,
 ) -> Result<()> {
-    if !has_test_trigger && (application_class.is_some() || focus_confirmed || observe_only) {
+    if !test_requested && (application_class.is_some() || focus_confirmed || observe_only) {
         bail!("--application-class, --focus-confirmed, and --observe-only apply only to --test");
     }
     if focus_confirmed != application_class.is_some() {
@@ -511,7 +600,8 @@ fn desktop_test_for(
     println!("Capture [{test_id}]: pending — no input content will be recorded");
     println!("Output [{test_id}]: pending — no Enter key will be sent");
     println!("Replacement [{test_id}]: pending — you will verify the final text in the target app");
-    println!("\nReview the expected text with `wayexpand preview {trigger:?}` first.");
+    let quoted_trigger = crate::commands::shell_single_quote(trigger);
+    println!("\nReview the expected text with `wayexpand preview {quoted_trigger}` first.");
     println!("This test types the configured replacement into the focused application when you type {trigger:?}.");
     let application_class = if let Some(application_class) = options.application_class.as_deref() {
         application_class.trim().to_owned()

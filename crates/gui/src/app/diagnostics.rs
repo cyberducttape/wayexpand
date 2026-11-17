@@ -200,6 +200,86 @@ impl GuiApp {
                 );
                 ui.add(egui::Label::new(RichText::new(answer).color(palette.warning)).wrap());
                 ui.add(egui::Label::new(instruction).wrap());
+                ui.add_space(3.0);
+                let terminal_scope_blocked = matches!(
+                    problem,
+                    super::Problem::TerminalFocusUnknown
+                        | super::Problem::TerminalCompositorIdentity
+                );
+                let replacement_gate_blocked = matches!(
+                    problem,
+                    super::Problem::ReplacementNotAllowed
+                        | super::Problem::ReplacementConsentUnknown
+                );
+                let input_route_blocked = matches!(
+                    problem,
+                    super::Problem::ServiceOff
+                        | super::Problem::NoTypingRoute
+                        | super::Problem::Paused
+                        | super::Problem::PermissionNeeded
+                        | super::Problem::PermissionRevoked
+                        | super::Problem::RestartNeeded
+                        | super::Problem::BuildUnknown
+                        | super::Problem::InputSourceNotSetUp
+                        | super::Problem::GnomeSourceStatusUnavailable
+                        | super::Problem::IbusManifestScopeInvalid
+                        | super::Problem::IbusDesktopRouteUnavailable
+                        | super::Problem::IbusDesktopRouteRecentlyCrashed
+                        | super::Problem::IbusEngineNotRegistered
+                        | super::Problem::InputSourceNotSelected
+                        | super::Problem::InputStatusPending
+                        | super::Problem::IbusEngineUnavailable
+                        | super::Problem::IbusInputNotObserved
+                        | super::Problem::InputStatusStale
+                        | super::Problem::Connecting
+                        | super::Problem::RouteFailed
+                        | super::Problem::Unsupported
+                        | super::Problem::TerminalRouteNoInput
+                        | super::Problem::StatusUnknown
+                        | super::Problem::RouteStatusUnknown
+                );
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(if terminal_scope_blocked {
+                            self.strings.why_focus_scope_pattern()
+                        } else if input_route_blocked {
+                            self.strings.why_route_blocked_pattern()
+                        } else {
+                            self.strings.why_pattern_status(
+                                situation.ibus_route_expected || situation.gnome_ibus,
+                                situation.ibus_latest_match,
+                                situation.recent_outcome,
+                            )
+                        })
+                        .small()
+                        .color(palette.muted),
+                    )
+                    .wrap(),
+                );
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(if terminal_scope_blocked {
+                            self.strings.why_focus_scope_delivery()
+                        } else if input_route_blocked {
+                            self.strings.why_route_blocked_delivery()
+                        } else {
+                            self.strings.why_delivery_status(
+                                situation.ibus_route_expected || situation.gnome_ibus,
+                                situation.ibus_latest_match,
+                                situation.recent_outcome,
+                                // A saved app test cannot imply that the
+                                // currently blocked consent/policy gate is
+                                // delivering output. Fresh match/refusal
+                                // telemetry remains visible above.
+                                situation.application_delivery_verified
+                                    && !replacement_gate_blocked,
+                            )
+                        })
+                        .small()
+                        .color(palette.muted),
+                    )
+                    .wrap(),
+                );
                 // Keep the highest-priority repair as the single action, but
                 // retain a known route limitation as context. The terminal
                 // scope is a route property, not proof that the user's last
@@ -223,8 +303,45 @@ impl GuiApp {
             });
             return action_requested.then_some(action);
         }
+        // A saved desktop test is scoped to the application named in its
+        // record. It cannot make a different, unobserved application appear
+        // healthy just because the route, session, and configuration match.
+        // Keep Diagnostics useful in that state without invalidating the
+        // valid test result or claiming the new application is broken.
+        if (situation.gnome_ibus || situation.ibus_route_expected)
+            && situation.application_delivery_verified
+        {
+            let application = self
+                .setup_record
+                .as_ref()
+                .and_then(|record| record.application.as_deref())
+                .unwrap_or("the tested application");
+            let scope_status = self.strings.why_verified_app_scope(application);
+            let mut action_requested = false;
+            theme::section_header(ui, "", self.strings.why_title());
+            theme::card(ui, palette, |ui| {
+                ui.label(
+                    RichText::new(self.strings.why_intro())
+                        .small()
+                        .color(palette.muted),
+                );
+                ui.label(RichText::new(scope_status).color(palette.muted));
+                if ui
+                    .button(
+                        self.strings
+                            .action_label(super::next_step::Action::TestInApplication),
+                    )
+                    .clicked()
+                {
+                    action_requested = true;
+                }
+            });
+            return action_requested.then_some(super::NextAction::TestInApplication);
+        }
         if self.daemon_reachable != Some(true)
             || runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin")
+            || runtime::daemon_build_state(&self.daemon_status)
+                != runtime::DaemonBuildState::Current
         {
             return None;
         }
@@ -1183,6 +1300,7 @@ impl GuiApp {
             let color = match status.state {
                 BackendState::Available => palette.success,
                 BackendState::RequiresPermission => palette.warning,
+                BackendState::ActionRequired => palette.warning,
                 BackendState::Implemented => palette.warning,
                 BackendState::Unavailable | BackendState::NotImplemented => palette.muted,
             };
@@ -1398,6 +1516,31 @@ impl GuiApp {
                     route.contract().label,
                     route.contract().setup_detail,
                 ));
+                // A running terminal-scoped route may be healthy for its
+                // current apps while a broader route is still recommended.
+                // Keep that recommendation actionable from Diagnostics; the
+                // guided setup performs its normal preflight and consent flow
+                // before applying a route change.
+                let current_backend = super::setup::current_guided_setup_backend(
+                    self.daemon_reachable,
+                    &self.daemon_status,
+                    self.route_plan.as_ref(),
+                );
+                if route.setup_backend() == "ibus"
+                    && current_backend.is_some_and(|backend| backend != "ibus")
+                {
+                    ui.label(
+                        RichText::new(self.strings.onboarding_ibus_field_limitation())
+                            .small()
+                            .color(palette.muted),
+                    );
+                    if ui
+                        .button(self.strings.onboarding_set_up_recommended_ibus())
+                        .clicked()
+                    {
+                        self.start_guided_setup();
+                    }
+                }
             } else {
                 ui.separator();
                 ui.colored_label(
@@ -1714,6 +1857,12 @@ impl GuiApp {
                     }
                 } else {
                     ui.label(self.strings.dg_no_enabled_static_snippet_is_available());
+                    if ui
+                        .button(self.strings.dg_add_harmless_test_snippet())
+                        .clicked()
+                    {
+                        self.create_diagnostic_test_snippet();
+                    }
                 }
                 if !first_run_verification {
                     ui.colored_label(
@@ -1799,14 +1948,56 @@ impl GuiApp {
             });
         });
         let mut save_error = None;
-        if confirmed {
+        let review = self.desktop_test_review.clone();
+        let review_scope = review.as_ref().map(|review| crate::setup_record::Scope {
+            route: review.route.as_deref(),
+            route_instance: review.route_instance.as_deref(),
+            config_revision: Some(&review.config_revision),
+            desktop: &review.desktop,
+            session: review.session.as_deref(),
+            build: &review.build,
+        });
+        let current_route = self.current_route_label();
+        let current_route_instance = self.current_route_instance();
+        let current_desktop = crate::setup_record::current_desktop();
+        let current_session = crate::setup_record::current_session();
+        let current_build = crate::setup_record::current_build();
+        let current_config_revision = self.config_revision.fingerprint();
+        let current_scope = crate::setup_record::Scope {
+            route: current_route.as_deref(),
+            route_instance: current_route_instance.as_deref(),
+            config_revision: Some(&current_config_revision),
+            desktop: &current_desktop,
+            session: current_session.as_deref(),
+            build: &current_build,
+        };
+        let review_staleness = match (review.as_ref(), review_scope.as_ref()) {
+            (Some(review), Some(scope)) => {
+                crate::setup_record::SetupRecord::verified(&review.application_class, scope)
+                    .staleness(&current_scope)
+            }
+            _ => Some(crate::setup_record::Staleness::Incomplete),
+        };
+        if let (true, Some(staleness)) = (confirmed, review_staleness.as_ref()) {
+            self.desktop_test_verified = false;
+            self.desktop_test_verified_application = None;
+            self.status = Status::warning(
+                self.strings
+                    .setup_changed_since_test(&self.strings.setup_change(staleness)),
+            );
+            self.desktop_test_review = None;
+        } else if confirmed {
             self.desktop_test_verified = true;
             self.desktop_test_verified_application = Some(application_class.clone());
-            // Keep the confirmation, with what it covered, across restarts.
+            // Persist exactly the environment used by the test. The earlier
+            // staleness check establishes that it still matches current
+            // route/config/session state; never retag an old result as a
+            // verification of a newer route instance.
             let record = crate::setup_record::SetupRecord::verified(
                 &application_class,
-                self.current_route_label(),
-                self.current_route_instance(),
+                review_scope
+                    .as_ref()
+                    .expect("confirmed review has a captured scope"),
             );
             save_error = crate::setup_record::save(&record).err();
             self.setup_record_saved = save_error.is_none();
@@ -3105,6 +3296,12 @@ app_filter = ["app_id_exact:org.example.Editor"]
             trigger: ";;hello".into(),
             replacement: "Hello from Wayland!".into(),
             application_class: "GTK".into(),
+            route: None,
+            route_instance: None,
+            desktop: "test desktop".into(),
+            session: None,
+            build: "test build".into(),
+            config_revision: "sha256:test-config".into(),
             capture_activity_observed: true,
             output_activity_observed: true,
         };

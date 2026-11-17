@@ -307,6 +307,20 @@ impl Strings {
         }
     }
 
+    pub fn status_save_before_matcher_preview(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Save or discard the current snippet edits before opening the onboarding preview."
+            }
+            Language::Indonesian => {
+                "Simpan atau buang perubahan cuplikan saat ini sebelum membuka pratinjau awal."
+            }
+            Language::German => {
+                "Speichern oder verwerfen Sie die aktuellen Snippet-Änderungen, bevor Sie die Vorschau öffnen."
+            }
+        }
+    }
+
     pub fn status_save_completed_with_newer_edits(&self) -> &'static str {
         match self.lang {
             Language::English => "Save completed; newer edits remain unsaved",

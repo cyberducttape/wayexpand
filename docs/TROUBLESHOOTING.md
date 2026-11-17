@@ -4,14 +4,44 @@
 
 ---
 
-Start with the unified, content-free diagnostic report:
+Start with the direct answer to **“Why didn't my expansion work?”**:
+
+```sh
+wayexpand why
+```
+
+It reports one prioritized cause and what to do next. For example, if GNOME
+has not selected WayExpand, the next step is to select it in **Settings →
+Keyboard** or the input-source menu, then run a live typing test in the
+affected application. Quick Picker remains available to copy a snippet and
+paste it manually while automatic expansion is unavailable. `wayexpand why
+--json` provides the same diagnosis and next action for scripts.
+
+The report keeps the stages distinct: a local matcher preview can show that a
+rule matches, but only a real application test can verify that replacement
+text appeared in that application's field. Even an acknowledged output
+operation does not prove the application changed its text.
+
+For more detailed, content-free diagnostics, use:
 
 ```sh
 wayexpand debug
 wayexpand debug --json
 wayexpand debug --trigger ';http503'
-wayexpand debug --test ';hello'
+wayexpand debug --test
 ```
+
+`wayexpand why` first checks that the running daemon build matches the CLI;
+when they differ, it asks you to resolve the installation or restart mismatch
+before trusting route telemetry. On a terminal-only route,
+`terminal_focus_unknown` means the
+route is currently failing closed because the compositor supplied no focused
+application ID. Keep the intended terminal focused and run
+`wayexpand debug --focused-app-id --json`, then follow its suggested action.
+`WX-EVDEV-FOCUS-006` means KWin returned its own process ID instead of the
+client application ID; do not allowlist `kwin_wayland` or use a window title
+as a substitute. Matching must remain blocked until client identity is
+available. Use Quick Picker copy-and-paste meanwhile.
 
 For a short live session, explicitly enable sanitized event counters and let
 the session expire automatically (60 seconds by default, at most 300 seconds):
@@ -80,8 +110,11 @@ an application; test a harmless expansion in each application class you rely
 on. A successful GTK test does not certify Qt, Electron, terminal, browser,
 remote-desktop, or sandboxed-app behavior.
 
-`debug --test TRIGGER` is an interactive desktop integration check for an
-enabled, static, non-command snippet. Review the expected text first with
+`debug --test` is an interactive desktop integration check that chooses a
+known harmless tutorial snippet, if one is configured. It never picks an
+arbitrary personal snippet automatically. If no tutorial is available, create
+one in the GUI or review a snippet with `wayexpand preview TRIGGER` and pass
+its trigger explicitly. Review the expected text first with
 `wayexpand preview`, select the target application class, and confirm before
 typing the trigger. It waits for sanitized capture/output evidence and then
 asks you to confirm exact visible text. It never presses Enter, never retries
@@ -199,8 +232,11 @@ checks with `wayexpand ibus status --json`. Run
 `wayexpand repair --gnome-input-source` to register and select the source
 through GNOME Shell, then independently verify the IBus engine.
 Configuration readiness does not prove that a text field receives input or
-that an application applied a replacement; use `wayexpand debug --test
-';;hello'` and confirm the visible result.
+that an application applied a replacement. Run `wayexpand debug --test` to
+use the harmless tutorial snippet when configured. If it is unavailable,
+review an enabled static snippet with `wayexpand preview TRIGGER`, then pass
+that exact trigger to `wayexpand debug --test 'TRIGGER'`. Confirm the visible
+result in the affected application.
 
 ### GNOME setup continuation
 
@@ -761,6 +797,7 @@ has advertised the protocol. The probe lines are the decision:
 | `input-method-v2 probe: manager and seat connection succeeded` | Experimental direct Wayland path is available | Use only with explicit opt-in if accepting possible loss of Escape, arrows, or function keys |
 | `wlroots probe: virtual keyboard globals available` | A wlroots output path was detected | Use `--source=evdev --backend=wlroots` only when doctor lists it as usable |
 | `RequiresPermission` / `permission=Required` | The device or portal needs explicit access | Apply the evdev or portal remediation below; raw evdev is never automatic |
+| `ActionRequired` / `permission=NotApplicable` | A setup step such as IBus registration, input-source selection, or replacement consent remains | Follow the named guided setup action; no operating-system permission is implied |
 | `Unavailable` / `NotImplemented` | The path cannot be used in this session | Choose another path or compositor |
 | `Capture readiness: NOT READY` | No complete source + output pair was found | Resolve the first unavailable probe; do not keep restarting the daemon |
 | `Capture readiness: AUTHORIZATION REQUIRED` | A backend such as libei was detected heuristically but requires interactive portal consent; doctor remains unhealthy | Start it deliberately only after reviewing the authorization requirements; treat connection failure as unresolved |

@@ -185,54 +185,63 @@ impl GuiApp {
             Some(false) => (self.strings.daemon_unreachable_status(), palette.danger),
             None => (self.strings.daemon_unknown_status(), palette.muted),
         };
-        let (route_label, _) = match self.route_state {
-            Some(runtime::RouteState::Connected) if self.paused => {
-                (self.strings.route_paused_status(), palette.warning)
-            }
-            Some(runtime::RouteState::Connected) => {
-                let full_protection = self
-                    .daemon_capabilities
-                    .as_ref()
-                    .is_some_and(|capabilities| capabilities.provides_full_protection());
-                // "Ready" claims verified text expansion on this desktop;
-                // without certification evidence the route is only running.
-                let certified = self
-                    .active_route_contract()
-                    .is_some_and(|contract| contract.is_certified());
-                if full_protection && certified {
-                    (self.strings.route_connected_status(), palette.success)
-                } else if full_protection {
-                    (self.strings.route_running_status(), palette.success)
-                } else {
-                    (self.strings.route_limited_status(), palette.warning)
+        let (route_label, _) = if self.daemon_reachable == Some(true)
+            && runtime::daemon_build_state(&self.daemon_status)
+                != runtime::DaemonBuildState::Current
+        {
+            // A stale or schema-incompatible status cannot prove that the
+            // reported connection is still the route this GUI is running.
+            (self.strings.route_unknown_status(), palette.warning)
+        } else {
+            match self.route_state {
+                Some(runtime::RouteState::Connected) if self.paused => {
+                    (self.strings.route_paused_status(), palette.warning)
                 }
+                Some(runtime::RouteState::Connected) => {
+                    let full_protection = self
+                        .daemon_capabilities
+                        .as_ref()
+                        .is_some_and(|capabilities| capabilities.provides_full_protection());
+                    // "Ready" claims verified text expansion on this desktop;
+                    // without certification evidence the route is only running.
+                    let certified = self
+                        .active_route_contract()
+                        .is_some_and(|contract| contract.is_certified());
+                    if full_protection && certified {
+                        (self.strings.route_connected_status(), palette.success)
+                    } else if full_protection {
+                        (self.strings.route_running_status(), palette.success)
+                    } else {
+                        (self.strings.route_limited_status(), palette.warning)
+                    }
+                }
+                Some(runtime::RouteState::Reconnecting) => {
+                    (self.strings.route_reconnecting_status(), palette.warning)
+                }
+                Some(runtime::RouteState::Starting) => {
+                    (self.strings.route_starting_status(), palette.warning)
+                }
+                Some(runtime::RouteState::PermissionRequired) => (
+                    self.strings.route_permission_required_status(),
+                    palette.warning,
+                ),
+                Some(runtime::RouteState::PortalRevoked) => {
+                    (self.strings.route_portal_revoked_status(), palette.warning)
+                }
+                Some(runtime::RouteState::Unsupported) => {
+                    (self.strings.route_unsupported_status(), palette.muted)
+                }
+                Some(runtime::RouteState::Degraded) => {
+                    (self.strings.route_degraded_status(), palette.warning)
+                }
+                Some(runtime::RouteState::Failed) => {
+                    (self.strings.route_failed_status(), palette.danger)
+                }
+                Some(runtime::RouteState::Stopped) => {
+                    (self.strings.route_stopped_status(), palette.muted)
+                }
+                None => (self.strings.route_unknown_status(), palette.muted),
             }
-            Some(runtime::RouteState::Reconnecting) => {
-                (self.strings.route_reconnecting_status(), palette.warning)
-            }
-            Some(runtime::RouteState::Starting) => {
-                (self.strings.route_starting_status(), palette.warning)
-            }
-            Some(runtime::RouteState::PermissionRequired) => (
-                self.strings.route_permission_required_status(),
-                palette.warning,
-            ),
-            Some(runtime::RouteState::PortalRevoked) => {
-                (self.strings.route_portal_revoked_status(), palette.warning)
-            }
-            Some(runtime::RouteState::Unsupported) => {
-                (self.strings.route_unsupported_status(), palette.muted)
-            }
-            Some(runtime::RouteState::Degraded) => {
-                (self.strings.route_degraded_status(), palette.warning)
-            }
-            Some(runtime::RouteState::Failed) => {
-                (self.strings.route_failed_status(), palette.danger)
-            }
-            Some(runtime::RouteState::Stopped) => {
-                (self.strings.route_stopped_status(), palette.muted)
-            }
-            None => (self.strings.route_unknown_status(), palette.muted),
         };
         let route_trust = self.active_route_contract().map(|contract| {
             let sensitive_field_protection = if contract.sensitive_fields {
@@ -782,10 +791,18 @@ impl GuiApp {
                 P::RouteFailed => (S::Disconnected, palette.danger),
                 P::Unsupported => (S::CopyOnly, palette.muted),
                 P::NoTypingRoute => (S::NeedsSetup, palette.warning),
+                P::NoEnabledExpansions => (S::NotSetUp, palette.warning),
                 P::FieldCannotReplace | P::SensitiveField | P::TerminalRouteNoInput => {
                     (S::Limited, palette.warning)
                 }
                 P::ApplicationDeliveryUnverified
+                | P::IbusInputNotObserved
+                | P::FieldTextMismatch
+                | P::FieldPolicyRefusal
+                | P::IbusFieldTypeUnknown
+                | P::TriggerNotMatched
+                | P::TriggerMatchUnknown
+                | P::IbusDesktopRouteRecentlyCrashed
                 | P::OutputUnverified
                 | P::PartialOutput
                 | P::OutputNotApplied
@@ -793,16 +810,21 @@ impl GuiApp {
                 | P::OutputInterrupted
                 | P::SnippetActionFailed
                 | P::OutputStatusUnknown => (S::NeedsVerification, palette.accent),
-                P::InputStatusPending => (S::Checking, palette.muted),
+                P::InputStatusPending
+                | P::GnomeSourceStatusUnavailable
+                | P::ReplacementConsentUnknown => (S::Checking, palette.muted),
                 P::RestartNeeded
                 | P::BuildUnknown
                 | P::InputSourceNotSetUp
                 | P::IbusEngineNotRegistered
+                | P::IbusManifestScopeInvalid
+                | P::IbusDesktopRouteUnavailable
                 | P::InputSourceNotSelected
                 | P::IbusEngineUnavailable
+                | P::TerminalFocusUnknown
+                | P::TerminalCompositorIdentity
                 | P::InputStatusStale
-                | P::ReplacementNotAllowed
-                | P::ReplacementConsentUnknown => (S::NeedsSetup, palette.warning),
+                | P::ReplacementNotAllowed => (S::NeedsSetup, palette.warning),
                 P::StatusUnknown | P::RouteStatusUnknown => (S::Checking, palette.muted),
             };
         }
@@ -855,6 +877,15 @@ impl GuiApp {
     /// route, "<source> → <backend>" for a connected daemon, `None` while
     /// unknown.
     pub(crate) fn current_route_label(&self) -> Option<String> {
+        // A saved real-app confirmation is scoped to the route actually
+        // running now. Do not let old or schema-incompatible daemon status
+        // make an earlier route name/instance look current.
+        if self.daemon_reachable == Some(true)
+            && runtime::daemon_build_state(&self.daemon_status)
+                != runtime::DaemonBuildState::Current
+        {
+            return None;
+        }
         let control_only =
             runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin");
         if self.ibus_route_active() && (self.daemon_reachable != Some(true) || control_only) {
@@ -899,9 +930,11 @@ impl GuiApp {
         let desktop = crate::setup_record::current_desktop();
         let session = crate::setup_record::current_session();
         let build = crate::setup_record::current_build();
+        let config_revision = self.config_revision.fingerprint();
         let scope = crate::setup_record::Scope {
             route: route.as_deref(),
             route_instance: instance.as_deref(),
+            config_revision: Some(&config_revision),
             desktop: &desktop,
             session: session.as_deref(),
             build: &build,

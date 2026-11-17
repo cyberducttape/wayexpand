@@ -262,7 +262,8 @@ most routes expand triggers while the picker can only copy.
 |---|---|
 | `Working` | An exact insertion was confirmed in a real application in this login session, with this build, typing route and route instance. A confirmation that could not be saved shows `Working (this session only)`. |
 | `Needs verification` | Connected with nothing wrong, but no insertion has been confirmed for what is running now. |
-| `Needs permission` / `Needs setup` | A permission, GNOME input source, service restart or replacement consent is still needed. |
+| `Needs permission` | An operating-system, device, or desktop-portal permission is explicitly required. |
+| `Needs setup` | A setup step remains, such as IBus registration/source selection, a service restart, or explicit replacement consent. This does not imply an administrator permission is missing. |
 | `Limited` | Some protection is unavailable, or the last app's field refused replacement. |
 | `Copy-only` | The desktop cannot replace typed text; use the Quick Picker. |
 | `Disconnected` | A route that was available failed. |

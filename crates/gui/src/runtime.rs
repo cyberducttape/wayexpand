@@ -922,14 +922,18 @@ pub(crate) enum DaemonBuildState {
 /// A responsive daemon can still be running old safety or output behavior.
 /// Compare exact build identities when available, as `wayexpand doctor` does.
 pub(crate) fn daemon_build_state(response: &str) -> DaemonBuildState {
-    let daemon_commit = status_field(response, "daemon_commit");
-    let daemon_version = status_field(response, "daemon_version");
+    let status = wayexpand_core::DaemonStatus::parse(response);
+    if !daemon_status_schema_compatible(&status) {
+        return DaemonBuildState::Unverified;
+    }
+    let daemon_commit = status.field("daemon_commit");
+    let daemon_version = status.field("daemon_version");
     let gui_commit = env!("WAYEXPAND_COMMIT");
     let gui_version = env!("WAYEXPAND_BUILD_VERSION");
     if gui_version.contains(".dirty-unknown") {
         return DaemonBuildState::Unverified;
     }
-    let Some(daemon_commit) = daemon_commit.filter(|commit| commit != "unknown") else {
+    let Some(daemon_commit) = daemon_commit.filter(|commit| *commit != "unknown") else {
         return DaemonBuildState::Unverified;
     };
     if gui_commit == "unknown" {
@@ -938,13 +942,18 @@ pub(crate) fn daemon_build_state(response: &str) -> DaemonBuildState {
     if daemon_commit != gui_commit {
         return DaemonBuildState::RestartRequired;
     }
-    match daemon_version.as_deref() {
+    match daemon_version {
         Some("unknown") => DaemonBuildState::Unverified,
         Some(version) if version == gui_version => DaemonBuildState::Current,
         Some(_) => DaemonBuildState::RestartRequired,
         None if gui_version.contains(".dirty.") => DaemonBuildState::Unverified,
         None => DaemonBuildState::Current,
     }
+}
+
+fn daemon_status_schema_compatible(status: &wayexpand_core::DaemonStatus) -> bool {
+    status.field_is_unique("status_schema")
+        && status.status_schema() == Some(wayexpand_core::CONTROL_STATUS_SCHEMA)
 }
 
 pub(crate) fn control_command(
@@ -1069,9 +1078,10 @@ mod tests {
     fn daemon_build_state_requires_exact_tree_identity_for_dirty_builds() {
         let commit = env!("WAYEXPAND_COMMIT");
         let version = env!("WAYEXPAND_BUILD_VERSION");
+        let schema = wayexpand_core::CONTROL_STATUS_SCHEMA;
         assert_eq!(
             super::daemon_build_state(&format!(
-                "daemon_commit={commit}\ndaemon_version={version}\n"
+                "status_schema={schema}\ndaemon_commit={commit}\ndaemon_version={version}\n"
             )),
             if commit == "unknown" || version == "unknown" || version.contains(".dirty-unknown") {
                 super::DaemonBuildState::Unverified
@@ -1081,7 +1091,7 @@ mod tests {
         );
         assert_eq!(
             super::daemon_build_state(&format!(
-                "daemon_commit={commit}\ndaemon_version={version}-other-tree\n"
+                "status_schema={schema}\ndaemon_commit={commit}\ndaemon_version={version}-other-tree\n"
             )),
             if commit == "unknown" || version.contains(".dirty-unknown") {
                 super::DaemonBuildState::Unverified
@@ -1090,7 +1100,7 @@ mod tests {
             }
         );
         assert_eq!(
-            super::daemon_build_state(&format!("daemon_commit={commit}\n")),
+            super::daemon_build_state(&format!("status_schema={schema}\ndaemon_commit={commit}\n")),
             if commit == "unknown"
                 || version.contains(".dirty.")
                 || version.contains(".dirty-unknown")
@@ -1101,7 +1111,9 @@ mod tests {
             }
         );
         assert_eq!(
-            super::daemon_build_state("daemon_commit=older-build\n"),
+            super::daemon_build_state(&format!(
+                "status_schema={schema}\ndaemon_commit=older-build\n"
+            )),
             if commit == "unknown" || version.contains(".dirty-unknown") {
                 super::DaemonBuildState::Unverified
             } else {
@@ -1113,9 +1125,23 @@ mod tests {
             super::DaemonBuildState::Unverified
         );
         assert_eq!(
+            super::daemon_build_state(&format!(
+                "status_schema=11\ndaemon_commit=older-build\ndaemon_version={version}\n"
+            )),
+            super::DaemonBuildState::Unverified
+        );
+        assert!(!super::daemon_status_schema_compatible(
+            &wayexpand_core::DaemonStatus::parse(&format!(
+                "status_schema={schema}\nstatus_schema=11\n"
+            ))
+        ));
+        assert_eq!(
             super::daemon_build_state("daemon_commit=unknown\n"),
             super::DaemonBuildState::Unverified
         );
+        assert!(super::daemon_status_schema_compatible(
+            &wayexpand_core::DaemonStatus::parse(&format!("status_schema={schema}\n"))
+        ));
     }
 
     #[test]

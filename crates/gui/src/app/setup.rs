@@ -324,21 +324,31 @@ impl GuiApp {
     }
 
     pub(crate) fn start_guided_setup(&mut self) {
+        let situation = self.situation();
+        // Desktop-managed IBus can cover browser/editor fields that a
+        // terminal-restricted evdev route cannot. When IBus readiness is the
+        // reported blocker, guided setup must preflight that route instead of
+        // reopening setup for the currently running terminal backend.
+        let ibus_route = self.gnome_setup_resume_pending
+            || situation.gnome_ibus
+            || situation.ibus_route_expected
+            || self
+                .recommended_route
+                .is_some_and(|route| route.setup_backend() == "ibus");
         let current_backend = current_guided_setup_backend(
             self.daemon_reachable,
             &self.daemon_status,
             self.route_plan.as_ref(),
         );
-        if let Some(backend) = current_backend.filter(|backend| *backend != "ibus") {
-            self.guided_setup_waiting_for_route = false;
-            self.start_setup_with_replacement_consent(false, false, Some(backend));
-            return;
+        if !ibus_route {
+            if let Some(backend) = current_backend.filter(|backend| *backend != "ibus") {
+                self.guided_setup_waiting_for_route = false;
+                self.start_setup_with_replacement_consent(false, false, Some(backend));
+                return;
+            }
         }
-        let ibus_route = self.gnome_setup_resume_pending
-            || self
-                .recommended_route
-                .is_some_and(|route| route.setup_backend() == "ibus");
         if ibus_route {
+            self.setup_ibus_preflight_report = None;
             self.start_cli_task(
                 vec!["ibus".into(), "status".into(), "--json".into()],
                 self.strings.setup_checking_ibus().into(),
@@ -354,6 +364,73 @@ impl GuiApp {
         } else {
             self.guided_setup_waiting_for_route = false;
             self.start_setup();
+        }
+    }
+
+    /// Verify the active CLI, daemon and managed service before offering any
+    /// restart. This avoids restarting a unit selected only from a stale or
+    /// unverifiable route report.
+    pub(crate) fn check_upgrade_runtime(&mut self) {
+        self.start_cli_task(
+            vec!["upgrade".into(), "--check".into(), "--json".into()],
+            self.strings.dg_software_versions().into(),
+            self.strings.dg_software_versions().into(),
+        );
+        if self.setup_task.is_some() {
+            self.cli_task_kind = Some("upgrade-check".into());
+        }
+    }
+
+    fn finish_upgrade_check(&mut self, output: &str) -> Status {
+        let Ok(report) = serde_json::from_str::<serde_json::Value>(output) else {
+            self.diagnostics_open = true;
+            return Status::error(self.strings.upgrade_check_unreadable());
+        };
+        let active_cli = report
+            .get("active_payload_cli")
+            .and_then(serde_json::Value::as_str);
+        if report
+            .get("cli_matches_current_install")
+            .and_then(serde_json::Value::as_bool)
+            == Some(false)
+        {
+            self.diagnostics_open = true;
+            return Status::warning(self.strings.upgrade_cli_mismatch(active_cli));
+        }
+        match report
+            .get("runtime_action")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("restart_daemon_service") => {
+                let unit = report
+                    .get("restart_process")
+                    .and_then(|process| process.get("unit"))
+                    .and_then(serde_json::Value::as_str);
+                if let Some(unit) = unit {
+                    self.service_restart_unit = Some(unit.to_owned());
+                    self.service_restart_confirm_open = true;
+                    Status::warning(self.strings.upgrade_restart_available())
+                } else {
+                    self.diagnostics_open = true;
+                    Status::warning(self.strings.upgrade_restart_unmanaged())
+                }
+            }
+            Some("restart_daemon_manually") => {
+                self.diagnostics_open = true;
+                Status::warning(self.strings.upgrade_restart_unmanaged())
+            }
+            Some("run_current_install_cli" | "verify_current_install_cli") => {
+                self.diagnostics_open = true;
+                Status::warning(self.strings.upgrade_cli_mismatch(active_cli))
+            }
+            Some("none") => {
+                self.refresh_diagnostics(false);
+                Status::success(self.strings.upgrade_build_current())
+            }
+            _ => {
+                self.diagnostics_open = true;
+                Status::warning(self.strings.upgrade_check_unreadable())
+            }
         }
     }
 
@@ -609,7 +686,10 @@ impl GuiApp {
                 false,
             )
         } else if output.contains("WX-POLICY-001") {
-            (Status::warning(strings.setup_needs_permission()), false)
+            (
+                Status::warning(strings.setup_replacement_consent_needed()),
+                false,
+            )
         } else if output
             .lines()
             .any(|line| line.trim() == "DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW")
@@ -660,6 +740,9 @@ impl GuiApp {
             self.diagnostics_open = true;
             return Status::error(self.strings.setup_checks_incomplete());
         };
+        // The consent dialog must show findings from the preflight that
+        // opened it, not a potentially older background diagnostics snapshot.
+        self.setup_ibus_preflight_report = Some(report);
         self.setup_system_integration_required = registration_needed;
         self.setup_system_integration_acknowledged = !registration_needed;
         self.setup_consent_acknowledged =
@@ -676,6 +759,36 @@ impl GuiApp {
             self.desktop_test_trigger.clear();
             false
         }
+    }
+
+    /// Show the matcher preview for the same saved snippet used by the
+    /// onboarding desktop test. Preserve unsaved editor work rather than
+    /// silently switching the selected snippet underneath the user.
+    pub(crate) fn open_onboarding_matcher_preview(&mut self) {
+        if self.draft_is_dirty() {
+            self.status = Status::warning(self.strings.status_save_before_matcher_preview());
+            return;
+        }
+        let Some(expansion) = super::first_run::onboarding_test_snippet(&self.config) else {
+            self.status = Status::warning(self.strings.status_create_test_expansion_first());
+            return;
+        };
+        let Some(index) = self
+            .config
+            .expansion
+            .iter()
+            .position(|candidate| candidate.id == expansion.id)
+        else {
+            self.status = Status::warning(self.strings.status_create_test_expansion_first());
+            return;
+        };
+
+        self.select(index);
+        self.invalidate_preview();
+        self.playground.clear();
+        self.playground.invalidate();
+        self.try_live_open = true;
+        self.status = Status::info(self.strings.matcher_preview_scope());
     }
 
     pub(crate) fn start_desktop_test(
@@ -702,6 +815,12 @@ impl GuiApp {
             trigger,
             replacement,
             application_class,
+            route: self.current_route_label(),
+            route_instance: self.current_route_instance(),
+            desktop: crate::setup_record::current_desktop(),
+            session: crate::setup_record::current_session(),
+            build: crate::setup_record::current_build(),
+            config_revision: self.config_revision.fingerprint(),
             capture_activity_observed: false,
             output_activity_observed: false,
         });
@@ -746,7 +865,7 @@ impl GuiApp {
                         };
                         if is_setup {
                             self.gnome_setup_resume_pending =
-                                wayexpand_core::gnome_ibus_setup_resume_pending(&self.path);
+                                crate::gnome_setup_resume_pending_for_current_session(&self.path);
                         }
                         let task_kind = self.cli_task_kind.take();
                         if task_kind.as_deref() != Some("setup-preflight") {
@@ -754,6 +873,8 @@ impl GuiApp {
                         }
                         if task_kind.as_deref() == Some("setup-preflight") {
                             self.setup_preflight_result(&output)
+                        } else if task_kind.as_deref() == Some("upgrade-check") {
+                            self.finish_upgrade_check(&output)
                         } else if task_kind.as_deref() == Some("picker-shortcut") {
                             self.picker_shortcut_error = None;
                             Status::success(success_message)
@@ -841,7 +962,7 @@ impl GuiApp {
                         self.pending_desktop_test = None;
                         if is_setup {
                             self.gnome_setup_resume_pending =
-                                wayexpand_core::gnome_ibus_setup_resume_pending(&self.path);
+                                crate::gnome_setup_resume_pending_for_current_session(&self.path);
                             if self.gnome_setup_resume_pending {
                                 self.onboarding_visible = true;
                             }
@@ -880,6 +1001,9 @@ impl GuiApp {
                         } else if task_kind.as_deref() == Some("setup-preflight") {
                             self.diagnostics_open = true;
                             Status::error(self.strings.setup_could_not_check_stages(&detail))
+                        } else if task_kind.as_deref() == Some("upgrade-check") {
+                            self.diagnostics_open = true;
+                            Status::error(self.strings.upgrade_check_unreadable())
                         } else if task_kind.as_deref() == Some("gnome-source-repair") {
                             let report = setup_failure_report(
                                 &[],
@@ -925,6 +1049,9 @@ impl GuiApp {
                 } else if task_kind.as_deref() == Some("setup-preflight") {
                     self.diagnostics_open = true;
                     self.status = Status::error(self.strings.setup_preflight_stopped());
+                } else if task_kind.as_deref() == Some("upgrade-check") {
+                    self.diagnostics_open = true;
+                    self.status = Status::error(self.strings.upgrade_check_unreadable());
                 } else {
                     self.status = Status::error(self.strings.status_setup_failed("worker stopped"));
                 }
@@ -1012,41 +1139,47 @@ impl GuiApp {
         if !self.setup_consent_open {
             return;
         }
-        let (input_title, input_detail, tracking_title, tracking_detail) =
-            match wayexpand_backend_selection::Compositor::detect() {
-                wayexpand_backend_selection::Compositor::Gnome => (
-                    self.strings.setup_gnome_input(),
-                    self.strings.setup_gnome_input_detail(),
-                    self.strings.setup_gnome_tracking(),
-                    self.strings.setup_gnome_tracking_detail(),
-                ),
-                wayexpand_backend_selection::Compositor::KdePlasma => (
-                    self.strings.setup_kde_input(),
-                    self.strings.setup_kde_input_detail(),
-                    self.strings.setup_kde_tracking(),
-                    self.strings.setup_tracking_detail(),
-                ),
-                compositor => (
-                    self.strings.setup_other_input(),
-                    self.strings.setup_other_input_detail(),
-                    self.strings.setup_other_tracking(),
-                    if compositor == wayexpand_backend_selection::Compositor::Unknown {
-                        self.strings.setup_unknown_tracking_detail()
-                    } else {
-                        self.strings.setup_other_tracking_detail()
-                    },
-                ),
-            };
-        egui::Modal::new(egui::Id::new("ibus_replacement_consent")).show(ctx, |ui| {
-            ui.set_width(430.0);
-            ui.heading(self.strings.setup_title());
-            ui.add_space(8.0);
-            ui.label(RichText::new(self.strings.setup_checks()).strong());
-            for (id, label) in [
-                ("tools", self.strings.setup_check_tools()),
-                ("component", self.strings.setup_check_component()),
-                ("registered", self.strings.setup_check_registered()),
-                ("manifest-scope", self.strings.setup_check_manifest_scope()),
+        let compositor = wayexpand_backend_selection::Compositor::detect();
+        let (input_title, input_detail, tracking_title, tracking_detail) = match compositor {
+            wayexpand_backend_selection::Compositor::Gnome => (
+                self.strings.setup_gnome_input(),
+                self.strings.setup_gnome_input_detail(),
+                self.strings.setup_gnome_tracking(),
+                self.strings.setup_gnome_tracking_detail(),
+            ),
+            wayexpand_backend_selection::Compositor::KdePlasma => (
+                self.strings.setup_kde_input(),
+                self.strings.setup_kde_input_detail(),
+                self.strings.setup_kde_tracking(),
+                self.strings.setup_tracking_detail(),
+            ),
+            compositor => (
+                self.strings.setup_other_input(),
+                self.strings.setup_other_input_detail(),
+                self.strings.setup_other_tracking(),
+                if compositor == wayexpand_backend_selection::Compositor::Unknown {
+                    self.strings.setup_unknown_tracking_detail()
+                } else {
+                    self.strings.setup_other_tracking_detail()
+                },
+            ),
+        };
+        let show_tracking_step = compositor == wayexpand_backend_selection::Compositor::Gnome
+            || self
+                .config
+                .expansion
+                .iter()
+                .any(|expansion| expansion.enabled && !expansion.app_filter.is_empty());
+        let mut checks = vec![
+            ("tools", self.strings.setup_check_tools()),
+            ("component", self.strings.setup_check_component()),
+            ("manifest", self.strings.setup_check_manifest()),
+            ("manifest-scope", self.strings.setup_check_manifest_scope()),
+            ("registered", self.strings.setup_check_registered()),
+        ];
+        if compositor == wayexpand_backend_selection::Compositor::Gnome {
+            checks.extend([
+                ("gnome-session", self.strings.setup_check_gnome_bridge()),
                 (
                     "gnome-source-registered",
                     self.strings.setup_check_gnome_registered(),
@@ -1055,32 +1188,217 @@ impl GuiApp {
                     "gnome-source-active",
                     self.strings.setup_check_gnome_active(),
                 ),
-                ("consent", self.strings.setup_check_consent()),
-            ] {
-                let state = self
-                    .ibus_route
-                    .as_ref()
-                    .and_then(|report| report.check(id))
-                    .map(|check| check.state);
-                let (symbol, detail) = match state {
-                    Some(wayexpand_backend_ibus::chain::IbusCheckState::Pass) => {
-                        ("✓", self.strings.setup_state_ready())
+            ]);
+        } else {
+            checks.extend([
+                ("desktop", self.strings.setup_check_desktop()),
+                ("selected", self.strings.setup_check_selected()),
+            ]);
+        }
+        checks.extend([
+            ("engine", self.strings.setup_check_engine()),
+            ("consent", self.strings.setup_check_consent()),
+        ]);
+        let mut attention = self
+            .setup_ibus_preflight_report
+            .as_ref()
+            .and_then(|report| report.get("checks"))
+            .and_then(serde_json::Value::as_array)
+            .map(|checks| {
+                checks
+                    .iter()
+                    .filter_map(|check| {
+                        let state = check.get("state").and_then(serde_json::Value::as_str)?;
+                        if !matches!(state, "fail" | "warn" | "unknown") {
+                            return None;
+                        }
+                        Some((
+                            match state {
+                                "fail" => "✗",
+                                "warn" => "!",
+                                _ => "?",
+                            },
+                            check
+                                .get("problem_id")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("")
+                                .to_owned(),
+                            check
+                                .get("title")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("IBus check")
+                                .to_owned(),
+                            check
+                                .get("detail")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("The check did not provide details.")
+                                .to_owned(),
+                            check
+                                .get("fix")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned),
+                        ))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        attention.sort_by_key(|(symbol, ..)| match *symbol {
+            "✗" => 0,
+            "!" => 1,
+            _ => 2,
+        });
+        attention.truncate(3);
+        egui::Modal::new(egui::Id::new("ibus_replacement_consent")).show(ctx, |ui| {
+            ui.set_width(430.0);
+            ui.heading(self.strings.setup_title());
+            if !attention.is_empty() {
+                ui.add_space(6.0);
+                ui.group(|ui| {
+                    ui.label(RichText::new(self.strings.setup_review_stages()).strong());
+                    for (symbol, problem_id, title, detail, fix) in &attention {
+                        let id = if problem_id.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" [{problem_id}]")
+                        };
+                        ui.label(format!("{symbol} {title}{id}"));
+                        ui.label(
+                            RichText::new(detail)
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        if let Some(fix) = fix {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} {fix}",
+                                    self.strings.setup_check_action()
+                                ))
+                                .small(),
+                            );
+                        }
                     }
-                    Some(wayexpand_backend_ibus::chain::IbusCheckState::Warn) => {
-                        ("!", self.strings.setup_state_warn())
-                    }
-                    Some(wayexpand_backend_ibus::chain::IbusCheckState::Fail) => {
-                        ("✗", self.strings.setup_state_fail())
-                    }
-                    Some(wayexpand_backend_ibus::chain::IbusCheckState::Skip) => {
-                        ("·", self.strings.setup_state_skip())
-                    }
-                    _ => ("·", self.strings.setup_state_unknown()),
-                };
-                ui.label(format!("{symbol} {label}: {detail}"));
+                });
             }
             ui.add_space(8.0);
-            for (number, title, detail) in [
+            egui::CollapsingHeader::new(self.strings.setup_checks())
+                .default_open(false)
+                .show(ui, |ui| {
+                    for (id, label) in checks {
+                        let preflight_check = self
+                            .setup_ibus_preflight_report
+                            .as_ref()
+                            .and_then(|report| report.get("checks"))
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|checks| {
+                                checks.iter().find(|check| {
+                                    check.get("id").and_then(serde_json::Value::as_str) == Some(id)
+                                })
+                            });
+                        let (state, check_detail, check_fix) = if self
+                            .setup_ibus_preflight_report
+                            .is_some()
+                        {
+                            match preflight_check {
+                                Some(check) => {
+                                    let state = match check
+                                        .get("state")
+                                        .and_then(serde_json::Value::as_str)
+                                    {
+                                        Some("pass") => Some(
+                                            wayexpand_backend_ibus::chain::IbusCheckState::Pass,
+                                        ),
+                                        Some("warn") => Some(
+                                            wayexpand_backend_ibus::chain::IbusCheckState::Warn,
+                                        ),
+                                        Some("fail") => Some(
+                                            wayexpand_backend_ibus::chain::IbusCheckState::Fail,
+                                        ),
+                                        Some("skip") => Some(
+                                            wayexpand_backend_ibus::chain::IbusCheckState::Skip,
+                                        ),
+                                        Some("unknown") => Some(
+                                            wayexpand_backend_ibus::chain::IbusCheckState::Unknown,
+                                        ),
+                                        _ => None,
+                                    };
+                                    (
+                                        state,
+                                        check
+                                            .get("detail")
+                                            .and_then(serde_json::Value::as_str)
+                                            .unwrap_or(
+                                            "The preflight did not include details for this check.",
+                                        ),
+                                        check.get("fix").and_then(serde_json::Value::as_str),
+                                    )
+                                }
+                                None => (
+                                    Some(wayexpand_backend_ibus::chain::IbusCheckState::Unknown),
+                                    "The preflight did not report this check.",
+                                    None,
+                                ),
+                            }
+                        } else if let Some(check) =
+                            self.ibus_route.as_ref().and_then(|report| report.check(id))
+                        {
+                            (
+                                Some(check.state),
+                                check.detail.as_str(),
+                                check.fix.as_deref(),
+                            )
+                        } else {
+                            (
+                                Some(wayexpand_backend_ibus::chain::IbusCheckState::Unknown),
+                                "No current IBus diagnostic is available for this check.",
+                                None,
+                            )
+                        };
+                        let (symbol, detail) = match state {
+                            Some(wayexpand_backend_ibus::chain::IbusCheckState::Pass) => {
+                                ("✓", self.strings.setup_state_ready())
+                            }
+                            Some(wayexpand_backend_ibus::chain::IbusCheckState::Warn) => {
+                                ("!", self.strings.setup_state_warn())
+                            }
+                            Some(wayexpand_backend_ibus::chain::IbusCheckState::Fail) => {
+                                ("✗", self.strings.setup_state_fail())
+                            }
+                            Some(wayexpand_backend_ibus::chain::IbusCheckState::Skip) => {
+                                ("·", self.strings.setup_state_skip())
+                            }
+                            _ => ("·", self.strings.setup_state_unknown()),
+                        };
+                        ui.label(format!("{symbol} {label}: {detail}"));
+                        if matches!(
+                            state,
+                            Some(
+                                wayexpand_backend_ibus::chain::IbusCheckState::Warn
+                                    | wayexpand_backend_ibus::chain::IbusCheckState::Fail
+                                    | wayexpand_backend_ibus::chain::IbusCheckState::Skip
+                                    | wayexpand_backend_ibus::chain::IbusCheckState::Unknown
+                            )
+                        ) {
+                            ui.indent(("ibus-check-detail", id), |ui| {
+                                ui.label(
+                                    RichText::new(check_detail)
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                                if let Some(fix) = check_fix {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{} {fix}",
+                                            self.strings.setup_check_action()
+                                        ))
+                                        .small(),
+                                    );
+                                }
+                            });
+                        }
+                    }
+                });
+            ui.add_space(8.0);
+            let mut steps = vec![
                 (
                     "1",
                     self.strings.setup_step_prepare(),
@@ -1092,8 +1410,11 @@ impl GuiApp {
                     self.strings.setup_step_activate(),
                     self.strings.setup_step_activate_detail(),
                 ),
-                ("4", tracking_title, tracking_detail),
-            ] {
+            ];
+            if show_tracking_step {
+                steps.push(("4", tracking_title, tracking_detail));
+            }
+            for (number, title, detail) in steps {
                 ui.horizontal_top(|ui| {
                     ui.label(RichText::new(number).strong());
                     ui.vertical(|ui| {
@@ -1114,16 +1435,19 @@ impl GuiApp {
                 ui.add_space(8.0);
                 ui.label(self.strings.setup_admin_not_needed());
             }
+            ui.add_space(8.0);
+            ui.label(self.strings.non_atomic_setup_warning());
             if self.config.settings.compatibility_mode == wayexpand_core::CompatibilityMode::Off {
-                ui.add_space(8.0);
-                ui.label(self.strings.non_atomic_setup_warning());
                 ui.checkbox(
                     &mut self.setup_consent_acknowledged,
                     self.strings.setup_consent_checkbox(),
                 );
             } else {
                 ui.add_space(8.0);
-                ui.label(self.strings.setup_consent_already());
+                ui.label(
+                    self.strings
+                        .setup_consent_already(self.config.settings.compatibility_mode),
+                );
             }
             ui.add_space(12.0);
             ui.horizontal(|ui| {
@@ -1334,7 +1658,7 @@ mod tests {
 
     #[test]
     fn setup_output_retains_operational_result_and_next_step() {
-        let output = b"WayExpand setup\nSETUP RESULT: CONFIGURED, AWAITING TEST\nNext: run wayexpand debug --test ';;hello'.\n";
+        let output = b"WayExpand setup\nSETUP RESULT: CONFIGURED, AWAITING TEST\nNext: run wayexpand debug --test ';custom'.\n";
         let visible = GuiApp::setup_output_text(output);
         assert!(visible.contains("SETUP RESULT: CONFIGURED, AWAITING TEST"));
         assert!(visible.contains("Next: run wayexpand debug"));
@@ -1427,7 +1751,7 @@ mod tests {
             "WX-POLICY-001: replacement is disabled",
             "setup incomplete".into(),
         );
-        assert!(permission.text().contains("Needs permission"));
+        assert!(permission.text().contains("Replacement consent needed"));
         assert!(!open_diagnostics);
     }
 

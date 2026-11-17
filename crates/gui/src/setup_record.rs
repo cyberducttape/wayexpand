@@ -4,9 +4,9 @@
 //! the desktop-test confirmation lived only in memory. This separate file
 //! (`gui-setup.toml`, owner-only) records the outcome itself: whether the
 //! user confirmed an exact insertion in a real application, or skipped the
-//! guide. A verification keeps the application, typing route, build,
-//! desktop session and date, so the GUI can trust it after a restart while
-//! the environment is the same, and say what changed when it is not.
+//! guide. A verification keeps the application, typing route, configuration
+//! fingerprint, build, desktop session and date, so the GUI can trust it after
+//! a restart while the environment and tested snippet library are unchanged.
 //!
 //! It is a separate file because `gui-prefs.toml` is parsed strictly: a new
 //! field there would make an older GUI discard every preference.
@@ -50,6 +50,10 @@ pub(crate) struct SetupRecord {
     /// been verified.
     #[serde(default)]
     pub route_instance: Option<String>,
+    /// Content-only digest of the configuration that was tested. Changing
+    /// snippets or their filters requires a new real-application check.
+    #[serde(default)]
+    pub config_revision: Option<String>,
     #[serde(default)]
     pub verified_at_unix: Option<u64>,
 }
@@ -72,6 +76,7 @@ pub(crate) enum Staleness {
     BuildChanged {
         was: String,
     },
+    ConfigurationChanged,
 }
 
 /// What the current session is running, to compare a verification against.
@@ -79,25 +84,23 @@ pub(crate) enum Staleness {
 pub(crate) struct Scope<'a> {
     pub route: Option<&'a str>,
     pub route_instance: Option<&'a str>,
+    pub config_revision: Option<&'a str>,
     pub desktop: &'a str,
     pub session: Option<&'a str>,
     pub build: &'a str,
 }
 
 impl SetupRecord {
-    pub(crate) fn verified(
-        application: &str,
-        route: Option<String>,
-        route_instance: Option<String>,
-    ) -> Self {
+    pub(crate) fn verified(application: &str, scope: &Scope<'_>) -> Self {
         Self {
             outcome: SetupOutcome::Verified,
             application: Some(application.to_owned()),
-            route,
-            route_instance,
-            build: Some(current_build()),
-            desktop: Some(current_desktop()),
-            session: current_session(),
+            route: scope.route.map(str::to_owned),
+            route_instance: scope.route_instance.map(str::to_owned),
+            config_revision: scope.config_revision.map(str::to_owned),
+            build: Some(scope.build.to_owned()),
+            desktop: Some(scope.desktop.to_owned()),
+            session: scope.session.map(str::to_owned),
             verified_at_unix: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .ok()
@@ -114,22 +117,32 @@ impl SetupRecord {
             desktop: None,
             session: None,
             route_instance: None,
+            config_revision: None,
             verified_at_unix: None,
         }
     }
 
     /// Why this verification does not cover `scope`, or `None` when it does.
-    /// A verification lasts for one compositor session, one WayExpand build
-    /// and one typing route on one desktop; anything missing from either
+    /// A verification lasts for one compositor session, one configuration,
+    /// one WayExpand build and one typing route on one desktop; anything missing from either
     /// side means a new test, never a match.
     pub(crate) fn staleness(&self, scope: &Scope<'_>) -> Option<Staleness> {
-        let (Some(route), Some(instance), Some(desktop), Some(session), Some(build)) = (
+        let (
+            Some(route),
+            Some(instance),
+            Some(config_revision),
+            Some(desktop),
+            Some(session),
+            Some(build),
+        ) = (
             self.route.as_deref(),
             self.route_instance.as_deref(),
+            self.config_revision.as_deref(),
             self.desktop.as_deref(),
             self.session.as_deref(),
             self.build.as_deref(),
-        ) else {
+        )
+        else {
             return Some(Staleness::Incomplete);
         };
         if desktop != scope.desktop {
@@ -144,6 +157,9 @@ impl SetupRecord {
             return Some(Staleness::BuildChanged {
                 was: build.to_owned(),
             });
+        }
+        if scope.config_revision != Some(config_revision) {
+            return Some(Staleness::ConfigurationChanged);
         }
         match scope.route {
             Some(now) if now != route => {
@@ -262,6 +278,7 @@ mod tests {
             desktop: Some(desktop.into()),
             session: Some("boot:1".into()),
             route_instance: Some("ibus:42:100".into()),
+            config_revision: Some("sha256:test-config".into()),
             verified_at_unix: Some(1),
         }
     }
@@ -270,6 +287,7 @@ mod tests {
         Scope {
             route,
             route_instance: Some("ibus:42:100"),
+            config_revision: Some("sha256:test-config"),
             desktop,
             session,
             build: "1.3.6 (abc)",
@@ -356,6 +374,10 @@ mod tests {
             },
             SetupRecord {
                 route_instance: None,
+                ..complete.clone()
+            },
+            SetupRecord {
+                config_revision: None,
                 ..complete.clone()
             },
         ] {
