@@ -138,7 +138,15 @@ fn newest_typed_field(fields: &[IbusFieldActivity]) -> Option<&IbusFieldActivity
 
 fn diagnose_input_method_route(report: &IbusChainReport) -> Option<InputMethodGuidance> {
     if !matches!(report.desktop, IbusDesktop::Gnome | IbusDesktop::KdeWayland) {
-        return None;
+        // Desktop detection can race the IBus report or identify a session
+        // outside the currently supported desktop-specific branches. Keep
+        // the route visible and give the user a safe diagnostic action
+        // instead of later printing the contradictory "no route" result.
+        return Some(InputMethodGuidance {
+            state: "desktop_route_unknown",
+            answer: "An IBus route responded, but WayExpand could not identify which desktop controls its input source.",
+            action: "Run `wayexpand ibus status --json` and `wayexpand doctor`; use the first failed or unknown check to identify the desktop integration. For manual insertion meanwhile, open `wayexpand-gui --picker --copy-only` and paste.",
+        });
     }
     let is_gnome = report.desktop == IbusDesktop::Gnome;
     let registered = report.check(if is_gnome {

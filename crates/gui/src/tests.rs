@@ -4667,11 +4667,27 @@ fn diagnostics_answer_why_a_trigger_did_not_expand() {
         .into();
     assert!(render(&app).contains("It only handles your terminal apps."));
 
-    // The control-only service captures nothing, so it has no answer.
+    // A control-only service cannot capture typing. Depending on the desktop,
+    // the GUI either identifies the missing typing route or asks for the
+    // IBus route checks; it must not silently omit the diagnosis.
     app.daemon_status = "running\nsource=stdin\nbackend=none\n".into();
-    assert!(!render(&app).contains("Why didn't my trigger expand?"));
+    let semantics = render(&app);
+    assert!(
+        semantics.contains("Why didn't my trigger expand?"),
+        "{semantics}"
+    );
+    assert!(
+        semantics.contains("Only the Quick Picker")
+            || semantics.contains("cannot confirm the current input-method")
+            || semantics.contains("not set up as a GNOME input source"),
+        "{semantics}"
+    );
     app.daemon_reachable = Some(false);
-    assert!(!render(&app).contains("Why didn't my trigger expand?"));
+    let semantics = render(&app);
+    assert!(
+        semantics.contains("Why didn't my trigger expand?"),
+        "{semantics}"
+    );
 }
 
 #[test]
