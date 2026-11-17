@@ -1066,6 +1066,7 @@ impl TextInjector for InputMethodSource {
 
     fn capabilities(&self) -> InjectorCapabilities {
         InjectorCapabilities {
+            clipboard_assisted_replace: false,
             insertion_mode: "input-method-v2 text",
             max_text_chars: 0,
             expected_throughput_chars_per_sec: None,

@@ -68,6 +68,10 @@ pub(crate) fn active_mode() -> TerminalPaste {
 static PASTED: AtomicU64 = AtomicU64::new(0);
 static FALLBACKS: AtomicU64 = AtomicU64::new(0);
 static UNREAD: AtomicU64 = AtomicU64::new(0);
+/// Last failed stage of a terminal paste transaction. This is a small,
+/// content-free enum so a refusal can be diagnosed without logging the
+/// trigger, replacement, clipboard data, or backend error text.
+static LAST_FAILURE: AtomicU8 = AtomicU8::new(0);
 
 /// Content-free paste counters for daemon status.
 pub(crate) struct PasteTotals {
@@ -78,6 +82,7 @@ pub(crate) struct PasteTotals {
     /// Paste keys pressed that the terminal never answered by reading the
     /// clipboard.
     pub(crate) unread: u64,
+    pub(crate) last_failure: &'static str,
 }
 
 pub(crate) fn totals() -> PasteTotals {
@@ -85,6 +90,24 @@ pub(crate) fn totals() -> PasteTotals {
         pasted: PASTED.load(Ordering::Relaxed),
         fallbacks: FALLBACKS.load(Ordering::Relaxed),
         unread: UNREAD.load(Ordering::Relaxed),
+        last_failure: match LAST_FAILURE.load(Ordering::Relaxed) {
+            1 => "trigger_erase_focus_changed",
+            2 => "trigger_erase_focus_unconfirmed",
+            3 => "trigger_erase_input_interrupted",
+            4 => "trigger_erase_output_cancelled",
+            5 => "trigger_erase_event_backlog",
+            6 => "trigger_erase_device_unavailable",
+            7 => "trigger_erase_disconnected",
+            8 => "trigger_erase_flush_failed",
+            9 => "trigger_erase_other",
+            10 => "focus_changed",
+            11 => "focus_unconfirmed",
+            12 => "input_interrupted",
+            13 => "output_cancelled",
+            14 => "safety_checkpoint_failed",
+            15 => "paste_key_failed",
+            _ => "none",
+        },
     }
 }
 
@@ -96,6 +119,7 @@ pub(crate) fn adjust_capabilities(mut capabilities: InjectorCapabilities) -> Inj
     if active_mode() != TerminalPaste::Off {
         capabilities.max_text_chars = 0;
         capabilities.full_unicode = true;
+        capabilities.clipboard_assisted_replace = true;
     }
     capabilities
 }
@@ -135,19 +159,85 @@ impl PasteInjector {
         text: &str,
         before_press: impl FnOnce(&mut dyn TextInjector) -> Result<(), InjectorError>,
     ) -> Result<bool, InjectorError> {
+        LAST_FAILURE.store(0, Ordering::Relaxed);
         let name = self.inner.name();
         let checkpoint = self.checkpoint.clone();
         let inner = &mut self.inner;
         let outcome = paste_text(text, || {
-            before_press(inner.as_mut())?;
+            if let Err(error) = before_press(inner.as_mut()) {
+                let (failure, category) = match error.message.as_str() {
+                    wayexpand_core::InjectorError::REFUSAL_FOCUS_CHANGED => (1, "focus_changed"),
+                    wayexpand_core::InjectorError::REFUSAL_FOCUS_UNCONFIRMED => {
+                        (2, "focus_unconfirmed")
+                    }
+                    message
+                        if message
+                            == wayexpand_core::InjectorError::input_interrupted_message() =>
+                    {
+                        (3, "input_interrupted")
+                    }
+                    message if message.starts_with("output was cancelled") => {
+                        (4, "output_cancelled")
+                    }
+                    message
+                        if message
+                            .starts_with("the EIS server is still sending device updates") =>
+                    {
+                        (5, "event_backlog")
+                    }
+                    message if message.starts_with("the EIS keyboard device is unavailable") => {
+                        (6, "device_unavailable")
+                    }
+                    message if message.starts_with("libei server disconnected:") => {
+                        (7, "disconnected")
+                    }
+                    message if message.starts_with("libei connection flush failed:") => {
+                        (8, "flush_failed")
+                    }
+                    _ => (9, "other"),
+                };
+                LAST_FAILURE.store(failure, Ordering::Relaxed);
+                tracing::warn!(
+                    stage = "trigger_erase",
+                    category,
+                    "terminal paste stopped before paste key"
+                );
+                return Err(error);
+            }
             // The clipboard can take a moment; do not press the paste key
             // into a window that took focus meanwhile.
-            checkpoint.check().map_err(|message| InjectorError {
-                backend: name,
-                message,
-                retryable: false,
-            })?;
-            inner.inject_key_with_modifiers(KEY_V, PASTE_MODIFIERS)
+            if let Err(message) = checkpoint.check() {
+                let (failure, reason) = if message
+                    == wayexpand_core::InjectorError::REFUSAL_FOCUS_CHANGED
+                {
+                    (10, "focus changed")
+                } else if message == wayexpand_core::InjectorError::REFUSAL_FOCUS_UNCONFIRMED {
+                    (11, "focus could not be confirmed")
+                } else if message == wayexpand_core::InjectorError::input_interrupted_message() {
+                    (12, "new input interrupted output")
+                } else if message.starts_with("output was cancelled") {
+                    (13, "output was cancelled")
+                } else {
+                    (14, "safety checkpoint failed")
+                };
+                LAST_FAILURE.store(failure, Ordering::Relaxed);
+                tracing::warn!(
+                    stage = "focus_check",
+                    reason,
+                    "terminal paste stopped after trigger erase and before paste key"
+                );
+                return Err(InjectorError {
+                    backend: name,
+                    message,
+                    retryable: false,
+                });
+            }
+            if let Err(error) = inner.inject_key_with_modifiers(KEY_V, PASTE_MODIFIERS) {
+                LAST_FAILURE.store(15, Ordering::Relaxed);
+                tracing::warn!(stage = "paste_key", "terminal paste key was not accepted");
+                return Err(error);
+            }
+            Ok(())
         })?;
         match outcome {
             PasteOutcome::Pasted => {
@@ -217,6 +307,10 @@ impl TextInjector for PasteInjector {
     }
 
     fn reset_output_progress(&mut self) {
+        // A diagnostic stage belongs to one output transaction only. Clear
+        // it before preflight so a later refusal cannot inherit an older
+        // paste failure from the process-wide status field.
+        LAST_FAILURE.store(0, Ordering::Relaxed);
         self.inner.reset_output_progress();
     }
 
@@ -229,6 +323,7 @@ impl TextInjector for PasteInjector {
     }
 
     fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
+        LAST_FAILURE.store(0, Ordering::Relaxed);
         if self.pastes(text) && self.paste(text, |_| Ok(()))? {
             return Ok(());
         }
@@ -239,6 +334,7 @@ impl TextInjector for PasteInjector {
     }
 
     fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
+        LAST_FAILURE.store(0, Ordering::Relaxed);
         if self.pastes(text) && self.paste(text, |inner| inner.erase(trigger))? {
             return Ok(());
         }

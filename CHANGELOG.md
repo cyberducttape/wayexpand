@@ -4,16 +4,96 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The headless GNOME GTK Unicode acceptance case now uses an eight-character
+  replacement, within the route's non-atomic safety ceiling. KWin E2E cases
+  now assert that oversized output is rejected before changing the target,
+  including when a larger configured limit is requested.
+- The GUI's next-step adviser now treats a connected, consented input route as
+  **not yet verified** until a user confirms an insertion in a real
+  application. Its *Test in an app* action opens the existing desktop test;
+  matcher previews and backend acknowledgements cannot mark delivery as
+  verified. This check is scoped to the current desktop session, build, and
+  route instance, and the Quick Picker remains the action for fields that
+  refuse safe replacement.
+- `wayexpand why` now checks GNOME's live input-source selection and the KDE
+  IBus selection when no other typing route is active, and gives a specific
+  repair, live-input test, or copy-only fallback. Reports state explicitly
+  that matcher preview and output submission do not verify application text.
+  The GUI now refreshes while GNOME readiness is unknown, treats unknown IBus
+  replacement consent as not authorized (matching first-run), and labels a
+  matcher result as a snippet check rather than a desktop success.
+- KDE IBus readiness in the GUI now requires current diagnostics for the
+  running engine and confirmation that WayExpand is the selected input
+  method. A live but unselected engine points to guided setup; missing or
+  stale selection evidence points to refresh instead of appearing ready.
+- Quick Picker now supports validated form templates with editable fields and
+  an exact rendered preview before copying. Organization policy, app scope,
+  clipboard/secret variables, and field validators are enforced on the copy
+  path. Command-backed entries open a read-only review screen and never execute
+  from picker search or selection; generated-file templates are copied rather
+  than sent as keyboard input.
+- The GUI opens in an **Everyday** workspace centered on creating, finding,
+  editing, enabling and testing text snippets. A visible workspace switcher
+  exposes **Advanced** options for app rules, forms, variables, profiles and
+  imports, and a **Developer / administrator** workspace for packs and
+  diagnostics. The matcher test is open by default after onboarding, and the
+  Quick Picker shortcut is available from the main actions menu.
+- Automatic non-atomic replacements now have a hard eight-character output
+  ceiling that cannot be raised by compatibility consent or
+  `keystroke_max_chars`. Longer replacements are refused before deletion and
+  remain available through Quick Picker clipboard/manual paste or an atomic
+  replacement route. Partial and uncertain output remains quarantined and is
+  never automatically replayed.
+- The first-run route summary reports capture and insertion readiness
+  independently. Unsupported protocols, unchecked capability evidence,
+  IBus replacement consent, raw-device access, and portal authorization now
+  have distinct explanations and corrective actions instead of all being
+  labeled as a permission problem.
 - The GUI no longer counts the control-only service (Quick Picker and
   hotkeys) as a connected typing route when the IBus engine is not active.
   The first-run guide ticked *Connect your desktop* and then asked for
   replacement consent; it now says nothing reads typing yet and offers guided
   setup, and the header shows *Needs setup*.
+- On GNOME, the GUI identifies IBus as the active route only when the GNOME
+  source check confirms it is selected, or when IBus is the recommendation
+  and no other typing backend is running. An IBus process or default
+  recommendation no longer overrides a user's active evdev or input-method
+  route.
+- The GUI waits for a daemon status response before treating an IBus
+  recommendation as the GNOME setup route; an unknown daemon state is not
+  treated as an idle desktop.
+- `wayexpand setup` preserves a compatible daemon's configured evdev or
+  input-method route by default. Switching to the automatic recommendation is
+  explicit with `--mode recommended`; a running daemon with unknown route
+  status is not treated as idle.
+- The GUI setup flow follows a compatible configured evdev or input-method
+  route directly, instead of showing IBus registration and replacement
+  consent for a different backend.
+- IBus readiness now respects the companion daemon's paused state on GNOME
+  and KDE, and offers Resume instead of presenting a paused route as ready.
+- On keystroke routes, the first-run consent action opens the Engine setting
+  that controls compatibility replacement. Organization-policy refusals open
+  diagnostics instead of suggesting that a user preference can override them.
+- `wayexpand setup --check` reports the configured route, automatic
+  recommendation, and the route setup will preserve, so operators can
+  distinguish an existing path from a suggested one in JSON and text output.
+- The generated HTTP 503 checklist validator now tokenizes and checks each
+  complete shell command against its exact approved arguments, validates
+  displayed target values, and rejects shell operators, substitutions,
+  redirections, extra arguments, and unexpected code blocks.
+- The IBus setup consent dialog shows shared-manifest executable scope
+  separately from component registration, so a system-wide repair is not
+  hidden behind a generic “component installed” pass.
+- The read-only `wayexpand setup` plan explains that a missing or user-scoped
+  shared IBus registration may require administrator authorization before
+  setup applies changes.
 - New `wayexpand why` says why the last trigger did not expand: matching is
   off (and why), no typing arrives, nothing matched, or what stopped the last
   expansion, with what to do. It combines the service's and the IBus engine's
   content-free history and never shows typed text. Diagnostics in the GUI
   opens with the same answer. `wayexpand help` shows it among its examples.
+  It refuses to interpret daemon history when the status schema does not
+  match this CLI and directs the user to `wayexpand upgrade --check`.
 - The main window shows what the Quick Picker will do before you open it: a
   second header chip reads *Quick Picker: types*, *copies* or *off*, with the
   reason in its tooltip. It uses the picker's own rule (atomic replacement
@@ -47,6 +127,9 @@ All notable changes to WayExpand are documented here.
 - The picker and the control protocol describe a reported `delivered` insert
   as what it is: the output backend acknowledged the text. That is not proof
   the application's document changed.
+- The Quick Picker is now a per-session singleton. Repeated launches focus
+  the existing window, and its private runtime socket is cleaned up with the
+  picker so Wayland clipboard ownership lasts until the picker closes.
 - Copr builds can no longer publish different code under one RPM version.
   A checkout at the release tag builds `X.Y.Z-1`. A later commit builds
   `X.Y.Z-1.N.gitSHA`, which upgrades the release, sorts before the next one,

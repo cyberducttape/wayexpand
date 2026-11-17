@@ -171,14 +171,62 @@ impl GuiApp {
         self.render_config_backup_dialog(ctx, palette);
     }
 
-    /// The plain answer to "why didn't my trigger expand?" for the keyboard
-    /// service, from its content-free status. IBus fields have their own
-    /// verdicts in the IBus section.
-    pub(crate) fn render_why_card(&self, ui: &mut egui::Ui, palette: &Palette) {
+    /// The prioritized answer to "why didn't my trigger expand?". Prefer the
+    /// shared route-readiness model used by the header and first-run guide;
+    /// use recent content-free route telemetry when that model has no pending
+    /// action to offer.
+    pub(crate) fn render_why_card(
+        &self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+    ) -> Option<super::NextAction> {
+        // Use the same prioritized state model as the header and first-run
+        // guide. This keeps the diagnosis and its recommended action from
+        // disagreeing about the active route.
+        let situation = self.situation();
+        if let Some((problem, action)) = super::next_step::next_step(&situation) {
+            let answer = self.strings.problem_text(problem);
+            let instruction = self
+                .strings
+                .next_step_instruction(problem, situation.gnome_ibus);
+            let action_label = self.strings.action_label(action);
+            let mut action_requested = false;
+            theme::section_header(ui, "", self.strings.why_title());
+            theme::card(ui, palette, |ui| {
+                ui.label(
+                    RichText::new(self.strings.why_intro())
+                        .small()
+                        .color(palette.muted),
+                );
+                ui.add(egui::Label::new(RichText::new(answer).color(palette.warning)).wrap());
+                ui.add(egui::Label::new(instruction).wrap());
+                // Keep the highest-priority repair as the single action, but
+                // retain a known route limitation as context. The terminal
+                // scope is a route property, not proof that the user's last
+                // trigger was typed in the currently focused GUI window.
+                if problem != super::Problem::TerminalRouteNoInput
+                    && situation.terminal_apps_only
+                    && situation.input_events_total == Some(0)
+                    && !situation.application_delivery_verified
+                {
+                    ui.add(
+                        egui::Label::new(
+                            self.strings
+                                .problem_text(super::Problem::TerminalRouteNoInput),
+                        )
+                        .wrap(),
+                    );
+                }
+                if ui.button(action_label).clicked() {
+                    action_requested = true;
+                }
+            });
+            return action_requested.then_some(action);
+        }
         if self.daemon_reachable != Some(true)
             || runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin")
         {
-            return;
+            return None;
         }
         let diagnosis = wayexpand_core::ExpansionDiagnosis::from_status(
             &wayexpand_core::DaemonStatus::parse(&self.daemon_status),
@@ -190,11 +238,27 @@ impl GuiApp {
         let (answer, fix) = self
             .strings
             .why_verdict(verdict, diagnosis.terminal_apps_only);
+        let action = match verdict {
+            // A harmless live test is the next useful step when no recent
+            // output transaction identifies the failure. It exercises the
+            // desktop path separately from the local matcher preview.
+            wayexpand_core::Verdict::NoTypingSeen
+            | wayexpand_core::Verdict::InputStatusUnknown
+            | wayexpand_core::Verdict::NothingMatched => super::NextAction::TestInApplication,
+            // Once output was attempted, inspect the target and transaction
+            // details before trying anything again. In particular, a partial
+            // or uncertain write must never lead to an automatic replay.
+            wayexpand_core::Verdict::LastStopped(_) | wayexpand_core::Verdict::LastExpanded => {
+                super::NextAction::InspectText
+            }
+            wayexpand_core::Verdict::MatchingOff(_) => super::NextAction::CheckAgain,
+        };
         let color = match verdict {
             wayexpand_core::Verdict::LastExpanded => palette.muted,
             _ => palette.warning,
         };
         theme::section_header(ui, "", self.strings.why_title());
+        let mut action_requested = false;
         theme::card(ui, palette, |ui| {
             ui.label(
                 RichText::new(self.strings.why_intro())
@@ -205,7 +269,12 @@ impl GuiApp {
             if let Some(fix) = fix {
                 ui.add(egui::Label::new(RichText::new(fix).small()).wrap());
             }
+            ui.add_space(4.0);
+            if ui.button(self.strings.action_label(action)).clicked() {
+                action_requested = true;
+            }
         });
+        action_requested.then_some(action)
     }
 
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
@@ -227,6 +296,10 @@ impl GuiApp {
             });
             ui.add_space(8.0);
         }
+        // Put the direct answer before the detailed route and protocol
+        // inventory so users do not have to interpret diagnostics first.
+        let why_action = self.render_why_card(ui, palette);
+        ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(self.strings.runtime_dashboard())
@@ -624,7 +697,6 @@ impl GuiApp {
             });
         }
 
-        self.render_why_card(ui, palette);
         ui.collapsing(self.strings.recent_expansion_outcomes(), |ui| {
             let traces = capabilities
                 .map(|caps| caps.recent_expansion_outcomes.as_slice())
@@ -1163,6 +1235,9 @@ impl GuiApp {
             self.support_export_open = true;
             self.support_preview = None;
             self.support_preview_error = None;
+        }
+        if let Some(action) = why_action {
+            self.perform_next_step(action);
         }
     }
 
@@ -2652,7 +2727,7 @@ impl GuiApp {
             // The verdict first, in words; the evidence grid behind it is for
             // troubleshooting and starts collapsed.
             let control_only = compact_status_value(&self.daemon_status, "source") == Some("stdin");
-            let ibus_only = self.daemon_reachable != Some(true) && self.ibus_active;
+            let ibus_only = self.daemon_reachable != Some(true) && self.ibus_route_active();
             let (state, state_color) = self.header_state(ibus_only, control_only, palette);
             let password_fields_detected =
                 capabilities.and_then(|caps| caps.capture_sensitive_focus) == Some(true);

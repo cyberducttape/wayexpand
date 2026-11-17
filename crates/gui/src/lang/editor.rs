@@ -257,6 +257,14 @@ impl Strings {
         }
     }
 
+    pub fn matcher_preview_scope(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Checks snippet matching and rendering only; it does not test keyboard input or insertion in another app.",
+            Language::Indonesian => "Hanya memeriksa pencocokan dan render cuplikan; ini tidak menguji input keyboard atau penyisipan di aplikasi lain.",
+            Language::German => "Prüft nur Snippet-Erkennung und Darstellung; Tastatureingabe und Einfügen in einer anderen App werden nicht getestet.",
+        }
+    }
+
     pub fn input(&self) -> &'static str {
         match self.lang {
             Language::English => "Input",

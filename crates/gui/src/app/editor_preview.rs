@@ -116,6 +116,11 @@ impl GuiApp {
                     });
                 });
         } else {
+            ui.label(
+                RichText::new(self.strings.matcher_preview_scope())
+                    .small()
+                    .color(palette.muted),
+            );
             let preview_result = self.preview();
             egui::Frame::new()
                 .fill(palette.extreme_bg)

@@ -17,6 +17,7 @@ impl LibeiSession {
         let keysym_fallback = matches!(self.mode, TextMode::Keysym(_));
         let direct_commit = self.fcitx5.is_some();
         InjectorCapabilities {
+            clipboard_assisted_replace: false,
             insertion_mode: if direct_commit {
                 "Fcitx5 direct commit (libei fallback available)"
             } else if keysym_fallback {
@@ -80,7 +81,11 @@ impl LibeiSession {
     }
 
     pub(super) fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
-        self.sync_server_state()
+        // Backspace is a fixed evdev keycode and does not require guessing
+        // which character layout is active. Keep the device and modifier
+        // state current, but don't block clipboard-assisted Unicode paste
+        // just because the EIS server omitted the active layout group.
+        self.sync_server_events()
             .and_then(|()| self.send_backspaces(erase_grapheme_count(trigger)))
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,

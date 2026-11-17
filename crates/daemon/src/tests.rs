@@ -359,16 +359,16 @@ fn assert_evdev_boundary_replacement(
 #[test]
 fn evdev_delayed_boundary_replacement_preserves_delimiters_in_text() {
     assert_evdev_boundary_replacement(
-        "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
+        "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"sigtext\"\nmatch_mode = \"word-boundary\"",
         ":sig",
         ' ',
-        "signature ",
+        "sigtext ",
     );
     assert_evdev_boundary_replacement(
-        "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
+        "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"sigtext\"\nmatch_mode = \"word-boundary\"",
         ":sig",
         '.',
-        "signature.",
+        "sigtext.",
     );
     assert_evdev_boundary_replacement(
         "[[expansion]]\ntrigger = \":a\"\nreplacement = \"alpha\"\n[[expansion]]\ntrigger = \":address\"\nreplacement = \"address\"",
@@ -1150,7 +1150,7 @@ impl TextInjector for AsciiOnlyInjector {
 #[test]
 fn text_the_route_cannot_type_is_classified_as_unsupported() {
     let config = Config::parse(
-        "[[expansion]]\ntrigger = \":a\"\nreplacement = \"lftp\u{00A0}host\"\n\n[[expansion]]\ntrigger = \":b\"\nreplacement = \"ok\"\n",
+        "[[expansion]]\ntrigger = \":a\"\nreplacement = \"ftp\u{00A0}x\"\n\n[[expansion]]\ntrigger = \":b\"\nreplacement = \"ok\"\n",
     )
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
@@ -1172,7 +1172,7 @@ fn text_the_route_cannot_type_is_classified_as_unsupported() {
         error.route_limit(&injector.capabilities()),
         Some(wayexpand_core::RouteLimit::Unicode {
             character: '\u{00A0}',
-            position: 5
+            position: 4
         })
     );
     // A rejection for another reason is not a route limit.

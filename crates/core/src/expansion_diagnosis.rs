@@ -161,6 +161,9 @@ pub enum Verdict {
     NoTypingSeen,
     /// Typing arrives, but nothing typed has matched a trigger.
     NothingMatched,
+    /// The daemon did not publish input counters, so delivery cannot be
+    /// inferred from its status.
+    InputStatusUnknown,
     /// The newest expansion attempt did not complete.
     LastStopped(OutcomeKind),
     /// The newest expansion was accepted by the route. If the text still
@@ -175,6 +178,7 @@ impl Verdict {
             Self::MatchingOff(_) => "matching_off",
             Self::NoTypingSeen => "no_typing_seen",
             Self::NothingMatched => "nothing_matched",
+            Self::InputStatusUnknown => "input_status_unknown",
             Self::LastStopped(_) => "last_stopped",
             Self::LastExpanded => "last_expanded",
         }
@@ -248,6 +252,9 @@ impl ExpansionDiagnosis {
         if self.input_events == Some(0) {
             return Verdict::NoTypingSeen;
         }
+        if self.input_events.is_none() {
+            return Verdict::InputStatusUnknown;
+        }
         Verdict::NothingMatched
     }
 }
@@ -297,7 +304,7 @@ mod tests {
             Verdict::LastStopped(OutcomeKind::InterruptedByTyping)
         );
         let expanded = diagnose(
-            "matching_unavailable_reason=none\n\
+            "matching_unavailable_reason=none\ninput_events_total=1\n\
              recent_expansion_outcomes=[{\"at_unix\":3,\"completion\":\"applied\"}]\n",
         );
         assert_eq!(
@@ -315,8 +322,8 @@ mod tests {
              recent_expansion_outcomes=[]\n",
         );
         assert_eq!(diagnosis.verdict(0), Verdict::NothingMatched);
-        // An older daemon without the history still gets an answer.
-        assert_eq!(diagnose("").verdict(0), Verdict::NothingMatched);
+        // Missing counters are unknown, not evidence that typing arrived.
+        assert_eq!(diagnose("").verdict(0), Verdict::InputStatusUnknown);
     }
 
     #[test]

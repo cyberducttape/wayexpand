@@ -1,5 +1,5 @@
 {
-  "schema_version": 25,
+  "schema_version": 26,
   "daemon_control_schema": 44,
   "fields": {
     "response": "string",
@@ -181,6 +181,7 @@
     "terminal_paste": "string",
     "terminal_paste_total": "integer",
     "terminal_paste_fallbacks_total": "integer",
-    "terminal_paste_unread_total": "integer"
+    "terminal_paste_unread_total": "integer",
+    "terminal_paste_last_failure": "string"
   }
 }

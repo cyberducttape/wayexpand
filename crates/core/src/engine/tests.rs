@@ -1944,8 +1944,10 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
     let mut injector = CapabilityInjector {
         calls: Vec::new(),
         capabilities: crate::InjectorCapabilities {
-            insertion_mode: "keysym fallback",
+            insertion_mode: "bounded atomic test route",
             max_text_chars: 250,
+            atomic_replace: true,
+            replacement_guarantee: crate::ReplacementGuarantee::Atomic,
             ..crate::InjectorCapabilities::default()
         },
     };
@@ -1959,10 +1961,7 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
 }
 
 #[test]
-fn paced_output_within_the_configured_limit_is_not_capped_by_duration() {
-    // Regression: a fixed 100 ms paced-output budget refused every keysym
-    // replacement longer than about eight keys, overriding the user's
-    // explicit `keystroke_max_chars`.
+fn non_atomic_replacement_has_a_hard_short_limit_even_when_route_limit_is_raised() {
     let result = ExpansionResult {
         snippet_id: Arc::from(""),
         trigger: ":x".into(),
@@ -1989,13 +1988,21 @@ fn paced_output_within_the_configured_limit_is_not_capped_by_duration() {
     assert!(matches!(
         ExpansionEngine::apply(&mut injector, &over_route_limit),
         crate::TransactionOutcome::NotApplied { ref source }
-            if source.message.contains("raise keystroke_max_chars")
+            if source.message.contains("limited to 8 characters")
     ));
     assert!(injector.calls.is_empty());
-    // 250 characters plus a reinserted delimiter exceed the 250-character
-    // route limit, so trim the replacement to fit exactly.
+    let mut too_long = result.clone();
+    too_long.insert = "r".repeat(8).into();
+    too_long.reinsert_after = Some(' ');
+    assert!(matches!(
+        ExpansionEngine::apply(&mut injector, &too_long),
+        crate::TransactionOutcome::NotApplied { ref source }
+            if source.message.contains("limited to 8 characters")
+    ));
+    assert!(injector.calls.is_empty());
     let mut fits = result;
-    fits.insert = "r".repeat(249).into();
+    fits.insert = "r".repeat(7).into();
+    fits.reinsert_after = Some(' ');
     assert!(ExpansionEngine::apply(&mut injector, &fits).is_output_acknowledged());
     assert_eq!(injector.calls.len(), 2);
 }
@@ -2040,7 +2047,7 @@ fn paced_output_without_a_declared_rate_is_still_typed() {
         snippet_id: Arc::from(""),
         trigger: ":sig".into(),
         matched_text: ":sig".into(),
-        insert: "replacement".into(),
+        insert: "replace".into(),
         cursor_offset: None,
         reinsert_after: None,
         command_backed: false,
@@ -2052,7 +2059,7 @@ fn paced_output_without_a_declared_rate_is_still_typed() {
     let outcome = ExpansionEngine::apply(&mut injector, &result);
 
     assert!(outcome.is_output_acknowledged(), "{outcome}");
-    assert_eq!(injector.calls, ["erase::sig", "insert:replacement"]);
+    assert_eq!(injector.calls, ["erase::sig", "insert:replace"]);
 }
 
 #[test]
@@ -2101,8 +2108,10 @@ fn apply_preflight_counts_reinserted_delimiter_as_one_character() {
     let mut injector = CapabilityInjector {
         calls: Vec::new(),
         capabilities: crate::InjectorCapabilities {
-            insertion_mode: "keysym fallback",
+            insertion_mode: "atomic capability limit test",
             max_text_chars: 250,
+            atomic_replace: true,
+            replacement_guarantee: crate::ReplacementGuarantee::Atomic,
             full_unicode: true,
             ..crate::InjectorCapabilities::default()
         },
@@ -2223,7 +2232,7 @@ fn failure_injection_result() -> ExpansionResult {
         snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
-        insert: "replacement".into(),
+        insert: "replace".into(),
         cursor_offset: None,
         reinsert_after: None,
         command_backed: false,
@@ -2259,7 +2268,7 @@ fn non_atomic_failure_during_insert_is_unknown_and_not_replayed() {
         outcome,
         crate::TransactionOutcome::UnknownPartialFailure { .. }
     ));
-    assert_eq!(injector.calls, ["erase::x", "insert:replacement"]);
+    assert_eq!(injector.calls, ["erase::x", "insert:replace"]);
 }
 
 #[test]
@@ -2270,7 +2279,7 @@ fn non_atomic_failures_with_delimiter_reinsertion_are_unknown_and_not_replayed()
     };
     for (fail_on_erase, expected_calls) in [
         (true, vec!["erase::x "]),
-        (false, vec!["erase::x ", "insert:replacement "]),
+        (false, vec!["erase::x ", "insert:replace "]),
     ] {
         let mut injector = FailingNonAtomicInjector {
             fail_on_erase,
@@ -2452,7 +2461,7 @@ fn apply_replaces_typed_trigger_and_commits_terminator() {
         snippet_id: Arc::from(""),
         trigger: ":sig".into(),
         matched_text: ":SIG".into(),
-        insert: "Best regards,".into(),
+        insert: "Regards".into(),
         cursor_offset: Some(2),
         reinsert_after: Some(' '),
         command_backed: false,
@@ -2461,10 +2470,7 @@ fn apply_replaces_typed_trigger_and_commits_terminator() {
     };
     let mut injector = RecordingInjector { calls: Vec::new() };
     assert!(ExpansionEngine::apply(&mut injector, &result).is_output_acknowledged());
-    assert_eq!(
-        injector.calls,
-        ["erase::SIG ", "insert:Best regards, ", "left:3"]
-    );
+    assert_eq!(injector.calls, ["erase::SIG ", "insert:Regards ", "left:3"]);
 }
 
 struct CursorFailingInjector;

@@ -135,17 +135,20 @@ output_interruption_reported() {
     esac
 }
 
-output_limit_refusal_reported() {
+expansion_rejection_reported() {
     status=$(daemon_status) || return 1
-    case "$status" in
-        *"output_last_unsupported=too-long"*) return 0 ;;
-        *) return 1 ;;
-    esac
+    rejected=$(printf '%s\n' "$status" | sed -n 's/^expansions_rejected_total=//p')
+    [ "${rejected:-0}" -gt 0 ]
 }
 
 daemon_ready() {
     status=$(daemon_status) || return 1
     route_ready "$status"
+}
+
+terminal_paste_active() {
+    status=$(daemon_status) || return 1
+    printf '%s\n' "$status" | grep -Fxq 'terminal_paste=multiline'
 }
 
 write_config() {
@@ -327,7 +330,12 @@ EOF
     # not; Konsole is the only window, so its focus is best effort here.
     activate org.kde.konsole || :
     start_daemon || return 2
-    sleep 1
+    if ! wait_until 50 terminal_paste_active; then
+        status=$(daemon_status 2>/dev/null || true)
+        printf '%s\n' "$status" >"$case_dir/status-before-input.txt"
+        printf 'WayExpand did not confirm Konsole paste mode before input'
+        return 2
+    fi
     "$bin/wx-e2e-type" text ";ml" >>"$case_dir/type.log" 2>&1 || return 2
     sleep 0.3
     daemon_sees ";ml"
@@ -339,9 +347,16 @@ second line ünïcode"
     sleep 0.5
     tail -c +7 "$out" >"$case_dir/got.txt"
     printf '%s' "$expected" >"$case_dir/expected.txt"
+    status=$(daemon_status 2>/dev/null || true)
+    printf '%s\n' "$status" >"$case_dir/status-after-input.txt"
     if ! cmp -s "$case_dir/expected.txt" "$case_dir/got.txt"; then
-        printf 'pasted bytes differ: expected=%s got=%s' \
-            "$(wc -c <"$case_dir/expected.txt")" "$(wc -c <"$case_dir/got.txt")"
+        paste_mode=$(printf '%s\n' "$status" | sed -n 's/^terminal_paste=//p')
+        pasted=$(printf '%s\n' "$status" | sed -n 's/^terminal_paste_total=//p')
+        fallbacks=$(printf '%s\n' "$status" | sed -n 's/^terminal_paste_fallbacks_total=//p')
+        unread=$(printf '%s\n' "$status" | sed -n 's/^terminal_paste_unread_total=//p')
+        printf 'pasted bytes differ: expected=%s got=%s (paste_mode=%s pasted=%s fallbacks=%s unread=%s)' \
+            "$(wc -c <"$case_dir/expected.txt")" "$(wc -c <"$case_dir/got.txt")" \
+            "${paste_mode:-unknown}" "${pasted:-unknown}" "${fallbacks:-unknown}" "${unread:-unknown}"
         return 1
     fi
     wait_until 30 session_clipboard_is "keep-me" || {
@@ -409,9 +424,9 @@ EOF
         "$(sink_field e2e-a cursor)"
 }
 
-scenario_paced_output_within_raised_limit_is_typed() {
-    # Raising keystroke_max_chars is explicit consent to long paced output;
-    # no fixed duration budget may refuse it.
+scenario_paced_output_raised_limit_still_refuses() {
+    # Even an explicit larger keystroke_max_chars cannot override the hard
+    # eight-character limit for non-atomic automatic replacement.
     saved_keystroke_max_chars=${e2e_keystroke_max_chars:-}
     e2e_keystroke_max_chars=250
     replacement=$(head -c 128 /dev/zero | tr '\000' A)
@@ -423,10 +438,25 @@ EOF
     e2e_keystroke_max_chars=$saved_keystroke_max_chars
     start_sink e2e-a && start_daemon || return 2
     expand_in e2e-a "" ";long" || return 2
-    wait_until 100 sink_text_is e2e-a "$replacement"
-    result=$?
+    wait_until 30 expansion_rejection_reported || {
+        printf 'raised keystroke_max_chars bypassed the non-atomic hard ceiling'
+        return 1
+    }
+    status=$(daemon_status) || return 2
+    rejected=$(printf '%s\n' "$status" | sed -n 's/^expansions_rejected_total=//p')
+    uncertain_total=$(printf '%s\n' "$status" | sed -n 's/^output_uncertain_total=//p')
+    partial_total=$(printf '%s\n' "$status" | sed -n 's/^output_partial_total=//p')
+    if [ "${rejected:-0}" -lt 1 ] ||
+        [ "${uncertain_total:-0}" -ne 0 ] || [ "${partial_total:-0}" -ne 0 ]; then
+        printf 'raised-limit preflight refusal was not reported as certain and unapplied'
+        return 1
+    fi
+    if ! sink_text_is e2e-a ";long"; then
+        printf 'raised-limit preflight refusal changed the target before output; '
+        describe e2e-a
+        return 1
+    fi
     describe e2e-a
-    return "$result"
 }
 
 scenario_paced_output_over_limit_refuses_before_erasing() {
@@ -451,23 +481,17 @@ EOF
     esac
 
     expand_in e2e-a "" ";long" || return 2
-    attempts=0
-    while [ "$attempts" -lt 30 ]; do
-        status=$(daemon_status) || return 2
-        case "$status" in
-            *"output_last_unsupported=too-long"*) break ;;
-        esac
-        sleep 0.1
-        attempts=$((attempts + 1))
-    done
-    if [ "$attempts" -ge 30 ]; then
-        printf 'paced output over keystroke_max_chars was not refused with the too-long diagnostic'
+    wait_until 30 expansion_rejection_reported || {
+        printf 'replacement over the non-atomic hard ceiling was not rejected'
         return 1
-    fi
+    }
+    status=$(daemon_status) || return 2
     printf '%s\n' "$status" >"$case_dir/status-after-refusal.txt"
     uncertain_total=$(printf '%s\n' "$status" | sed -n 's/^output_uncertain_total=//p')
     partial_total=$(printf '%s\n' "$status" | sed -n 's/^output_partial_total=//p')
-    if [ "${uncertain_total:-0}" -ne 0 ] || [ "${partial_total:-0}" -ne 0 ]; then
+    rejected=$(printf '%s\n' "$status" | sed -n 's/^expansions_rejected_total=//p')
+    if [ "${rejected:-0}" -lt 1 ] ||
+        [ "${uncertain_total:-0}" -ne 0 ] || [ "${partial_total:-0}" -ne 0 ]; then
         printf 'preflight refusal unexpectedly recorded output as attempted or partial'
         return 1
     fi
@@ -508,7 +532,7 @@ EOF
     esac
 
     expand_in e2e-a "" ";long" || return 2
-    wait_until 30 output_limit_refusal_reported || {
+    wait_until 30 expansion_rejection_reported || {
         printf 'long paced output was not refused before erasing; '
         describe e2e-a
         return 1
@@ -517,11 +541,11 @@ EOF
     printf '%s\n' "$status" >"$case_dir/status-after-limit-refusal.txt"
     uncertain_total=$(printf '%s\n' "$status" | sed -n 's/^output_uncertain_total=//p')
     partial_total=$(printf '%s\n' "$status" | sed -n 's/^output_partial_total=//p')
-    unsupported=$(printf '%s\n' "$status" | sed -n 's/^output_last_unsupported=//p')
-    if [ "$unsupported" != too-long ] ||
+    rejected=$(printf '%s\n' "$status" | sed -n 's/^expansions_rejected_total=//p')
+    if [ "${rejected:-0}" -lt 1 ] ||
         [ "${uncertain_total:-0}" -ne 0 ] || [ "${partial_total:-0}" -ne 0 ]; then
         printf 'preflight refusal did not preserve a certain, unmodified outcome; '
-        printf 'reason=%s uncertain=%s partial=%s ' "$unsupported" \
+        printf 'rejected=%s uncertain=%s partial=%s ' "${rejected:-unavailable}" \
             "${uncertain_total:-unavailable}" "${partial_total:-unavailable}"
         return 1
     fi
@@ -533,7 +557,7 @@ EOF
 
     "$bin/wx-e2e-type" text x >>"$case_dir/type.log" 2>&1 || return 2
     daemon_sees x || return 2
-    if ! sink_text_is e2e-a ";longx"; then
+    if ! wait_until 30 sink_text_is e2e-a ";longx"; then
         printf 'input after a refused replacement was not preserved; '
         describe e2e-a
         return 1

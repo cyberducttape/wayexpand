@@ -82,13 +82,19 @@ struct RouteRecommendation {
     output_transaction: &'static str,
     application_result: &'static str,
     certified: bool,
+    recommended: bool,
+    blocked_by_policy: bool,
 }
 
 fn route_recommendation(
-    route: RecommendedRoute,
+    route: &'static wayexpand_backend_selection::RouteContract,
     route_plan: Option<&wayexpand_backend_selection::RoutePlan>,
+    capabilities: Option<&Capabilities>,
+    backend_status: &[BackendStatus],
+    ibus_report: Option<&wayexpand_backend_ibus::chain::IbusChainReport>,
 ) -> Option<RouteRecommendation> {
-    let contract = route.contract();
+    let capture_backend = route.capture_backend()?;
+    let injection_backend = route.injection_backend()?;
     let backend_kind = |backend: RouteBackend| match backend {
         RouteBackend::IBus | RouteBackend::InputMethodV2 => {
             wayexpand_core::BackendKind::InputMethodV2
@@ -97,41 +103,190 @@ fn route_recommendation(
         RouteBackend::Libei => wayexpand_core::BackendKind::Libei,
         RouteBackend::WlrootsVirtualKeyboard => wayexpand_core::BackendKind::WlrootsVirtualKeyboard,
     };
-    let capture = backend_kind(contract.capture_backend()?);
-    let injection = backend_kind(contract.injection_backend()?);
-    let assessment = route_plan
-        .and_then(|plan| {
-            plan.routes
+    let planned = route_plan.and_then(|plan| {
+        plan.routes
+            .iter()
+            .find(|planned| planned.contract.id == route.id)
+    });
+    let assessment = planned.map(|planned| &planned.assessment);
+    let mut capture_state = route_component_state(
+        capture_backend,
+        true,
+        capabilities,
+        assessment,
+        backend_status,
+    );
+    let mut injection_state = route_component_state(
+        injection_backend,
+        false,
+        capabilities,
+        assessment,
+        backend_status,
+    );
+    // IBus is one route for both directions, but its readiness links differ:
+    // registration/selection starts capture, while replacement consent gates
+    // insertion. Do not copy a route-level `supported` result onto both.
+    if route.id == "ibus" {
+        if let Some(report) = ibus_report {
+            use wayexpand_backend_ibus::chain::IbusCheckState as I;
+            let capture_states = ["component", "registered", "daemon", "selected", "engine"]
+                .map(|id| report.check(id).map_or(I::Unknown, |check| check.state));
+            if capture_states.contains(&I::Fail) {
+                capture_state = BackendState::Unavailable;
+            } else if capture_states.contains(&I::Warn) {
+                capture_state = BackendState::RequiresPermission;
+            } else if capture_states
                 .iter()
-                .find(|planned| planned.contract.id == route.id())
-        })
-        .map(|planned| &planned.assessment);
-    let state = match assessment.map(|assessment| assessment.supported) {
-        Some(wayexpand_backend_selection::AssessmentEvidence::Yes) => BackendState::Available,
-        Some(wayexpand_backend_selection::AssessmentEvidence::No) => BackendState::Unavailable,
-        Some(wayexpand_backend_selection::AssessmentEvidence::RequiresAction) => {
-            BackendState::RequiresPermission
+                .any(|state| matches!(state, I::Unknown | I::Skip))
+            {
+                capture_state = BackendState::Implemented;
+            }
+            if let Some(consent) = report.check("consent") {
+                injection_state = match consent.state {
+                    I::Pass => injection_state,
+                    I::Fail | I::Warn => BackendState::RequiresPermission,
+                    I::Unknown | I::Skip => BackendState::Implemented,
+                };
+            }
         }
-        Some(wayexpand_backend_selection::AssessmentEvidence::Unknown) | None => {
-            BackendState::Implemented
-        }
-    };
+    }
     Some(RouteRecommendation {
-        capture,
-        injection,
-        capture_label: &contract.capture,
-        injection_label: &contract.injection,
-        // These are probe-derived support states, not claims that a daemon is
-        // connected or that a target application has passed certification.
-        capture_state: state,
-        injection_state: state,
-        focus_tracking: contract.focus_tracking,
-        sensitive_fields: contract.sensitive_fields,
-        trigger_precondition: &contract.trigger_precondition,
-        output_transaction: &contract.output_transaction,
-        application_result: &contract.application_result,
-        certified: contract.is_certified(),
+        capture: backend_kind(capture_backend),
+        injection: backend_kind(injection_backend),
+        capture_label: &route.capture,
+        injection_label: &route.injection,
+        capture_state,
+        injection_state,
+        focus_tracking: route.focus_tracking,
+        sensitive_fields: route.sensitive_fields,
+        trigger_precondition: &route.trigger_precondition,
+        output_transaction: &route.output_transaction,
+        application_result: &route.application_result,
+        certified: route.is_certified(),
+        recommended: planned.is_some_and(|planned| {
+            planned.standing == wayexpand_backend_selection::RouteStanding::Recommended
+        }),
+        blocked_by_policy: planned.is_some_and(|planned| {
+            planned.standing == wayexpand_backend_selection::RouteStanding::BlockedByPolicy
+        }),
     })
+}
+
+fn assessment_evidence_state(
+    evidence: wayexpand_backend_selection::AssessmentEvidence,
+) -> BackendState {
+    use wayexpand_backend_selection::AssessmentEvidence as E;
+    match evidence {
+        E::Yes => BackendState::Available,
+        E::No => BackendState::Unavailable,
+        E::Unknown => BackendState::Implemented,
+        E::RequiresAction => BackendState::RequiresPermission,
+    }
+}
+
+fn route_component_state(
+    backend: RouteBackend,
+    capture: bool,
+    capabilities: Option<&Capabilities>,
+    assessment: Option<&wayexpand_backend_selection::BackendAssessment>,
+    backend_status: &[BackendStatus],
+) -> BackendState {
+    let probed_state = |kind| {
+        backend_status
+            .iter()
+            .find(|status| status.kind == kind)
+            .map(|status| status.state)
+    };
+    match backend {
+        RouteBackend::IBus => assessment.map_or(BackendState::Implemented, |assessment| {
+            assessment_evidence_state(assessment.supported)
+        }),
+        RouteBackend::InputMethodV2 => capabilities.map_or_else(
+            || {
+                probed_state(wayexpand_core::BackendKind::InputMethodV2)
+                    .unwrap_or(BackendState::Implemented)
+            },
+            |capabilities| {
+                if capabilities.has_input_method_v2 {
+                    BackendState::Available
+                } else {
+                    BackendState::Unavailable
+                }
+            },
+        ),
+        RouteBackend::Evdev if capture => capabilities.map_or_else(
+            || {
+                probed_state(wayexpand_core::BackendKind::Evdev)
+                    .unwrap_or(BackendState::Implemented)
+            },
+            |capabilities| {
+                if capabilities.has_dev_input {
+                    BackendState::Available
+                } else {
+                    match probed_state(wayexpand_core::BackendKind::Evdev) {
+                        Some(BackendState::RequiresPermission) => BackendState::RequiresPermission,
+                        Some(BackendState::NotImplemented) => BackendState::NotImplemented,
+                        _ => BackendState::Unavailable,
+                    }
+                }
+            },
+        ),
+        RouteBackend::Evdev => BackendState::NotImplemented,
+        RouteBackend::Libei if !capture => {
+            if capabilities.is_some_and(|capabilities| capabilities.has_direct_libei_socket) {
+                BackendState::Available
+            } else if let Some(portal) =
+                assessment.and_then(|assessment| assessment.portal.as_ref())
+            {
+                match portal.authorization {
+                    wayexpand_backend_selection::PortalAuthorization::NotRequested
+                    | wayexpand_backend_selection::PortalAuthorization::Denied => {
+                        // Authorization is an explicit next step. A candidate
+                        // desktop does not prove that the portal provider is
+                        // installed; the UI says that availability is unknown.
+                        BackendState::RequiresPermission
+                    }
+                    wayexpand_backend_selection::PortalAuthorization::Granted => {
+                        match portal.injection_negotiated {
+                            wayexpand_backend_selection::AssessmentEvidence::Yes => {
+                                BackendState::Available
+                            }
+                            wayexpand_backend_selection::AssessmentEvidence::No => {
+                                BackendState::Unavailable
+                            }
+                            wayexpand_backend_selection::AssessmentEvidence::Unknown
+                            | wayexpand_backend_selection::AssessmentEvidence::RequiresAction => {
+                                BackendState::Implemented
+                            }
+                        }
+                    }
+                    wayexpand_backend_selection::PortalAuthorization::Unknown => {
+                        BackendState::Implemented
+                    }
+                }
+            } else if capabilities.is_some() {
+                BackendState::Unavailable
+            } else {
+                probed_state(wayexpand_core::BackendKind::Libei)
+                    .unwrap_or(BackendState::Implemented)
+            }
+        }
+        RouteBackend::Libei => BackendState::NotImplemented,
+        RouteBackend::WlrootsVirtualKeyboard if !capture => capabilities.map_or_else(
+            || {
+                probed_state(wayexpand_core::BackendKind::WlrootsVirtualKeyboard)
+                    .unwrap_or(BackendState::Implemented)
+            },
+            |capabilities| {
+                if capabilities.has_virtual_keyboard {
+                    BackendState::Available
+                } else {
+                    BackendState::Unavailable
+                }
+            },
+        ),
+        RouteBackend::WlrootsVirtualKeyboard => BackendState::NotImplemented,
+    }
 }
 /// Template variables offered as insert buttons, by group. Group names and
 /// hover descriptions are translated in `Strings::template_variable_group`
@@ -416,6 +571,10 @@ struct GuiApp {
     /// The user's basic/advanced editor choice this session; `None` follows
     /// the snippet (advanced options open when it uses them).
     editor_advanced: Option<bool>,
+    /// The interface's default level of detail. Everyday is intentionally
+    /// the first-run default; advanced configuration remains available from
+    /// the visible experience switcher.
+    experience: GuiExperience,
     /// Whether the diagnostics overview shows its technical evidence grid.
     diagnostics_details_open: bool,
     /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
@@ -575,6 +734,24 @@ struct PendingSave {
 enum SettingsTab {
     Appearance,
     Engine,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum GuiExperience {
+    #[default]
+    Everyday,
+    Advanced,
+    DeveloperAdmin,
+}
+
+impl GuiExperience {
+    fn includes_advanced(self) -> bool {
+        !matches!(self, Self::Everyday)
+    }
+
+    fn includes_developer_admin(self) -> bool {
+        matches!(self, Self::DeveloperAdmin)
+    }
 }
 
 /// A detection worker cannot be forcefully cancelled while it is inside a
@@ -792,8 +969,12 @@ impl GuiApp {
             form_preview_values: std::collections::HashMap::new(),
             // Collapsed by default so the snippet form gets the window's
             // height; its header stays visible as a one-line bar.
-            try_live_open: false,
+            // The in-process matcher check is useful even when a desktop
+            // route is not set up yet, so make it visible in the everyday
+            // workspace instead of hiding it behind an extra click.
+            try_live_open: true,
             editor_advanced: None,
+            experience: GuiExperience::Everyday,
             diagnostics_details_open: false,
             setup_task: None,
             sync_task: None,
@@ -922,7 +1103,12 @@ impl eframe::App for GuiApp {
         self.render_status_bar(root, &palette);
         self.render_snippet_list(root, &palette);
         self.render_editor_actions(root, &palette);
-        self.render_try_live_panel(root, &palette);
+        // First run already has a dedicated, guided matcher/desktop test.
+        // Avoid showing a second preview panel until the user reaches the
+        // everyday snippet workspace.
+        if !self.onboarding_visible {
+            self.render_try_live_panel(root, &palette);
+        }
         self.render_editor(root, &palette);
         self.render_pending_action(ctx, &palette);
         self.render_evdev_setup(ctx, &palette);

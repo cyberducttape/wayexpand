@@ -369,7 +369,12 @@ impl GuiApp {
             .draft
             .as_ref()
             .is_some_and(crate::editor::Draft::uses_advanced_fields);
-        let show_advanced = self.editor_advanced.unwrap_or(advanced_in_use);
+        let show_advanced = match self.experience {
+            GuiExperience::Everyday => self.editor_advanced.unwrap_or(advanced_in_use),
+            GuiExperience::Advanced | GuiExperience::DeveloperAdmin => {
+                self.editor_advanced.unwrap_or(true)
+            }
+        };
         let mut toggle_advanced = false;
         let daemon_capabilities = self.daemon_capabilities.clone();
         // The pane itself is the surface: a card inside the pane inside the
@@ -1164,6 +1169,11 @@ impl GuiApp {
                     .desired_rows(2)
                     .desired_width(f32::INFINITY)
                     .show(ui);
+                ui.label(
+                    RichText::new(self.strings.try_live_delivery_notice())
+                        .small()
+                        .color(palette.muted),
+                );
                 if self.playground.expansions > 0 {
                     ui.label(
                         RichText::new(self.strings.try_live_cumulative_notice())

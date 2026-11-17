@@ -14,9 +14,9 @@ impl Strings {
 
     pub(crate) fn why_intro(&self) -> &'static str {
         match self.lang {
-            Language::English => "Typing route (keyboard service), from its last two minutes. No typed text is recorded.",
-            Language::German => "Eingabeweg (Tastaturdienst), aus seinen letzten zwei Minuten. Getippter Text wird nicht gespeichert.",
-            Language::Indonesian => "Jalur pengetikan (layanan keyboard), dari dua menit terakhirnya. Teks yang diketik tidak dicatat.",
+            Language::English => "A matcher preview only checks whether a rule matches; it does not prove text reached an application. Only a real typing test can verify delivery. Typed text is never recorded.",
+            Language::German => "Die Matcher-Vorschau prüft nur, ob eine Regel passt; sie beweist nicht, dass Text eine Anwendung erreicht hat. Nur ein echter Tipptest kann die Ausgabe bestätigen. Getippter Text wird niemals gespeichert.",
+            Language::Indonesian => "Pratinjau matcher hanya memeriksa kecocokan aturan; itu tidak membuktikan teks sampai ke aplikasi. Hanya tes mengetik sungguhan yang dapat memverifikasi pengiriman. Teks yang diketik tidak pernah dicatat.",
         }
     }
 
@@ -35,13 +35,16 @@ impl Strings {
             (V::NoTypingSeen, En) => ("No typing has reached the service since it started.", Some("Check the input route in the diagnostics above.")),
             (V::NoTypingSeen, De) => ("Seit dem Start hat den Dienst keine Eingabe erreicht.", Some("Prüfen Sie den Eingabeweg in der Diagnose oben.")),
             (V::NoTypingSeen, Id) => ("Belum ada ketikan yang sampai ke layanan sejak dimulai.", Some("Periksa jalur input di diagnostik di atas.")),
-            (V::NothingMatched, En) => ("Typing arrives, but nothing has expanded in the last two minutes. Usually the text did not match: a typo, a word-boundary trigger typed right after a letter, or an app filter that leaves the app out.", Some("Type exactly what you typed into the matcher preview to check it.")),
-            (V::NothingMatched, De) => ("Eingaben kommen an, aber in den letzten zwei Minuten wurde nichts ersetzt. Meist passte der Text nicht: ein Tippfehler, ein Wortgrenzen-Trigger direkt nach einem Buchstaben oder ein App-Filter, der die App ausschließt.", Some("Tippen Sie denselben Text in die Matcher-Vorschau, um ihn zu prüfen.")),
-            (V::NothingMatched, Id) => ("Ketikan masuk, tetapi tidak ada yang diperluas dalam dua menit terakhir. Biasanya teksnya tidak cocok: salah ketik, pemicu batas kata yang diketik tepat setelah huruf, atau filter aplikasi yang mengecualikan aplikasinya.", Some("Ketik teks yang sama di pratinjau pencocok untuk memeriksanya.")),
+            (V::NothingMatched, En) => ("Typing arrives, but nothing has expanded in the last two minutes. The trigger may not match, or an app filter may exclude this app.", Some("Use Matcher preview to check the pattern. A match there is not a desktop test; then run the real-application typing test from Getting started.")),
+            (V::NothingMatched, De) => ("Eingaben kommen an, aber in den letzten zwei Minuten wurde nichts ersetzt. Der Auslöser passt möglicherweise nicht oder ein App-Filter schließt diese App aus.", Some("Prüfen Sie das Muster in der Matcher-Vorschau. Ein Treffer dort ist kein Desktop-Test; führen Sie danach den echten Anwendungstest unter „Erste Schritte“ aus.")),
+            (V::NothingMatched, Id) => ("Ketikan masuk, tetapi tidak ada yang diperluas dalam dua menit terakhir. Pemicu mungkin tidak cocok atau filter aplikasi mengecualikan aplikasi ini.", Some("Periksa pola di Pratinjau pencocok. Kecocokan di sana bukan uji desktop; lalu jalankan uji pengetikan aplikasi nyata dari Memulai.")),
+            (V::InputStatusUnknown, En) => ("The daemon did not report input activity, so WayExpand cannot tell whether the affected field sent typing to it.", Some("Run Debug → Live, type harmless text in the affected app, and check whether input is observed. If it is not, open Diagnostics. Use Quick Picker to copy and paste meanwhile.")),
+            (V::InputStatusUnknown, De) => ("Der Dienst meldet keine Eingabeaktivität. WayExpand kann daher nicht feststellen, ob das betroffene Feld Eingaben weitergeleitet hat.", Some("Starten Sie Diagnose → Live, tippen Sie harmlosen Text in der betroffenen App und prüfen Sie, ob Eingaben beobachtet werden. Öffnen Sie andernfalls die Diagnose. Bis dahin können Sie mit dem Schnellwähler kopieren und einfügen.")),
+            (V::InputStatusUnknown, Id) => ("Layanan tidak melaporkan aktivitas input, jadi WayExpand belum tahu apakah kolom tersebut mengirim ketikan.", Some("Jalankan Debug → Live, ketik teks aman di aplikasi terkait, lalu periksa apakah input terdeteksi. Jika tidak, buka Diagnostik. Sementara itu, gunakan Quick Picker untuk menyalin dan menempel.")),
             (V::LastStopped(kind), lang) => self.why_stopped(kind, lang),
-            (V::LastExpanded, En) => ("The route accepted the last expansion. If the text did not appear, the app ignored or changed it; WayExpand cannot see the app's text.", None),
-            (V::LastExpanded, De) => ("Der Eingabeweg hat die letzte Ersetzung angenommen. Fehlt der Text, hat die App ihn ignoriert oder verändert; WayExpand sieht den Text der App nicht.", None),
-            (V::LastExpanded, Id) => ("Jalur menerima perluasan terakhir. Jika teksnya tidak muncul, aplikasi mengabaikan atau mengubahnya; WayExpand tidak dapat melihat teks aplikasi.", None),
+            (V::LastExpanded, En) => ("WayExpand matched the trigger and submitted replacement output, but cannot verify that the application changed its text.", Some("Check the field. If the replacement is missing or wrong, run the real-application typing test from Getting started; do not retry uncertain output.")),
+            (V::LastExpanded, De) => ("WayExpand hat die letzte Ersetzung erkannt und gesendet, kann aber nicht prüfen, ob die Anwendung ihren Text geändert hat.", Some("Prüfen Sie das Feld. Fehlt der Text oder ist er falsch, führen Sie den echten Anwendungstest unter „Erste Schritte“ aus; unsichere Ausgaben nicht wiederholen.")),
+            (V::LastExpanded, Id) => ("WayExpand mencocokkan dan mengirim perluasan terakhir, tetapi tidak dapat memastikan bahwa aplikasi mengubah teksnya.", Some("Periksa kolomnya. Jika hasilnya hilang atau salah, jalankan uji pengetikan aplikasi nyata dari Memulai; jangan ulangi keluaran yang belum pasti.")),
         }
     }
 
@@ -97,27 +100,30 @@ impl Strings {
     fn why_stopped(&self, kind: K, lang: Language) -> (&'static str, Option<&'static str>) {
         use Language::{English as En, German as De, Indonesian as Id};
         match (kind, lang) {
-            (K::NotApplied, En) => ("The route refused the last expansion before changing anything.", None),
-            (K::NotApplied, De) => ("Der Eingabeweg hat die letzte Ersetzung abgelehnt, bevor er etwas änderte.", None),
-            (K::NotApplied, Id) => ("Jalur menolak perluasan terakhir sebelum mengubah apa pun.", None),
+            (K::NotApplied, En) => ("The route refused the last expansion before changing anything.", Some("Follow the corrective action shown above, then try one harmless real-application test.")),
+            (K::NotApplied, De) => ("Der Eingabeweg hat die letzte Ersetzung abgelehnt, bevor er etwas änderte.", Some("Folgen Sie der obigen Korrektur und testen Sie anschließend einmal in einer unkritischen Anwendung.")),
+            (K::NotApplied, Id) => ("Jalur menolak perluasan terakhir sebelum mengubah apa pun.", Some("Ikuti tindakan perbaikan di atas, lalu uji sekali di aplikasi nyata dengan teks yang tidak sensitif.")),
             (K::Unknown, En) => ("The route could not tell whether the app received the last expansion.", Some("Check the field before typing on.")),
             (K::Unknown, De) => ("Der Eingabeweg konnte nicht feststellen, ob die App die letzte Ersetzung erhielt.", Some("Prüfen Sie das Feld, bevor Sie weitertippen.")),
             (K::Unknown, Id) => ("Jalur tidak dapat memastikan apakah aplikasi menerima perluasan terakhir.", Some("Periksa kolomnya sebelum lanjut mengetik.")),
             (K::Partial, En) => ("The last expansion was only partly written.", Some("Check the field and correct it by hand.")),
             (K::Partial, De) => ("Die letzte Ersetzung wurde nur teilweise geschrieben.", Some("Prüfen Sie das Feld und korrigieren Sie es von Hand.")),
             (K::Partial, Id) => ("Perluasan terakhir hanya tertulis sebagian.", Some("Periksa kolomnya dan perbaiki secara manual.")),
-            (K::BlockedByPolicy, En) => ("Organization or command policy stopped the last expansion.", None),
-            (K::BlockedByPolicy, De) => ("Organisations- oder Befehlsrichtlinie hat die letzte Ersetzung gestoppt.", None),
-            (K::BlockedByPolicy, Id) => ("Kebijakan organisasi atau perintah menghentikan perluasan terakhir.", None),
+            (K::BlockedByPolicy, En) => ("Organization or command policy stopped the last expansion.", Some("Open Diagnostics → Policy to identify the refusing rule; ask the policy administrator to change it if appropriate.")),
+            (K::BlockedByPolicy, De) => ("Organisations- oder Befehlsrichtlinie hat die letzte Ersetzung gestoppt.", Some("Öffnen Sie Diagnose → Richtlinie, um die Regel zu finden; bitten Sie bei Bedarf die zuständige Administration um eine Änderung.")),
+            (K::BlockedByPolicy, Id) => ("Kebijakan organisasi atau perintah menghentikan perluasan terakhir.", Some("Buka Diagnostik → Kebijakan untuk melihat aturan yang menolak; minta administrator kebijakan mengubahnya jika sesuai.")),
             (K::InterruptedByTyping, En) => ("More typing arrived before WayExpand could type the replacement, so it dropped the expansion rather than risk typing in the wrong place.", Some("Pause briefly after the trigger.")),
             (K::InterruptedByTyping, De) => ("Weitere Eingaben kamen, bevor WayExpand die Ersetzung tippen konnte; es verwarf sie, statt an der falschen Stelle zu tippen.", Some("Halten Sie nach dem Trigger kurz inne.")),
             (K::InterruptedByTyping, Id) => ("Ketikan lain masuk sebelum WayExpand sempat mengetik penggantinya, jadi perluasan dibatalkan agar tidak mengetik di tempat yang salah.", Some("Berhenti sejenak setelah pemicu.")),
             (K::SnippetActionFailed, En) => ("The command or form behind the last snippet failed.", Some("Open the snippet and check its command or form fields.")),
             (K::SnippetActionFailed, De) => ("Der Befehl oder das Formular hinter dem letzten Snippet ist fehlgeschlagen.", Some("Öffnen Sie das Snippet und prüfen Sie den Befehl oder die Formularfelder.")),
             (K::SnippetActionFailed, Id) => ("Perintah atau formulir di balik cuplikan terakhir gagal.", Some("Buka cuplikannya dan periksa perintah atau kolom formulirnya.")),
-            (K::Expanded | K::ExpandedCursorMisplaced | K::Other, En) => ("The last expansion stopped; the details are below.", None),
-            (K::Expanded | K::ExpandedCursorMisplaced | K::Other, De) => ("Die letzte Ersetzung wurde abgebrochen; Details stehen unten.", None),
-            (K::Expanded | K::ExpandedCursorMisplaced | K::Other, Id) => ("Perluasan terakhir berhenti; detailnya ada di bawah.", None),
+            (K::Expanded | K::Other, En) => ("WayExpand submitted output, but the application result is unverified.", Some("Inspect the field and run a real-application typing test if the text is missing; do not replay uncertain output.")),
+            (K::Expanded | K::Other, De) => ("WayExpand hat die Ausgabe gesendet, aber das Ergebnis in der Anwendung ist ungeprüft.", Some("Prüfen Sie das Feld und testen Sie in einer echten Anwendung, falls Text fehlt; unsichere Ausgabe nicht erneut senden.")),
+            (K::Expanded | K::Other, Id) => ("WayExpand mengirim keluaran, tetapi hasil di aplikasi belum diverifikasi.", Some("Periksa kolomnya dan uji di aplikasi nyata jika teks hilang; jangan kirim ulang keluaran yang belum pasti.")),
+            (K::ExpandedCursorMisplaced, En) => ("WayExpand submitted the replacement but could not confirm cursor placement; application text is unverified.", Some("Inspect the field and cursor before continuing. Run a real-application test if the result is wrong.")),
+            (K::ExpandedCursorMisplaced, De) => ("WayExpand hat die Ersetzung gesendet, konnte die Cursorposition aber nicht bestätigen; der Anwendungstext ist ungeprüft.", Some("Prüfen Sie Feld und Cursor, bevor Sie weitertippen. Testen Sie in einer echten Anwendung, wenn das Ergebnis falsch ist.")),
+            (K::ExpandedCursorMisplaced, Id) => ("WayExpand mengirim penggantian tetapi tidak dapat memastikan posisi kursor; teks aplikasi belum diverifikasi.", Some("Periksa kolom dan kursor sebelum melanjutkan. Uji di aplikasi nyata jika hasilnya salah.")),
         }
     }
 }
@@ -151,7 +157,12 @@ mod tests {
             .into_iter()
             .map(V::MatchingOff)
             .chain(kinds.into_iter().map(V::LastStopped))
-            .chain([V::NoTypingSeen, V::NothingMatched, V::LastExpanded]);
+            .chain([
+                V::NoTypingSeen,
+                V::InputStatusUnknown,
+                V::NothingMatched,
+                V::LastExpanded,
+            ]);
         for verdict in verdicts {
             for terminal_only in [false, true] {
                 let answers = [Language::English, Language::German, Language::Indonesian]

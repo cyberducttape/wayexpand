@@ -552,7 +552,11 @@ mod tests {
             snippet_id: String::new().into(),
             trigger: matched.into(),
             matched_text: matched.into(),
-            insert: "replacement".into(),
+            insert: if matched.is_empty() {
+                "replacement".into()
+            } else {
+                "replace".into()
+            },
             cursor_offset: None,
             reinsert_after: None,
             command_backed: false,
@@ -874,7 +878,7 @@ mod tests {
         assert!(
             ExpansionEngine::apply(injector.as_mut(), &expansion(":sig")).is_output_acknowledged()
         );
-        assert_eq!(*typed.lock().unwrap(), ["erase::sig", "insert:replacement"]);
+        assert_eq!(*typed.lock().unwrap(), ["erase::sig", "insert:replace"]);
     }
 
     #[test]

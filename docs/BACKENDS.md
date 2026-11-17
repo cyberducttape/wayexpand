@@ -161,22 +161,26 @@ the total insertion time becomes noticeable:
 - 100-character replacement payload: ~1.2 seconds, plus trigger erasure and any
   delimiter or cursor work
 
-Longer replacements are rejected before any erase or insertion. The configured
-character ceiling is `[settings] keystroke_max_chars` (default 8, at most 5000;
-also under Settings > Engine in the GUI):
+Longer insert-only keysym output is rejected before typing. The configured
+ceiling is `[settings] keystroke_max_chars` (default 8, at most 5000; also
+under Settings > Engine in the GUI):
 
 ```toml
 [settings]
 keystroke_max_chars = 1000   # explicit opt-in to longer paced output
 ```
 
-The insertion planner previews a route-native, manual-paste, or short paced-key
-strategy from active daemon capabilities and compatibility consent. The GUI
-estimates the whole transaction, including trigger erasure, replacement text,
-delimiter handling, and a conservative cursor-travel bound. Runtime preflight
-refuses a replacement longer than `keystroke_max_chars` before erasing the
-trigger. These estimates use advertised throughput; they are not certified
-latency guarantees. For
+Automatic non-atomic trigger replacement has an additional hard ceiling of
+eight output characters, regardless of compatibility consent or this setting.
+The runtime refuses longer replacements before erasing the trigger, and the
+insertion planner recommends clipboard/manual paste. This limit applies to
+IBus and synthetic-key routes because output cannot be rolled back once the
+target receives it. The planner previews a route-native, manual-paste, or short
+paced-key strategy from active daemon capabilities and compatibility consent.
+The GUI estimates the whole transaction, including trigger erasure,
+replacement text, delimiter handling, and a conservative cursor-travel bound.
+These estimates use advertised throughput; they are not certified latency
+guarantees. For
 long configuration files and runbooks, use the preview's Copy action or
 `wayexpand new` to write a file instead of typing the content through the
 virtual keyboard. This does not make an unverified or non-atomic route safe for
@@ -206,8 +210,10 @@ pressed. A shell with bracketed paste then holds a multi-line replacement until
 you press Enter. Pasted text is not limited by `keystroke_max_chars` or the
 keyboard layout. Your previous clipboard text is restored afterwards. If the
 clipboard holds something that is not text, or the compositor lacks
-`ext-data-control-v1`, the replacement is typed as before. A terminal whose
-paste shortcut is not Ctrl+Shift+V reports an uncertain outcome instead.
+`ext-data-control-v1`, only replacements within the hard non-atomic limit can
+fall back to typing; longer ones are refused before the trigger is erased. A
+terminal whose paste shortcut is not Ctrl+Shift+V reports an uncertain outcome
+instead.
 
 **When does this happen?** It has been observed with xdg-desktop-portal-kde on
 KWin 6.6. Treat that as a recorded compatibility observation, not a guarantee

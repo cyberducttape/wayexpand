@@ -11,19 +11,27 @@
 
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    fs,
+    io::{Read, Write},
+    os::unix::{
+        fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt},
+        net::{UnixListener, UnixStream},
+    },
+    path::{Path, PathBuf},
     sync::{
-        mpsc::{self, Receiver, TryRecvError},
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender, TryRecvError},
         Arc, Mutex,
     },
-    thread,
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
 use eframe::egui::{self, Color32, RichText, TextEdit};
 use wayexpand_core::{
     form_fields, render_template_preview, render_template_with_cursor, template_variables, Config,
-    ConfigRevision, ExpansionConfig, TemplateContext,
+    ConfigRevision, ExpansionConfig, ExpansionDelivery, FormField, FormFieldKind, FormValues,
+    TemplateContext,
 };
 
 use crate::{
@@ -44,6 +52,233 @@ const PREVIEW_CONTEXT_REFRESH: Duration = Duration::from_secs(1);
 const MAX_RESULTS: usize = 60;
 /// Sinks an unusable snippet below every usable match.
 const UNAVAILABLE_PENALTY: i64 = 1_000_000;
+const PICKER_SOCKET_NAME: &str = "wayexpand-picker.sock";
+const PICKER_SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// Owns the one picker instance for this login session. Its lifetime also
+/// anchors Wayland clipboard ownership; closing the picker releases both.
+struct PickerInstance {
+    focus_requests: Receiver<()>,
+    repaint_context: Arc<Mutex<Option<egui::Context>>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+    socket: PickerSocket,
+}
+
+struct PickerSocket {
+    path: PathBuf,
+    socket_device: u64,
+    socket_inode: u64,
+}
+
+impl Drop for PickerSocket {
+    fn drop(&mut self) {
+        // Do not unlink a replacement socket if the path changed while this
+        // picker was starting or running.
+        if fs::symlink_metadata(&self.path).is_ok_and(|metadata| {
+            metadata.dev() == self.socket_device && metadata.ino() == self.socket_inode
+        }) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+impl PickerInstance {
+    /// Returns `None` after asking an existing picker to focus itself.
+    fn acquire() -> anyhow::Result<Option<Self>> {
+        let runtime_dir = picker_runtime_dir()?;
+        Self::acquire_at(&runtime_dir.join(PICKER_SOCKET_NAME))
+    }
+
+    fn acquire_at(socket_path: &Path) -> anyhow::Result<Option<Self>> {
+        validate_private_runtime_dir(
+            socket_path
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("picker socket has no parent directory"))?,
+        )?;
+
+        for _ in 0..2 {
+            if request_existing_picker(socket_path)? {
+                return Ok(None);
+            }
+
+            let listener = match UnixListener::bind(socket_path) {
+                Ok(listener) => listener,
+                Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => continue,
+                Err(error) => return Err(error.into()),
+            };
+            let metadata = match fs::symlink_metadata(socket_path) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    drop(listener);
+                    let _ = fs::remove_file(socket_path);
+                    return Err(error.into());
+                }
+            };
+            let socket = PickerSocket {
+                path: socket_path.to_owned(),
+                socket_device: metadata.dev(),
+                socket_inode: metadata.ino(),
+            };
+            fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600))?;
+            let metadata = fs::symlink_metadata(socket_path)?;
+            if !metadata.file_type().is_socket()
+                || metadata.uid() != unsafe { libc::geteuid() }
+                || metadata.permissions().mode() & 0o077 != 0
+            {
+                anyhow::bail!("picker socket was replaced during startup");
+            }
+
+            let (sender, focus_requests) = mpsc::sync_channel(4);
+            let stop = Arc::new(AtomicBool::new(false));
+            let worker_stop = Arc::clone(&stop);
+            let repaint_context = Arc::new(Mutex::new(None));
+            let worker_context = Arc::clone(&repaint_context);
+            let worker = thread::Builder::new()
+                .name("wayexpand-picker-singleton".into())
+                .spawn(move || {
+                    serve_picker_requests(listener, sender, worker_stop, worker_context)
+                })?;
+            return Ok(Some(Self {
+                focus_requests,
+                repaint_context,
+                stop,
+                worker: Some(worker),
+                socket,
+            }));
+        }
+
+        // A competing launch won the bind race. Ask it to focus and exit.
+        request_existing_picker(socket_path).map(|_| None)
+    }
+
+    fn take_focus_request(&self) -> bool {
+        let mut received = false;
+        while self.focus_requests.try_recv().is_ok() {
+            received = true;
+        }
+        received
+    }
+
+    fn set_repaint_context(&self, context: egui::Context) {
+        if let Ok(mut slot) = self.repaint_context.lock() {
+            *slot = Some(context);
+        }
+    }
+}
+
+impl Drop for PickerInstance {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        // The listener blocks in accept() while idle. A local connection wakes
+        // it so teardown joins the worker without a polling loop.
+        let _ = UnixStream::connect(&self.socket.path);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn serve_picker_requests(
+    listener: UnixListener,
+    sender: SyncSender<()>,
+    stop: Arc<AtomicBool>,
+    repaint_context: Arc<Mutex<Option<egui::Context>>>,
+) {
+    while !stop.load(Ordering::Acquire) {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = stream.set_read_timeout(Some(PICKER_SOCKET_READ_TIMEOUT));
+                let mut request = [0u8; 8];
+                if stream
+                    .read(&mut request)
+                    .is_ok_and(|size| &request[..size] == b"focus")
+                    && sender.try_send(()).is_ok()
+                {
+                    if let Ok(context) = repaint_context.lock() {
+                        if let Some(context) = context.as_ref() {
+                            context.request_repaint();
+                        }
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+}
+
+fn picker_runtime_dir() -> anyhow::Result<PathBuf> {
+    let uid = unsafe { libc::geteuid() };
+    if let Some(path) = std::env::var_os("XDG_RUNTIME_DIR") {
+        let path = PathBuf::from(path);
+        validate_private_runtime_dir(&path)?;
+        return Ok(path);
+    }
+
+    // Some launchers omit XDG_RUNTIME_DIR. Create a per-UID private fallback
+    // under the system temporary directory rather than using a shared socket
+    // pathname directly in /tmp.
+    let path = std::env::temp_dir().join(format!("wayexpand-runtime-{uid}"));
+    if !path.exists() {
+        let mut builder = fs::DirBuilder::new();
+        builder.mode(0o700).create(&path)?;
+    }
+    validate_private_runtime_dir(&path)?;
+    Ok(path)
+}
+
+fn validate_private_runtime_dir(path: &Path) -> anyhow::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.permissions().mode() & 0o077 != 0
+        || metadata.permissions().mode() & 0o700 != 0o700
+    {
+        anyhow::bail!("picker runtime directory must be a private directory owned by this user");
+    }
+    Ok(())
+}
+
+fn remove_stale_picker_socket(path: &Path) -> anyhow::Result<()> {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+    if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
+        anyhow::bail!("refusing to replace an unexpected file at the picker socket path");
+    }
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+fn request_existing_picker(socket_path: &Path) -> anyhow::Result<bool> {
+    match UnixStream::connect(socket_path) {
+        Ok(mut stream) => {
+            stream.set_write_timeout(Some(PICKER_SOCKET_READ_TIMEOUT))?;
+            stream.write_all(b"focus")?;
+            Ok(true)
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            remove_stale_picker_socket(socket_path)?;
+            Ok(false)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Focus the existing picker without launching a helper process. Returns
+/// false when the caller should start the first picker instance.
+pub(crate) fn focus_existing_picker() -> anyhow::Result<bool> {
+    let runtime_dir = picker_runtime_dir()?;
+    let socket_path = runtime_dir.join(PICKER_SOCKET_NAME);
+    validate_private_runtime_dir(&runtime_dir)?;
+    request_existing_picker(&socket_path)
+}
 
 /// Rank `entry` against `query` (both compared case-insensitively). A
 /// trigger match beats a description match, an earlier match beats a later
@@ -107,40 +342,167 @@ struct SearchEntry {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Availability {
     Available,
-    /// Disabled, or generate-only: turned off on purpose.
+    /// Disabled by the user.
     Hidden,
     /// Command-backed snippets run only when their trigger is typed.
     RunsCommand,
-    /// Form fields need input the picker cannot ask for yet.
+    /// Form fields need values before the picker can render a copy preview.
     NeedsInput,
+    /// A template could not be parsed or rendered safely.
+    InvalidTemplate,
+    /// Form templates are copy-only and organization policy forbids copying.
+    PolicyRestricted,
     /// Copy-only mode cannot check which app receives the paste.
     AppRestricted,
     /// Copy-only mode would put clipboard or secret content on the clipboard.
     ReadsClipboard,
 }
 
+#[cfg(test)]
 fn picker_availability(expansion: &ExpansionConfig, safe_direct_insert: bool) -> Availability {
-    if !expansion.is_keyboard_matchable() {
+    picker_availability_with_policy(expansion, safe_direct_insert, true)
+}
+
+fn picker_availability_with_policy(
+    expansion: &ExpansionConfig,
+    safe_direct_insert: bool,
+    clipboard_fallback_allowed: bool,
+) -> Availability {
+    if !expansion.enabled {
         Availability::Hidden
     } else if expansion.command.is_some() {
         Availability::RunsCommand
-    } else if !form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty()) {
-        Availability::NeedsInput
-    } else if !safe_direct_insert && !expansion.app_filter.is_empty() {
-        Availability::AppRestricted
-    } else if !safe_direct_insert
-        && template_variables(&expansion.replacement)
-            .iter()
-            .any(|variable| matches!(*variable, "clipboard" | "secret"))
-    {
-        Availability::ReadsClipboard
     } else {
-        Availability::Available
+        let fields = match form_fields(&expansion.replacement) {
+            Ok(fields) => fields,
+            Err(_) => return Availability::InvalidTemplate,
+        };
+        if !fields.is_empty() {
+            // Form entries in the picker render to the clipboard. Do not
+            // treat exact focus as permission to copy, nor infer that an
+            // app-scoped template is safe for an unverified manual paste.
+            if !expansion.app_filter.is_empty() {
+                Availability::AppRestricted
+            } else if template_variables(&expansion.replacement)
+                .iter()
+                .any(|variable| matches!(*variable, "clipboard" | "secret"))
+            {
+                Availability::ReadsClipboard
+            } else if !clipboard_fallback_allowed {
+                Availability::PolicyRestricted
+            } else {
+                Availability::NeedsInput
+            }
+        } else if expansion.delivery == ExpansionDelivery::GenerateOnly
+            && !clipboard_fallback_allowed
+        {
+            Availability::PolicyRestricted
+        } else if expansion.delivery == ExpansionDelivery::GenerateOnly
+            && !expansion.app_filter.is_empty()
+        {
+            Availability::AppRestricted
+        } else if expansion.delivery == ExpansionDelivery::GenerateOnly
+            && template_variables(&expansion.replacement)
+                .iter()
+                .any(|variable| matches!(*variable, "clipboard" | "secret"))
+        {
+            Availability::ReadsClipboard
+        } else if !safe_direct_insert && !expansion.app_filter.is_empty() {
+            Availability::AppRestricted
+        } else if !safe_direct_insert
+            && template_variables(&expansion.replacement)
+                .iter()
+                .any(|variable| matches!(*variable, "clipboard" | "secret"))
+        {
+            Availability::ReadsClipboard
+        } else {
+            Availability::Available
+        }
     }
+}
+
+fn picker_form(expansion: &ExpansionConfig) -> Result<PickerForm, String> {
+    let fields = form_fields(&expansion.replacement)
+        .map_err(|error| format!("Could not read template fields: {error}"))?;
+    if fields.is_empty() {
+        return Err("This template does not contain fields to fill in.".into());
+    }
+    let today = fields
+        .iter()
+        .any(|field| matches!(&field.kind, FormFieldKind::Date { default } if default == "today"))
+        .then(wayexpand_core::today_local_date)
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    let mut values = FormValues::default();
+    for field in &fields {
+        let default = match &field.kind {
+            FormFieldKind::Text { default } => default.clone(),
+            FormFieldKind::Choice { options, default } => default
+                .clone()
+                .or_else(|| options.first().cloned())
+                .unwrap_or_default(),
+            FormFieldKind::Date { default } if default == "today" => {
+                today.clone().unwrap_or_default()
+            }
+            FormFieldKind::Date { default } => default.clone(),
+        };
+        values.insert(field.key.clone(), default);
+    }
+    Ok(PickerForm {
+        expansion_id: expansion.id.clone(),
+        fields,
+        values,
+    })
+}
+
+fn render_picker_form(config: &Config, form: &PickerForm) -> Result<String, String> {
+    for field in &form.fields {
+        let value = form
+            .values
+            .get(&field.key)
+            .map(String::as_str)
+            .unwrap_or_default();
+        field
+            .validate_value(value)
+            .map_err(|error| format!("{}: {error}", field.label))?;
+    }
+    let expansion = config
+        .expansion
+        .iter()
+        .find(|expansion| expansion.id == form.expansion_id)
+        .ok_or_else(|| "This template is no longer in the snippet library.".to_owned())?;
+    let mut context = config.template_context(None);
+    context.fields = Arc::new(form.values.clone());
+    render_template_with_cursor(&expansion.replacement, &context)
+        .map(|(text, _)| text)
+        .map_err(|error| format!("Could not render this template: {error}"))
+}
+
+fn picker_copy_form_allowed(config: &Config, form: &PickerForm, clipboard_allowed: bool) -> bool {
+    if !clipboard_allowed {
+        return false;
+    }
+    let Some(expansion) = config
+        .expansion
+        .iter()
+        .find(|expansion| expansion.id == form.expansion_id)
+    else {
+        return false;
+    };
+    picker_availability_with_policy(expansion, false, clipboard_allowed) == Availability::NeedsInput
+        && render_picker_form(config, form).is_ok()
 }
 
 impl SearchEntry {
     fn from_expansion(expansion: &ExpansionConfig, safe_direct_insert: bool) -> Self {
+        Self::from_expansion_with_policy(expansion, safe_direct_insert, true)
+    }
+
+    fn from_expansion_with_policy(
+        expansion: &ExpansionConfig,
+        safe_direct_insert: bool,
+        clipboard_fallback_allowed: bool,
+    ) -> Self {
         Self {
             trigger: crate::library::trigger_search_text(expansion),
             description: expansion.description.to_lowercase(),
@@ -148,12 +510,23 @@ impl SearchEntry {
             // Eligibility does not change while the picker is open. Parse
             // forms and template variables once here instead of repeating
             // that work for every search edit.
-            availability: picker_availability(expansion, safe_direct_insert),
+            availability: picker_availability_with_policy(
+                expansion,
+                safe_direct_insert,
+                clipboard_fallback_allowed,
+            ),
         }
     }
 
     fn eligible(&self) -> bool {
         self.availability == Availability::Available
+    }
+
+    fn selectable(&self) -> bool {
+        matches!(
+            self.availability,
+            Availability::Available | Availability::NeedsInput | Availability::RunsCommand
+        )
     }
 }
 
@@ -192,11 +565,26 @@ pub(crate) struct PickerApp {
     focus_requested: bool,
     target_focus: Option<FocusTarget>,
     insert_state: InsertState,
+    workflow: Option<PickerWorkflow>,
     /// List snippets the picker cannot use (with their reason). On by
     /// default so nothing silently disappears; the user can hide them.
     show_unavailable: bool,
     /// Debug builds only: capture the window and exit (see `screenshot`).
     screenshot: Option<crate::screenshot::ScreenshotCapture>,
+    /// Owns the per-session singleton socket and therefore this picker's
+    /// clipboard lifetime. Tests and embedded instances leave this empty.
+    picker_instance: Option<PickerInstance>,
+}
+
+enum PickerWorkflow {
+    Form(PickerForm),
+    ReviewAutomation { expansion_id: String },
+}
+
+struct PickerForm {
+    expansion_id: String,
+    fields: Vec<FormField>,
+    values: FormValues,
 }
 
 enum InsertState {
@@ -246,7 +634,13 @@ impl PickerApp {
             search_index: config
                 .expansion
                 .iter()
-                .map(|expansion| SearchEntry::from_expansion(expansion, safe_direct_insert))
+                .map(|expansion| {
+                    SearchEntry::from_expansion_with_policy(
+                        expansion,
+                        safe_direct_insert,
+                        clipboard_fallback_allowed,
+                    )
+                })
                 .collect(),
             template_context: config.template_context(None),
             config,
@@ -267,7 +661,9 @@ impl PickerApp {
             focus_requested: false,
             target_focus,
             screenshot: None,
+            picker_instance: None,
             insert_state: InsertState::Ready,
+            workflow: None,
             show_unavailable: true,
         }
     }
@@ -288,12 +684,12 @@ impl PickerApp {
         self.ranked_scratch.clear();
         for (index, entry) in self.search_index.iter().enumerate() {
             if entry.availability == Availability::Hidden
-                || !self.show_unavailable && !entry.eligible()
+                || !self.show_unavailable && !entry.selectable()
             {
                 continue;
             }
             if let Some(score) = score_normalized(&query, &entry.trigger, &entry.description) {
-                let score = if entry.eligible() {
+                let score = if entry.selectable() {
                     score
                 } else {
                     score - UNAVAILABLE_PENALTY
@@ -311,7 +707,7 @@ impl PickerApp {
     }
 
     fn choose(&mut self, ctx: &egui::Context, expansion: &ExpansionConfig) {
-        if self.safe_direct_insert {
+        if self.safe_direct_insert && expansion.is_keyboard_matchable() {
             let Some(target_focus) = self.target_focus.clone() else {
                 self.insert_state = InsertState::Failed {
                     trigger: expansion.trigger.clone(),
@@ -384,6 +780,36 @@ impl PickerApp {
         self.copied = Some(copy_snippet(ctx, text, &expansion.trigger));
     }
 
+    fn activate_entry(&mut self, ctx: &egui::Context, expansion: &ExpansionConfig) {
+        match picker_availability_with_policy(
+            expansion,
+            self.safe_direct_insert,
+            self.clipboard_fallback_allowed,
+        ) {
+            Availability::Available => self.choose(ctx, expansion),
+            Availability::NeedsInput => match picker_form(expansion) {
+                Ok(form) => self.workflow = Some(PickerWorkflow::Form(form)),
+                Err(error) => {
+                    self.insert_state = InsertState::Failed {
+                        trigger: expansion.trigger.clone(),
+                        text: String::new(),
+                        error,
+                    }
+                }
+            },
+            Availability::RunsCommand => {
+                self.workflow = Some(PickerWorkflow::ReviewAutomation {
+                    expansion_id: expansion.id.clone(),
+                });
+            }
+            Availability::Hidden
+            | Availability::InvalidTemplate
+            | Availability::PolicyRestricted
+            | Availability::AppRestricted
+            | Availability::ReadsClipboard => {}
+        }
+    }
+
     /// Render a snippet for the clipboard with the values available to this
     /// process; the clipboard has no daemon to render it.
     fn clipboard_text(&self, expansion: &ExpansionConfig) -> Result<String, String> {
@@ -450,6 +876,9 @@ impl PickerApp {
             self.last_preview_context_refresh = Instant::now();
         }
         let expansion = &self.config.expansion[index];
+        if expansion.command.is_some() {
+            return self.strings.picker_review_no_execution().to_owned();
+        }
         if let Some(preview) = self.preview_cache.get(&expansion.id) {
             return preview.clone();
         }
@@ -507,6 +936,232 @@ impl PickerApp {
                 self.insert_state =
                     failed(self.strings.picker_message(&PickerMessage::WorkerStopped));
                 bring_back(ctx);
+            }
+        }
+    }
+
+    fn render_workflow(&mut self, ctx: &egui::Context) {
+        let Some(workflow) = self.workflow.take() else {
+            return;
+        };
+        match workflow {
+            PickerWorkflow::Form(mut form) => {
+                let Some(expansion) = self
+                    .config
+                    .expansion
+                    .iter()
+                    .find(|expansion| expansion.id == form.expansion_id)
+                else {
+                    return;
+                };
+                let trigger = expansion.trigger.clone();
+                let title = if expansion.description.is_empty() {
+                    expansion.trigger.clone()
+                } else {
+                    expansion.description.clone()
+                };
+                let mut open = true;
+                let mut copy_text = None;
+                let mut copy_requested = false;
+                let mut back = false;
+                egui::Window::new(self.strings.picker_form_title())
+                    .id(egui::Id::new("picker_template_form"))
+                    .collapsible(false)
+                    .resizable(true)
+                    .default_width(520.0)
+                    .open(&mut open)
+                    .show(ctx, |ui| {
+                        ui.label(RichText::new(title).strong());
+                        ui.add_space(8.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(260.0)
+                            .show(ui, |ui| {
+                                for (index, field) in form.fields.iter().enumerate() {
+                                    ui.push_id(("picker_form_field", index), |ui| {
+                                        ui.label(&field.label);
+                                        let current = form
+                                            .values
+                                            .get(&field.key)
+                                            .cloned()
+                                            .unwrap_or_default();
+                                        match &field.kind {
+                                            FormFieldKind::Text { .. } => {
+                                                let mut value = current;
+                                                if ui
+                                                    .add(
+                                                        TextEdit::singleline(&mut value)
+                                                            .desired_width(f32::INFINITY),
+                                                    )
+                                                    .changed()
+                                                {
+                                                    form.values.insert(field.key.clone(), value);
+                                                }
+                                            }
+                                            FormFieldKind::Choice { options, .. } => {
+                                                let mut value = current;
+                                                egui::ComboBox::from_id_salt("value")
+                                                    .selected_text(&value)
+                                                    .width(ui.available_width())
+                                                    .show_ui(ui, |ui| {
+                                                        for option in options {
+                                                            ui.selectable_value(
+                                                                &mut value,
+                                                                option.clone(),
+                                                                option,
+                                                            );
+                                                        }
+                                                    });
+                                                if form.values.get(&field.key) != Some(&value) {
+                                                    form.values.insert(field.key.clone(), value);
+                                                }
+                                            }
+                                            FormFieldKind::Date { .. } => {
+                                                let mut value = current;
+                                                if ui
+                                                    .add(
+                                                        TextEdit::singleline(&mut value)
+                                                            .hint_text("YYYY-MM-DD")
+                                                            .desired_width(f32::INFINITY),
+                                                    )
+                                                    .changed()
+                                                {
+                                                    form.values.insert(field.key.clone(), value);
+                                                }
+                                            }
+                                        }
+                                    });
+                                    ui.add_space(5.0);
+                                }
+                            });
+
+                        match render_picker_form(&self.config, &form) {
+                            Ok(rendered) => {
+                                ui.add_space(6.0);
+                                ui.label(
+                                    RichText::new(self.strings.picker_form_preview()).strong(),
+                                );
+                                let mut preview = rendered.clone();
+                                egui::ScrollArea::vertical()
+                                    .max_height(170.0)
+                                    .show(ui, |ui| {
+                                        ui.add(
+                                            TextEdit::multiline(&mut preview)
+                                                .code_editor()
+                                                .desired_width(f32::INFINITY)
+                                                .interactive(false),
+                                        );
+                                    });
+                                copy_text = Some(rendered);
+                            }
+                            Err(error) => {
+                                ui.colored_label(self.palette.warning, error);
+                            }
+                        }
+                        if !self.clipboard_fallback_allowed {
+                            ui.colored_label(
+                                self.palette.warning,
+                                self.strings
+                                    .picker_message(&PickerMessage::CopyNotAllowedByPolicy),
+                            );
+                        }
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            let can_copy = self.clipboard_fallback_allowed
+                                && copy_text.is_some()
+                                && picker_copy_form_allowed(
+                                    &self.config,
+                                    &form,
+                                    self.clipboard_fallback_allowed,
+                                );
+                            if ui
+                                .add_enabled(
+                                    can_copy,
+                                    egui::Button::new(self.strings.picker_copy_output()),
+                                )
+                                .clicked()
+                            {
+                                copy_requested = true;
+                            }
+                            if ui.button(self.strings.picker_back_to_results()).clicked() {
+                                back = true;
+                            }
+                        });
+                    });
+                if !open || back {
+                    self.workflow = None;
+                } else {
+                    if copy_requested && self.clipboard_fallback_allowed {
+                        if let Some(text) = copy_text {
+                            if picker_copy_form_allowed(
+                                &self.config,
+                                &form,
+                                self.clipboard_fallback_allowed,
+                            ) {
+                                self.copied = Some(copy_snippet(ctx, text, &trigger));
+                                self.workflow = None;
+                                return;
+                            }
+                        }
+                    }
+                    self.workflow = Some(PickerWorkflow::Form(form));
+                }
+            }
+            PickerWorkflow::ReviewAutomation { expansion_id } => {
+                let Some(expansion) = self
+                    .config
+                    .expansion
+                    .iter()
+                    .find(|expansion| expansion.id == expansion_id)
+                else {
+                    return;
+                };
+                let mut open = true;
+                let mut back = false;
+                egui::Window::new(self.strings.picker_review_title())
+                    .id(egui::Id::new("picker_automation_review"))
+                    .collapsible(false)
+                    .resizable(true)
+                    .default_width(520.0)
+                    .open(&mut open)
+                    .show(ctx, |ui| {
+                        ui.label(RichText::new(&expansion.trigger).monospace().strong());
+                        if !expansion.description.is_empty() {
+                            ui.label(&expansion.description);
+                        }
+                        ui.add_space(8.0);
+                        ui.colored_label(
+                            self.palette.warning,
+                            self.strings.picker_review_no_execution(),
+                        );
+                        if let Some(command) = expansion.command.as_ref() {
+                            ui.add_space(8.0);
+                            if let Some(action) = command.action.as_deref() {
+                                ui.label(RichText::new("Named action").strong());
+                                ui.monospace(action);
+                            } else {
+                                ui.label(RichText::new("Program").strong());
+                                ui.monospace(&command.program);
+                            }
+                            if !command.args.is_empty() {
+                                ui.label(RichText::new("Arguments").strong());
+                                egui::ScrollArea::vertical()
+                                    .max_height(140.0)
+                                    .show(ui, |ui| {
+                                        for (index, argument) in command.args.iter().enumerate() {
+                                            ui.monospace(format!("{index}: {argument}"));
+                                        }
+                                    });
+                            }
+                            ui.label(format!("Timeout: {} ms", command.timeout_ms));
+                        }
+                        ui.add_space(10.0);
+                        if ui.button(self.strings.picker_back_to_results()).clicked() {
+                            back = true;
+                        }
+                    });
+                if open && !back {
+                    self.workflow = Some(PickerWorkflow::ReviewAutomation { expansion_id });
+                }
             }
         }
     }
@@ -590,6 +1245,21 @@ fn bring_back(ctx: &egui::Context) {
 impl eframe::App for PickerApp {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
+        if let Some(instance) = self.picker_instance.as_ref() {
+            instance.set_repaint_context(ctx.clone());
+        }
+        if self
+            .picker_instance
+            .as_ref()
+            .is_some_and(PickerInstance::take_focus_request)
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Informational,
+            ));
+            ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("picker_search")));
+        }
         let palette = self.palette;
         if let Some(capture) = self.screenshot.as_mut() {
             // `search` stages a query so the capture shows ranked results.
@@ -611,7 +1281,7 @@ impl eframe::App for PickerApp {
                 input.key_pressed(egui::Key::Escape),
             )
         });
-        if escape {
+        if escape && self.workflow.take().is_none() {
             self.cancel(&ctx);
         }
         // Closing the window follows the same policy as Escape: an insert
@@ -627,7 +1297,7 @@ impl eframe::App for PickerApp {
         // listed with its reason but is never a stop on the way.
         let usable_rows: Vec<bool> = result_indices
             .iter()
-            .map(|index| self.search_index[*index].eligible())
+            .map(|index| self.search_index[*index].selectable())
             .collect();
         self.selected = self.selected.min(count.saturating_sub(1));
         if down {
@@ -639,9 +1309,10 @@ impl eframe::App for PickerApp {
         if !usable_rows.get(self.selected).copied().unwrap_or(false) {
             self.selected = step_to_usable(&usable_rows, self.selected, Step::Settle);
         }
-        // Enter and clicks pick only usable snippets; an unusable row shows
-        // why instead of doing something unexpected.
-        let usable = |index: usize| self.search_index[index].eligible();
+        // Enter and clicks either copy/insert a plain snippet, open a form,
+        // or open a read-only automation review. Blocked entries remain
+        // visible with their reason and are never actionable.
+        let usable = |index: usize| self.search_index[index].selectable();
         let mut chosen = (ready && enter && count > 0)
             .then(|| result_indices[self.selected])
             .filter(|index| usable(*index));
@@ -673,7 +1344,7 @@ impl eframe::App for PickerApp {
                 let has_unavailable = self
                     .search_index
                     .iter()
-                    .any(|entry| entry.availability != Availability::Hidden && !entry.eligible());
+                    .any(|entry| entry.availability != Availability::Hidden && !entry.selectable());
                 if has_unavailable
                     && ui
                         .checkbox(
@@ -805,6 +1476,17 @@ impl eframe::App for PickerApp {
                             let expansion = &self.config.expansion[expansion_index];
                             let selected = index == self.selected;
                             let availability = self.search_index[expansion_index].availability;
+                            let field_count = if availability == Availability::NeedsInput {
+                                form_fields(&expansion.replacement).map_or(0, |fields| fields.len())
+                            } else {
+                                0
+                            };
+                            let status = self.strings.picker_entry_status(
+                                availability,
+                                field_count,
+                                self.safe_direct_insert && availability == Availability::Available,
+                                expansion.delivery == ExpansionDelivery::GenerateOnly,
+                            );
                             let response = picker_row(
                                 ui,
                                 &palette,
@@ -812,6 +1494,7 @@ impl eframe::App for PickerApp {
                                 &self.search_index[expansion_index].app_scope,
                                 &self.strings,
                                 expansion,
+                                &status,
                                 selected,
                                 self.strings.picker_unavailable_reason(availability),
                             );
@@ -823,7 +1506,7 @@ impl eframe::App for PickerApp {
                             }
                             if ready
                                 && response.clicked()
-                                && availability == Availability::Available
+                                && self.search_index[expansion_index].selectable()
                             {
                                 chosen = Some(expansion_index);
                             }
@@ -850,8 +1533,9 @@ impl eframe::App for PickerApp {
             });
         if let Some(expansion_index) = chosen {
             let expansion = self.config.expansion[expansion_index].clone();
-            self.choose(&ctx, &expansion);
+            self.activate_entry(&ctx, &expansion);
         }
+        self.render_workflow(&ctx);
     }
 }
 
@@ -863,6 +1547,7 @@ fn picker_row(
     app_scope: &str,
     strings: &Strings,
     expansion: &ExpansionConfig,
+    status: &str,
     selected: bool,
     unavailable: Option<&str>,
 ) -> egui::Response {
@@ -909,13 +1594,31 @@ fn picker_row(
                     });
                 }
             });
+            ui.label(
+                RichText::new(status)
+                    .small()
+                    .color(if unavailable.is_some() {
+                        palette.warning
+                    } else {
+                        palette.accent
+                    }),
+            );
             if let Some(reason) = unavailable {
                 ui.label(RichText::new(reason).small().color(palette.warning));
                 return;
             }
-            ui.add(
-                egui::Label::new(RichText::new(first_line).small().color(palette.muted)).truncate(),
-            );
+            if expansion.command.is_some() {
+                ui.label(
+                    RichText::new(strings.picker_review_no_execution())
+                        .small()
+                        .color(palette.muted),
+                );
+            } else {
+                ui.add(
+                    egui::Label::new(RichText::new(first_line).small().color(palette.muted))
+                        .truncate(),
+                );
+            }
             if !app_scope.is_empty() {
                 ui.label(
                     RichText::new(strings.picker_app_scope(app_scope))
@@ -1223,6 +1926,12 @@ fn focus_returned_to_target(target: &FocusTarget, current: &FocusTarget) -> bool
 /// Run the picker. Insertion remains inside the picker until the guarded
 /// focus handoff succeeds, so a safe failure remains visible to the user.
 pub(crate) fn run(path: PathBuf, copy_only: bool) -> anyhow::Result<()> {
+    // A second launcher raises the live picker and exits. Keeping one process
+    // per session is also necessary for clipboard managers that request the
+    // Wayland selection after the copy operation has completed.
+    let Some(picker_instance) = PickerInstance::acquire()? else {
+        return Ok(());
+    };
     let policy = wayexpand_core::load_organization_policy()
         .map_err(|error| anyhow::anyhow!("could not load organization policy: {error}"))?;
     let loaded = Config::load_versioned(&path)
@@ -1290,6 +1999,7 @@ pub(crate) fn run(path: PathBuf, copy_only: bool) -> anyhow::Result<()> {
                 target_focus,
             );
             app.screenshot = crate::screenshot::ScreenshotCapture::from_env();
+            app.picker_instance = Some(picker_instance);
             Ok(Box::new(app))
         }),
     )
@@ -1433,7 +2143,8 @@ pub(crate) fn picker_readiness(
 }
 
 fn picker_expansion_is_eligible(expansion: &ExpansionConfig, safe_direct_insert: bool) -> bool {
-    picker_availability(expansion, safe_direct_insert) == Availability::Available
+    expansion.is_keyboard_matchable()
+        && SearchEntry::from_expansion(expansion, safe_direct_insert).eligible()
 }
 
 fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
@@ -1481,13 +2192,57 @@ fn top_ranked_into(ranked: &mut Vec<(i64, usize)>, limit: usize, result: &mut Ve
 
 #[cfg(test)]
 mod tests {
+    use super::PickerInstance;
     use super::PickerMessage;
     use super::{
         clipboard_fallback_allowed_by_policy, copy_snippet, delivery_verdict,
         focus_returned_to_target, focus_target_from_response, format_app_scope,
-        picker_expansion_is_eligible, picker_focus_state, picker_needs_daemon_focus, score,
-        top_ranked, top_ranked_into, FocusInfo, FocusTarget, SearchEntry, MAX_RESULTS,
+        picker_availability_with_policy, picker_copy_form_allowed, picker_expansion_is_eligible,
+        picker_focus_state, picker_form, picker_needs_daemon_focus, render_picker_form, score,
+        top_ranked, top_ranked_into, Availability, FocusInfo, FocusTarget, SearchEntry,
+        MAX_RESULTS,
     };
+
+    #[test]
+    fn picker_launches_focus_the_single_live_instance_and_cleanup_releases_ownership() {
+        use std::{
+            fs,
+            os::unix::fs::PermissionsExt,
+            path::PathBuf,
+            thread,
+            time::{Duration, Instant},
+        };
+
+        let dir: PathBuf = std::env::temp_dir().join(format!(
+            "wayexpand-picker-singleton-test-{}-{}",
+            unsafe { libc::geteuid() },
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = dir.join("picker.sock");
+
+        let primary = PickerInstance::acquire_at(&socket)
+            .unwrap()
+            .expect("first launch owns the picker");
+        assert!(PickerInstance::acquire_at(&socket).unwrap().is_none());
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut got_focus_request = false;
+        while !got_focus_request && Instant::now() < deadline {
+            got_focus_request = primary.take_focus_request();
+            if got_focus_request {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(got_focus_request, "second launch notifies the live picker");
+
+        drop(primary);
+        assert!(!socket.exists(), "closing the picker removes its socket");
+        fs::remove_dir(&dir).unwrap();
+    }
 
     #[test]
     fn top_ranked_matches_a_full_sort() {
@@ -1828,7 +2583,7 @@ mod tests {
     }
 
     #[test]
-    fn form_snippets_are_hidden_until_picker_form_submission_exists() {
+    fn form_snippets_are_not_mistaken_for_direct_insert_entries() {
         let expansion = ExpansionConfig {
             id: ExpansionConfig::new_id(),
             trigger: ":form".into(),
@@ -1848,6 +2603,124 @@ mod tests {
 
         assert!(!picker_expansion_is_eligible(&expansion, false));
         assert!(!picker_expansion_is_eligible(&expansion, true));
+    }
+
+    #[test]
+    fn quick_picker_forms_validate_preview_and_copy_only_the_rendered_values() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ":nginx"
+replacement = "server_name {{field:host=example.com|required|validate=hostname}};"
+"#,
+        )
+        .unwrap();
+        let expansion = &config.expansion[0];
+        assert_eq!(
+            picker_availability_with_policy(expansion, false, true),
+            Availability::NeedsInput
+        );
+
+        let mut form = picker_form(expansion).unwrap();
+        assert_eq!(
+            render_picker_form(&config, &form).unwrap(),
+            "server_name example.com;"
+        );
+        assert!(picker_copy_form_allowed(&config, &form, true));
+
+        form.values
+            .insert(form.fields[0].key.clone(), "api.example.org".into());
+        assert_eq!(
+            render_picker_form(&config, &form).unwrap(),
+            "server_name api.example.org;"
+        );
+        assert!(picker_copy_form_allowed(&config, &form, true));
+
+        form.values.insert(
+            form.fields[0].key.clone(),
+            "not a host; touch /tmp/x".into(),
+        );
+        assert!(render_picker_form(&config, &form).is_err());
+        assert!(!picker_copy_form_allowed(&config, &form, true));
+        assert!(!picker_copy_form_allowed(&config, &form, false));
+    }
+
+    #[test]
+    fn picker_forms_remain_blocked_by_app_scope_sensitive_variables_and_policy() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ":form"
+replacement = "Hello {{field:name=friend}}"
+app_filter = ["app_id_exact:org.example.Editor"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            picker_availability_with_policy(&config.expansion[0], false, true),
+            Availability::AppRestricted
+        );
+
+        let policy_blocked = Config::parse(
+            r#"[[expansion]]
+trigger = ":form"
+replacement = "Hello {{field:name=friend}}"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            picker_availability_with_policy(&policy_blocked.expansion[0], false, false),
+            Availability::PolicyRestricted
+        );
+
+        let secret = Config::parse(
+            r#"[settings]
+allow_clipboard = true
+
+[[expansion]]
+trigger = ":form"
+replacement = "{{field:name=friend}} {{clipboard}}"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            picker_availability_with_policy(&secret.expansion[0], false, true),
+            Availability::ReadsClipboard
+        );
+    }
+
+    #[test]
+    fn generated_file_templates_are_copyable_but_never_sent_to_the_target() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ":compose"
+replacement = "services:\\n  web:\\n    image: nginx"
+delivery = "generate_only"
+output_file = "compose.yml"
+"#,
+        )
+        .unwrap();
+        let expansion = &config.expansion[0];
+        assert_eq!(
+            picker_availability_with_policy(expansion, true, true),
+            Availability::Available
+        );
+        assert!(!expansion.is_keyboard_matchable());
+        assert!(!picker_expansion_is_eligible(expansion, true));
+    }
+
+    #[test]
+    fn command_entries_are_selectable_only_for_read_only_review() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ":diagnose"
+replacement = ""
+command = { program = "/usr/bin/systemctl", args = ["status", "nginx.service"] }
+"#,
+        )
+        .unwrap();
+        let entry = SearchEntry::from_expansion(&config.expansion[0], false);
+        assert!(entry.selectable());
+        assert!(!entry.eligible());
+        assert_eq!(entry.availability, Availability::RunsCommand);
     }
 
     #[test]
@@ -2200,7 +3073,7 @@ mod tests {
              [[expansion]]\ntrigger = ';sig'\nreplacement = 'Best regards'\n";
 
         #[test]
-        fn unusable_snippets_are_listed_after_usable_ones_with_a_reason() {
+        fn picker_lists_actionable_workflows_and_explains_blocked_entries() {
             let mut app = picker(LIBRARY, false);
             app.refresh_results();
             let listed: Vec<&str> = app
@@ -2208,7 +3081,7 @@ mod tests {
                 .iter()
                 .map(|index| app.config.expansion[*index].trigger.as_str())
                 .collect();
-            assert_eq!(listed.first(), Some(&";sig"), "{listed:?}");
+            assert!(listed.contains(&";sig"), "{listed:?}");
             assert!(!listed.contains(&";off"), "turned-off snippets stay out");
             for trigger in [";form", ";cmd", ";scoped"] {
                 assert!(listed.contains(&trigger), "{trigger} is listed: {listed:?}");
@@ -2218,7 +3091,13 @@ mod tests {
                 let reason = app.strings.picker_unavailable_reason(availability);
                 assert_eq!(
                     reason.is_some(),
-                    availability != Availability::Available,
+                    matches!(
+                        availability,
+                        Availability::AppRestricted
+                            | Availability::ReadsClipboard
+                            | Availability::InvalidTemplate
+                            | Availability::PolicyRestricted
+                    ),
                     "{availability:?}"
                 );
             }
@@ -2252,7 +3131,7 @@ mod tests {
                 .iter()
                 .map(|index| app.config.expansion[*index].trigger.as_str())
                 .collect();
-            assert_eq!(listed, [";sig"]);
+            assert_eq!(listed, [";form", ";cmd", ";sig"]);
         }
 
         #[test]

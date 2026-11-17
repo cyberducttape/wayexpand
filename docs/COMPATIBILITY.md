@@ -756,6 +756,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "terminal_paste_total": 0,
   "terminal_paste_fallbacks_total": 0,
   "terminal_paste_unread_total": 0,
+  "terminal_paste_last_failure": "none",
   "input_events_total": 42,
   "output_reconnect_total": 0,
   "input_reconnect_total": 0,
@@ -850,6 +851,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `terminal_paste_total` (integer): Replacements the focused terminal read from the clipboard since daemon start. Added in status schema 44.
 - `terminal_paste_fallbacks_total` (integer): Pastes that could not start (no data control, or a clipboard holding non-text data) and were typed instead. Added in status schema 44.
 - `terminal_paste_unread_total` (integer): Paste keys pressed that the terminal never answered by reading the clipboard; such outcomes are uncertain. Added in status schema 44.
+- `terminal_paste_last_failure` (string): Content-free failure category from the latest output transaction, or `none`. Categories distinguish trigger-erasure focus refusal, EIS device/disconnect/backlog/flush failures, cancellation, input interruption, safety-check failure, and paste-key failure. It never contains an error string or text content. Added in status contract version 26.
 - `input_events_total` (integer): Count of text/key/backspace/delimiter events accepted by the matching engine since daemon start. It contains no key or text values and is intended for sanitized live diagnostics. Added in status schema 27.
 - `evdev_raw_key_events_total` (integer): Count of raw key press, release, and repeat events processed by the evdev source since daemon start. It contains no keycodes or text and distinguishes device activity from matcher input. Added in status schema 34.
 - `evdev_layout_unavailable_key_events_total` (integer): Count of evdev key events discarded because no trustworthy active keyboard layout snapshot was available. Added in status schema 34.
@@ -990,8 +992,22 @@ one means the trigger never reached that route. Window-dependent matching
 reasons (`application_scope_denied`, `application_scope_unknown`) are ignored,
 because the focused window while the command runs is the terminal.
 
-`--json` prints `{"daemon": …, "ibus": …}`; either is `null` when that route
-is not running. `daemon` holds `source`, `backend`, `verdict`
+The text report gives one plain-language cause and a concrete next action.
+`--json` adds a top-level `diagnosis` with stable `state`, `answer`, and
+`next_action` fields, plus `pattern_match` and `delivery_status`. These describe
+separate stages: a recent match or submitted output is not proof that the
+target application changed its text. `matcher_preview_proves_application_delivery`
+and `application_delivery_verified` remain `false`; a local matcher preview
+cannot certify desktop delivery. Use the GUI's real-application typing test
+and confirm the visible result to establish that route's operation.
+`pattern_match` reports `confirmed_recently`, `not_observed_recently`,
+`no_input_observed`, `blocked`, or `unknown`; `delivery_status` reports
+`submitted_unverified`, `not_submitted`, `partial_or_uncertain`, `uncertain`,
+`blocked_by_policy`, `stopped_before_output`, `snippet_action_failed`,
+`not_observed`, or `unknown`.
+
+`daemon` and `ibus` are `null` when those routes are not available. `daemon`
+holds `source`, `backend`, `verdict`
 (`matching_off`, `no_typing_seen`, `nothing_matched`, `last_stopped`,
 `last_expanded`), `matching_block` (`capture_disconnected`,
 `keyboard_layout_unavailable`, `output_unavailable`, `policy_route`, `paused`,
@@ -1000,7 +1016,12 @@ is not running. `daemon` holds `source`, `backend`, `verdict`
 first: `at_unix`, `outcome`, and the daemon's fixed `completion` label).
 `outcome` is one of `expanded`, `expanded_cursor_misplaced`, `not_applied`,
 `unknown`, `partial`, `blocked_by_policy`, `interrupted_by_typing`,
-`snippet_action_failed` or `other`. `ibus` holds the newest typed field's
+`snippet_action_failed` or `other`. Terminal paste routes can also report a
+content-free `terminal_paste_last_failure` stage, such as trigger erasure,
+focus validation, EIS device loss/disconnection/event backlog/flush failure,
+input interruption, cancellation, or paste-key delivery.
+When output may have started, inspect the target before continuing; WayExpand
+does not automatically replay uncertain output. `ibus` holds the newest typed field's
 `verdict` (an IBus field label such as `no-surrounding-text`), `keys` and
 `expansions`, all `null` before any typing. The control-only service (stdin
 source) counts as no daemon route. Exit code 0 when either route is running,
@@ -1143,9 +1164,15 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   surrounding text but deletes and inserts in two steps, so it also needs a
   mode other than `off`; `wayexpand setup --backend ibus` asks for it.
 - `Settings::keystroke_max_chars` (integer 1–5000, default 8, omitted from
-  saved TOML at the default) — the longest replacement a keystroke-typed
-  route (the libei keysym fallback) accepts; longer ones are refused before
-  anything is erased. It is reported as `inject_max_text_chars`. Older
+  saved TOML at the default) — the longest insert-only payload a keystroke-
+  typed route (the libei keysym fallback) accepts. Automatic trigger
+  paced synthetic-key trigger replacement has a separate hard eight-character
+  output ceiling that cannot be raised by this setting or compatibility
+  consent; longer output is refused before the trigger is erased. A configured
+  terminal clipboard-paste route may carry a longer payload as one paste
+  operation, but trigger deletion remains non-atomic and still requires the
+  same compatibility consent and focus checks. It is reported as
+  `inject_max_text_chars`. Older
   readers that reject unknown fields will not load a config that sets it.
 - `Settings::terminal_apps` (array of scope filters, default empty, omitted
   from saved TOML when empty) — terminal apps may use `app_id_exact:` (the

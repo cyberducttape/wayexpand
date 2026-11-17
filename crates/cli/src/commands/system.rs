@@ -16,12 +16,12 @@ fn setup_plan_actions(
     let mut actions = vec!["Create the default configuration only if it is missing"];
     match backend {
         "ibus" => {
-            actions.push("Check IBus prerequisites and replacement policy before applying integration changes");
+            actions.push("Check IBus prerequisites, shared-manifest safety, and replacement policy before applying integration changes");
             if is_gnome_wayland {
                 actions.push("After IBus preflight and explicit replacement consent, prepare GNOME's window tracker and IBus source");
                 actions.push("Keep GNOME extension files and enablement settings in the IBus rollback transaction until verification");
             }
-            actions.push("Register and activate the IBus engine, then verify the session route");
+            actions.push("Register and activate the IBus engine, repairing a missing or user-scoped shared registration with administrator authorization if needed, then verify the session route");
         }
         "input-method" => actions.push("Enable the input-method-v2 user service; portal authorization may be requested when it connects"),
         "evdev" => {
@@ -36,8 +36,7 @@ fn setup_plan_actions(
         actions.push("Stop before changing GNOME or IBus if replacement authorization is not already configured");
     }
     if install_system_integration {
-        actions
-            .push("Request administrator authorization to install the system-wide IBus component");
+        actions.push("Use the explicitly authorized system-integration repair if the shared IBus registration needs replacement");
     }
     if evdev_apps_requested && backend == "ibus" {
         actions.push(
@@ -57,6 +56,36 @@ fn setup_can_apply_without_prompt(
     stdin_is_tty: bool,
 ) -> bool {
     assume_yes || apply_requested || stdin_is_tty
+}
+
+/// Preserve a route already selected by a compatible running daemon. Setup
+/// is also the repair command, so replacing an existing route merely because
+/// another backend ranks higher would be surprising and can reduce coverage.
+/// Control-only (stdin) daemons are paired with IBus and are handled by the
+/// ordinary recommendation path.
+fn existing_setup_backend(policy: &OrganizationPolicy) -> Option<&'static str> {
+    let response = control_operation(wayexpand_core::DaemonOperation::Status).ok()?;
+    existing_setup_backend_from_status(&response, policy)
+}
+
+pub(crate) fn existing_setup_backend_from_status(
+    response: &str,
+    policy: &OrganizationPolicy,
+) -> Option<&'static str> {
+    let status = wayexpand_core::DaemonStatus::parse(response);
+    if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) || !status.field_is_unique("source") {
+        return None;
+    }
+    let backend = match status.field("source")? {
+        "evdev" => "evdev",
+        "input-method" | "input-method-v2" => "input-method",
+        // The IBus engine is the typing route when the daemon only provides
+        // the control socket. Let current IBus readiness and policy determine
+        // whether it is recommended.
+        "stdin" => return None,
+        _ => return None,
+    };
+    setup_backend_allowed(policy, backend).then_some(backend)
 }
 
 pub(crate) fn setup_command(mut args: Args) -> Result<()> {
@@ -196,6 +225,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let ibus_route_ready = ibus_engine_available() || ibus_engine_installed();
     let automatic =
         recommended_setup_backend_with_ibus(&capabilities, ibus_setup_available, &policy);
+    let existing_backend = existing_setup_backend(&policy);
     let route_plan =
         wayexpand_backend_selection::plan_routes(&capabilities, ibus_route_ready, |route| {
             route_allowed_by_policy(&policy, route)
@@ -211,6 +241,12 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     println!();
     println!("Automatic recommendation: {}", automatic.label);
     println!("  {}", automatic.detail);
+    if let Some(existing) = existing_backend {
+        println!("Existing configured typing route: {existing}.");
+        if existing != automatic.backend {
+            println!("Setup keeps this route by default. To switch to the automatic recommendation, pass `--mode recommended`.");
+        }
+    }
     println!("\nRanked routes (current session and policy):");
     for planned in &route_plan.routes {
         println!(
@@ -254,6 +290,18 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         setup_backend_for_mode(&mode, &capabilities, &policy)?
     } else if resume_pending {
         "ibus".to_owned()
+    } else if let Some(existing) = existing_backend {
+        if assume_yes
+            || apply_requested
+            || crate::prompt_yes_no(
+                &format!("Keep the existing {existing} typing route? [Y/n] "),
+                true,
+            )?
+        {
+            existing.to_owned()
+        } else {
+            prompt_mode_choice(&capabilities, &policy)?
+        }
     } else if assume_yes || apply_requested {
         automatic.backend
     } else {
@@ -1937,11 +1985,29 @@ pub(crate) fn live_explain_build_gate(
 mod policy_check_tests {
     use super::{
         active_managed_daemon_service, backend_route_json, match_executable_paths,
-        policy_check_findings, setup_can_apply_without_prompt, setup_test_trigger,
-        upgrade_check_runtime_action, upgrade_check_runtime_action_text, upgrade_health_failure,
-        upgrade_mutation_cli_identity_is_valid, upgrade_status_invoker_action,
+        policy_check_findings, setup_can_apply_without_prompt, setup_plan_actions,
+        setup_test_trigger, upgrade_check_runtime_action, upgrade_check_runtime_action_text,
+        upgrade_health_failure, upgrade_mutation_cli_identity_is_valid,
+        upgrade_status_invoker_action,
     };
     use wayexpand_core::{Config, OrganizationPolicy};
+
+    #[test]
+    fn read_only_ibus_setup_plan_discloses_possible_shared_registration_authorization() {
+        let actions = setup_plan_actions("ibus", false, false, false, false, false);
+        assert!(actions
+            .iter()
+            .any(|action| { action.contains("shared-manifest safety") }));
+        assert!(actions.iter().any(|action| {
+            action.contains("user-scoped shared registration")
+                && action.contains("administrator authorization")
+        }));
+
+        let explicitly_authorized = setup_plan_actions("ibus", true, false, true, false, false);
+        assert!(explicitly_authorized
+            .iter()
+            .any(|action| action.contains("explicitly authorized system-integration repair")));
+    }
 
     #[test]
     fn backend_route_json_does_not_conflate_trigger_check_with_applied_text() {

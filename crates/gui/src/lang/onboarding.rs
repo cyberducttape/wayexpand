@@ -8,9 +8,9 @@ texts! {
         "Funktioniert in der getesteten Anwendung",
         "Berfungsi di aplikasi yang diuji";
     outcome_safe_fallback =>
-        "Connected, not tested yet",
-        "Verbunden, noch nicht getestet",
-        "Terhubung, belum diuji";
+        "Configured, insertion not verified",
+        "Konfiguriert, Einfügen nicht verifiziert",
+        "Dikonfigurasi, penyisipan belum diverifikasi";
     outcome_setup_incomplete =>
         "Setup incomplete",
         "Einrichtung unvollständig",
@@ -98,6 +98,10 @@ texts! {
         "IBus engine registered",
         "IBus-Engine registriert",
         "Engine IBus terdaftar";
+    setup_check_manifest_scope =>
+        "Shared IBus engine uses a protected system executable",
+        "Die gemeinsame IBus-Engine nutzt eine geschützte Systemdatei",
+        "Engine IBus bersama memakai executable sistem yang terlindungi";
     setup_check_gnome_registered =>
         "GNOME input source registered",
         "GNOME-Eingabequelle registriert",
@@ -468,9 +472,9 @@ texts! {
         "Auslöser zuerst in WayExpand ausprobieren",
         "Coba pemicu di dalam WayExpand dulu";
     first_run_trigger_works_inside =>
-        "The trigger works inside WayExpand.",
-        "Der Auslöser funktioniert in WayExpand.",
-        "Pemicu berfungsi di dalam WayExpand.";
+        "Matcher preview: this rule matches locally. It does not verify keyboard input or text replacement in an application.",
+        "Matcher-Vorschau: Diese Regel passt lokal. Tastatureingabe und Textersetzung in einer Anwendung werden dadurch nicht verifiziert.",
+        "Pratinjau matcher: aturan ini cocok secara lokal. Ini tidak memverifikasi input keyboard atau penggantian teks di aplikasi.";
     first_run_troubleshooting_details =>
         "Troubleshooting details",
         "Details zur Fehlerbehebung",
