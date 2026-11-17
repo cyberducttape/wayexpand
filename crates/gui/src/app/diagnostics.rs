@@ -171,10 +171,37 @@ impl GuiApp {
         self.render_config_backup_dialog(ctx, palette);
     }
 
-    /// The plain answer to "why didn't my trigger expand?" for the keyboard
-    /// service, from its content-free status. IBus fields have their own
-    /// verdicts in the IBus section.
+    /// The prioritized answer to "why didn't my trigger expand?". Prefer the
+    /// shared route-readiness model used by the header and first-run guide;
+    /// use recent content-free route telemetry when that model has no pending
+    /// action to offer.
     pub(crate) fn render_why_card(&self, ui: &mut egui::Ui, palette: &Palette) {
+        // Use the same prioritized state model as the header and first-run
+        // guide. This keeps the diagnosis and its recommended action from
+        // disagreeing about the active route.
+        let situation = self.situation();
+        if let Some((problem, action)) = super::next_step::next_step(&situation) {
+            let answer = self.strings.problem_text(problem);
+            let instruction = self
+                .strings
+                .next_step_instruction(problem, situation.gnome_ibus);
+            let action_label = self.strings.action_label(action);
+            theme::section_header(ui, "", self.strings.why_title());
+            theme::card(ui, palette, |ui| {
+                ui.label(
+                    RichText::new(self.strings.why_intro())
+                        .small()
+                        .color(palette.muted),
+                );
+                ui.add(egui::Label::new(RichText::new(answer).color(palette.warning)).wrap());
+                ui.add(egui::Label::new(instruction).wrap());
+                ui.colored_label(
+                    palette.accent,
+                    format!("{}: {action_label}", self.strings.next_step_details()),
+                );
+            });
+            return;
+        }
         if self.daemon_reachable != Some(true)
             || runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin")
         {

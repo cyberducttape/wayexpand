@@ -14,9 +14,9 @@ impl Strings {
 
     pub(crate) fn why_intro(&self) -> &'static str {
         match self.lang {
-            Language::English => "Typing route (keyboard service), from its last two minutes. No typed text is recorded.",
-            Language::German => "Eingabeweg (Tastaturdienst), aus seinen letzten zwei Minuten. Getippter Text wird nicht gespeichert.",
-            Language::Indonesian => "Jalur pengetikan (layanan keyboard), dari dua menit terakhirnya. Teks yang diketik tidak dicatat.",
+            Language::English => "Current expansion diagnosis and next step. Typed text is never recorded.",
+            Language::German => "Aktuelle Diagnose und nächster Schritt. Getippter Text wird niemals gespeichert.",
+            Language::Indonesian => "Diagnosis ekspansi saat ini dan langkah berikutnya. Teks yang diketik tidak pernah dicatat.",
         }
     }
 

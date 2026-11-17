@@ -188,6 +188,78 @@ impl Strings {
             Language::Indonesian => "Detail",
         }
     }
+
+    /// The concrete follow-up for the one prioritized diagnosis. Keep this
+    /// separate from the button label: some problems need a user action in
+    /// the desktop before the button's live test can be meaningful.
+    pub fn next_step_instruction(&self, problem: Problem, gnome_ibus: bool) -> &'static str {
+        use Language::{English as En, German as De, Indonesian as Id};
+        match (problem, self.lang) {
+            (Problem::InputSourceNotSelected, En) if gnome_ibus => {
+                "Use Select WayExpand to activate it. If GNOME still has not selected it, choose it in Settings → Keyboard. Then run a live typing test. Quick Picker can copy a snippet for you to paste meanwhile."
+            }
+            (Problem::InputSourceNotSelected, De) if gnome_ibus => {
+                "Nutzen Sie „WayExpand auswählen“, um es zu aktivieren. Falls GNOME es weiterhin nicht auswählt, wählen Sie es unter Einstellungen → Tastatur aus. Führen Sie danach einen Live-Tipptest durch. Bis dahin können Sie ein Snippet mit dem Schnellwähler kopieren und einfügen."
+            }
+            (Problem::InputSourceNotSelected, Id) if gnome_ibus => {
+                "Gunakan Pilih WayExpand untuk mengaktifkannya. Jika GNOME masih belum memilihnya, pilih di Pengaturan → Keyboard. Lalu jalankan tes mengetik langsung. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel."
+            }
+            (Problem::InputSourceNotSelected, En) => {
+                "Select WayExpand in your desktop's input-method settings, then run a live typing test. Quick Picker can copy a snippet for you to paste meanwhile."
+            }
+            (Problem::InputSourceNotSelected, De) => {
+                "Wählen Sie WayExpand in den Eingabemethode-Einstellungen Ihres Desktops aus und führen Sie danach einen Live-Tipptest durch. Bis dahin können Sie ein Snippet mit dem Schnellwähler kopieren und einfügen."
+            }
+            (Problem::InputSourceNotSelected, Id) => {
+                "Pilih WayExpand di pengaturan metode input desktop Anda, lalu jalankan tes mengetik langsung. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel."
+            }
+            (Problem::ApplicationDeliveryUnverified, En) => {
+                "Run a real typing test in the affected app. Matcher preview checks only whether the rule matches; it does not prove that the app received the replacement."
+            }
+            (Problem::ApplicationDeliveryUnverified, De) => {
+                "Führen Sie einen echten Tipptest in der betroffenen App durch. Die Matcher-Vorschau prüft nur die Regel, nicht ob die App den Ersatztext erhalten hat."
+            }
+            (Problem::ApplicationDeliveryUnverified, Id) => {
+                "Jalankan tes mengetik sungguhan di aplikasi yang bermasalah. Pratinjau matcher hanya memeriksa kecocokan aturan, bukan apakah aplikasi menerima teks pengganti."
+            }
+            (Problem::FieldCannotReplace, En) => {
+                "This field does not provide text WayExpand can safely replace. Open Quick Picker in copy-only mode and paste the snippet."
+            }
+            (Problem::FieldCannotReplace, De) => {
+                "Dieses Feld stellt keinen Text bereit, den WayExpand sicher ersetzen kann. Öffnen Sie den Schnellwähler im Kopiermodus und fügen Sie das Snippet ein."
+            }
+            (Problem::FieldCannotReplace, Id) => {
+                "Kolom ini tidak menyediakan teks yang dapat diganti WayExpand dengan aman. Buka Quick Picker dalam mode salin saja, lalu tempel cuplikannya."
+            }
+            (Problem::Unsupported, En) => {
+                "This route cannot replace typed text here. Use Quick Picker in copy-only mode and paste the snippet."
+            }
+            (Problem::Unsupported, De) => {
+                "Dieser Eingabeweg kann hier keinen getippten Text ersetzen. Nutzen Sie den Schnellwähler im Kopiermodus und fügen Sie das Snippet ein."
+            }
+            (Problem::Unsupported, Id) => {
+                "Rute ini tidak dapat mengganti teks yang diketik di sini. Gunakan Quick Picker dalam mode salin saja, lalu tempel cuplikannya."
+            }
+            (Problem::NoTypingRoute, En) => {
+                "Configure an input route with guided setup. Quick Picker remains available for copy and paste."
+            }
+            (Problem::NoTypingRoute, De) => {
+                "Richten Sie mit der geführten Einrichtung einen Eingabeweg ein. Der Schnellwähler bleibt zum Kopieren und Einfügen verfügbar."
+            }
+            (Problem::NoTypingRoute, Id) => {
+                "Siapkan rute input melalui penyiapan terpandu. Quick Picker tetap tersedia untuk salin dan tempel."
+            }
+            (_, En) => {
+                "Follow the action shown here, then refresh this diagnosis. Quick Picker can copy a snippet for manual paste while expansion is unavailable."
+            }
+            (_, De) => {
+                "Führen Sie die angezeigte Aktion aus und aktualisieren Sie danach diese Diagnose. Solange die Ersetzung nicht verfügbar ist, können Sie ein Snippet mit dem Schnellwähler kopieren und einfügen."
+            }
+            (_, Id) => {
+                "Ikuti tindakan yang ditampilkan, lalu perbarui diagnosis ini. Quick Picker dapat menyalin cuplikan untuk ditempel secara manual selama ekspansi belum tersedia."
+            }
+        }
+    }
 }
 
 impl Strings {
