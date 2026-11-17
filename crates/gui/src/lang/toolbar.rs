@@ -137,6 +137,70 @@ impl Strings {
         }
     }
 
+    pub fn experience_label(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Workspace",
+            Language::Indonesian => "Ruang kerja",
+            Language::German => "Arbeitsbereich",
+        }
+    }
+
+    pub fn experience_everyday(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Everyday",
+            Language::Indonesian => "Sehari-hari",
+            Language::German => "Alltag",
+        }
+    }
+
+    pub fn experience_everyday_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Create, find, edit and test text snippets.",
+            Language::Indonesian => "Buat, cari, edit, dan uji cuplikan teks.",
+            Language::German => "Textbausteine erstellen, finden, bearbeiten und testen.",
+        }
+    }
+
+    pub fn experience_advanced(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Advanced",
+            Language::Indonesian => "Lanjutan",
+            Language::German => "Erweitert",
+        }
+    }
+
+    pub fn experience_advanced_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Application rules, forms, variables, profiles and imports.",
+            Language::Indonesian => "Aturan aplikasi, formulir, variabel, profil, dan impor.",
+            Language::German => "App-Regeln, Formulare, Variablen, Profile und Importe.",
+        }
+    }
+
+    pub fn experience_developer_admin(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Developer / administrator",
+            Language::Indonesian => "Pengembang / administrator",
+            Language::German => "Entwicklung / Administration",
+        }
+    }
+
+    pub fn experience_developer_admin_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Command-backed snippets, packs, policy and diagnostics.",
+            Language::Indonesian => "Cuplikan perintah, paket, kebijakan, dan diagnostik.",
+            Language::German => "Befehlsbausteine, Pakete, Richtlinien und Diagnose.",
+        }
+    }
+
+    pub fn set_picker_shortcut(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Set Quick Picker shortcut",
+            Language::Indonesian => "Atur pintasan Quick Picker",
+            Language::German => "Schnellwähler-Tastenkürzel festlegen",
+        }
+    }
+
     pub fn sync_library(&self) -> &'static str {
         match self.lang {
             Language::English => "Sync library",

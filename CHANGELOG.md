@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The GUI opens in an **Everyday** workspace centered on creating, finding,
+  editing, enabling and testing text snippets. A visible workspace switcher
+  exposes **Advanced** options for app rules, forms, variables, profiles and
+  imports, and a **Developer / administrator** workspace for packs and
+  diagnostics. The matcher test is open by default after onboarding, and the
+  Quick Picker shortcut is available from the main actions menu.
 - Automatic non-atomic replacements now have a hard eight-character output
   ceiling that cannot be raised by compatibility consent or
   `keystroke_max_chars`. Longer replacements are refused before deletion and

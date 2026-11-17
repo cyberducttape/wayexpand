@@ -3147,6 +3147,38 @@ fn indonesian_strings_are_translated_not_english_fallbacks() {
         english.reusable_snippet_search_hint()
     );
     assert_ne!(indonesian.try_live_draft(), english.try_live_draft());
+    assert_ne!(
+        indonesian.experience_everyday(),
+        english.experience_everyday()
+    );
+    assert_ne!(german.experience_advanced(), english.experience_advanced());
+    assert_ne!(
+        indonesian.experience_developer_admin_help(),
+        english.experience_developer_admin_help()
+    );
+}
+
+#[test]
+fn everyday_workspace_is_the_default_and_experience_levels_reveal_more_tools() {
+    assert_eq!(GuiExperience::default(), GuiExperience::Everyday);
+    assert!(!GuiExperience::Everyday.includes_advanced());
+    assert!(GuiExperience::Advanced.includes_advanced());
+    assert!(GuiExperience::DeveloperAdmin.includes_advanced());
+    assert!(!GuiExperience::Advanced.includes_developer_admin());
+    assert!(GuiExperience::DeveloperAdmin.includes_developer_admin());
+
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-everyday-default-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let app = GuiApp::load(path.clone()).unwrap();
+    assert_eq!(app.experience, GuiExperience::Everyday);
+    assert!(
+        app.try_live_open,
+        "matcher test should be visible by default"
+    );
+    fs::remove_file(path).unwrap();
 }
 
 fn failed_save_test_app(name: &str) -> (std::path::PathBuf, GuiApp) {

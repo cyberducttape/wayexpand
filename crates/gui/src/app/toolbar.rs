@@ -98,6 +98,54 @@ impl GuiApp {
                     });
                 }
             });
+        egui::Panel::top("experience_switcher")
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.surface)
+                    .inner_margin(egui::Margin::symmetric(18, 4))
+                    .stroke(egui::Stroke::NONE),
+            )
+            .show(root, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(self.strings.experience_label())
+                            .small()
+                            .color(palette.muted),
+                    );
+                    for (experience, label, help) in [
+                        (
+                            GuiExperience::Everyday,
+                            self.strings.experience_everyday(),
+                            self.strings.experience_everyday_help(),
+                        ),
+                        (
+                            GuiExperience::Advanced,
+                            self.strings.experience_advanced(),
+                            self.strings.experience_advanced_help(),
+                        ),
+                        (
+                            GuiExperience::DeveloperAdmin,
+                            self.strings.experience_developer_admin(),
+                            self.strings.experience_developer_admin_help(),
+                        ),
+                    ] {
+                        let selected = self.experience == experience;
+                        if ui
+                            .selectable_label(selected, label)
+                            .on_hover_text(help)
+                            .clicked()
+                        {
+                            self.experience = experience;
+                            self.editor_advanced = match experience {
+                                GuiExperience::Everyday => None,
+                                GuiExperience::Advanced | GuiExperience::DeveloperAdmin => {
+                                    Some(true)
+                                }
+                            };
+                        }
+                    }
+                });
+            });
     }
 
     pub(crate) fn render_toolbar_brand(&mut self, ui: &mut egui::Ui, palette: &Palette) {
@@ -216,7 +264,11 @@ impl GuiApp {
         // Workspace switching is a frequent action, so keep it directly in
         // the toolbar as well as in the profile-management menu. The list is
         // still sourced from the CLI's validated profile inventory.
-        if !compact && !self.profile_loaded && self.profile_receiver.is_none() {
+        if self.experience.includes_advanced()
+            && !compact
+            && !self.profile_loaded
+            && self.profile_receiver.is_none()
+        {
             self.start_profile_operation(ProfileOperation::List);
         }
         let runtime_profile = runtime_selected_profile(&self.daemon_status);
@@ -233,7 +285,7 @@ impl GuiApp {
         // there is something to switch between. Management stays in the menu.
         let has_profiles =
             !self.profiles.is_empty() || runtime_profile.is_some() || self.active_profile.is_some();
-        if !compact && has_profiles {
+        if self.experience.includes_advanced() && !compact && has_profiles {
             ui.menu_button(active_profile_label, |ui| {
                 if self.profile_receiver.is_some() {
                     ui.horizontal(|ui| {
@@ -275,173 +327,184 @@ impl GuiApp {
             });
         }
         let more_actions = self.strings.more_actions();
+        let advanced_experience = self.experience.includes_advanced();
+        let developer_experience = self.experience.includes_developer_admin();
         let actions_response = ui
             .menu_button(RichText::new("☰").size(18.0), |ui| {
-                ui.menu_button(self.strings.profiles(), |ui| {
-                    if !self.profile_loaded && self.profile_receiver.is_none() {
-                        self.start_profile_operation(ProfileOperation::List);
-                    }
-                    if let Some(active) = self.active_profile.as_deref() {
-                        ui.label(format!("{}: {active}", self.strings.profiles()));
-                    }
-                    if let Some(config_path) = runtime::status_field(&self.daemon_status, "config")
-                    {
-                        let config_path = std::path::Path::new(&config_path);
-                        let is_profile = config_path
-                            .parent()
-                            .and_then(std::path::Path::file_name)
-                            .is_some_and(|name| name == "profiles");
-                        if is_profile {
-                            if let Some(name) =
-                                config_path.file_stem().and_then(|name| name.to_str())
-                            {
-                                ui.label(self.strings.profile_automatic_active(name));
+                if advanced_experience {
+                    ui.menu_button(self.strings.profiles(), |ui| {
+                        if !self.profile_loaded && self.profile_receiver.is_none() {
+                            self.start_profile_operation(ProfileOperation::List);
+                        }
+                        if let Some(active) = self.active_profile.as_deref() {
+                            ui.label(format!("{}: {active}", self.strings.profiles()));
+                        }
+                        if let Some(config_path) =
+                            runtime::status_field(&self.daemon_status, "config")
+                        {
+                            let config_path = std::path::Path::new(&config_path);
+                            let is_profile = config_path
+                                .parent()
+                                .and_then(std::path::Path::file_name)
+                                .is_some_and(|name| name == "profiles");
+                            if is_profile {
+                                if let Some(name) =
+                                    config_path.file_stem().and_then(|name| name.to_str())
+                                {
+                                    ui.label(self.strings.profile_automatic_active(name));
+                                }
                             }
                         }
-                    }
-                    match runtime::status_field(&self.daemon_status, "config_state").as_deref() {
-                        Some("loading") => {
-                            ui.label(self.strings.profile_config_loading());
+                        match runtime::status_field(&self.daemon_status, "config_state").as_deref()
+                        {
+                            Some("loading") => {
+                                ui.label(self.strings.profile_config_loading());
+                            }
+                            Some("reload-rejected") => {
+                                ui.colored_label(
+                                    palette.danger,
+                                    self.strings.profile_config_rejected(),
+                                );
+                            }
+                            _ => {}
                         }
-                        Some("reload-rejected") => {
-                            ui.colored_label(
-                                palette.danger,
-                                self.strings.profile_config_rejected(),
-                            );
+                        if self.profile_receiver.is_some() {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(self.strings.profile_loading());
+                            });
                         }
-                        _ => {}
-                    }
-                    if self.profile_receiver.is_some() {
+                        let profiles = self.profiles.clone();
+                        for profile in &profiles {
+                            let active = self.active_profile.as_deref() == Some(&profile.name);
+                            let label = if profile.valid {
+                                profile.name.clone()
+                            } else {
+                                format!("{} · {}", profile.name, self.strings.profile_invalid())
+                            };
+                            if ui
+                                .add_enabled(
+                                    profile.valid && !active && self.profile_receiver.is_none(),
+                                    egui::Button::new(if active {
+                                        format!("✓ {label}")
+                                    } else {
+                                        label
+                                    }),
+                                )
+                                .clicked()
+                            {
+                                self.request_action(PendingAction::SwitchProfile(
+                                    profile.name.clone(),
+                                ));
+                                ui.close();
+                            }
+                        }
+                        if profiles.is_empty() && self.profile_loaded {
+                            ui.label(self.strings.no_profiles());
+                        }
+                        ui.separator();
                         ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(self.strings.profile_loading());
+                            ui.add(
+                                TextEdit::singleline(&mut self.profile_name_draft)
+                                    .hint_text(self.strings.profile_name_hint())
+                                    .desired_width(120.0),
+                            );
+                            let name = self.profile_name_draft.trim().to_owned();
+                            if ui
+                                .add_enabled(
+                                    !name.is_empty() && self.profile_receiver.is_none(),
+                                    egui::Button::new(self.strings.create_profile()),
+                                )
+                                .clicked()
+                            {
+                                self.request_action(PendingAction::CreateProfile(name));
+                                ui.close();
+                            }
                         });
-                    }
-                    let profiles = self.profiles.clone();
-                    for profile in &profiles {
-                        let active = self.active_profile.as_deref() == Some(&profile.name);
-                        let label = if profile.valid {
-                            profile.name.clone()
-                        } else {
-                            format!("{} · {}", profile.name, self.strings.profile_invalid())
-                        };
-                        if ui
-                            .add_enabled(
-                                profile.valid && !active && self.profile_receiver.is_none(),
-                                egui::Button::new(if active {
-                                    format!("✓ {label}")
-                                } else {
-                                    label
-                                }),
-                            )
-                            .clicked()
-                        {
-                            self.request_action(PendingAction::SwitchProfile(profile.name.clone()));
-                            ui.close();
-                        }
-                    }
-                    if profiles.is_empty() && self.profile_loaded {
-                        ui.label(self.strings.no_profiles());
-                    }
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            TextEdit::singleline(&mut self.profile_name_draft)
-                                .hint_text(self.strings.profile_name_hint())
-                                .desired_width(120.0),
-                        );
-                        let name = self.profile_name_draft.trim().to_owned();
-                        if ui
-                            .add_enabled(
-                                !name.is_empty() && self.profile_receiver.is_none(),
-                                egui::Button::new(self.strings.create_profile()),
-                            )
-                            .clicked()
-                        {
-                            self.request_action(PendingAction::CreateProfile(name));
-                            ui.close();
-                        }
-                    });
-                    ui.separator();
-                    ui.label(self.strings.profile_app_defaults());
-                    ui.label(self.strings.profile_app_id_help());
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            TextEdit::singleline(&mut self.profile_app_id_draft)
-                                .hint_text(self.strings.profile_app_id_hint())
-                                .desired_width(170.0),
-                        );
-                        let selected = self
-                            .profile_app_target
-                            .as_deref()
-                            .unwrap_or(self.strings.profile_select_app_target());
-                        egui::ComboBox::from_id_salt("profile-app-target")
-                            .selected_text(selected)
-                            .show_ui(ui, |ui| {
-                                for profile in self.profiles.iter().filter(|profile| profile.valid)
-                                {
-                                    ui.selectable_value(
-                                        &mut self.profile_app_target,
-                                        Some(profile.name.clone()),
-                                        &profile.name,
-                                    );
-                                }
-                            });
-                    });
-                    let app_id = self.profile_app_id_draft.trim().to_owned();
-                    let target_profile = self.profile_app_target.clone();
-                    if ui
-                        .add_enabled(
-                            !app_id.is_empty()
-                                && target_profile.is_some()
-                                && self.profile_receiver.is_none(),
-                            egui::Button::new(self.strings.profile_assign_app()),
-                        )
-                        .clicked()
-                    {
-                        if let Some(profile) = target_profile {
-                            self.start_profile_operation(ProfileOperation::AssignApp {
-                                app_id,
-                                profile,
-                            });
-                        }
-                    }
-                    egui::ScrollArea::vertical()
-                        .max_height(140.0)
-                        .show(ui, |ui| {
-                            for assignment in self.profile_app_assignments.clone() {
-                                ui.horizontal(|ui| {
-                                    ui.small(format!(
-                                        "{} → {}",
-                                        assignment.app_id, assignment.profile
-                                    ));
-                                    if ui
-                                        .add_enabled(
-                                            self.profile_receiver.is_none(),
-                                            egui::Button::new(self.strings.profile_unassign_app()),
-                                        )
-                                        .clicked()
+                        ui.separator();
+                        ui.label(self.strings.profile_app_defaults());
+                        ui.label(self.strings.profile_app_id_help());
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                TextEdit::singleline(&mut self.profile_app_id_draft)
+                                    .hint_text(self.strings.profile_app_id_hint())
+                                    .desired_width(170.0),
+                            );
+                            let selected = self
+                                .profile_app_target
+                                .as_deref()
+                                .unwrap_or(self.strings.profile_select_app_target());
+                            egui::ComboBox::from_id_salt("profile-app-target")
+                                .selected_text(selected)
+                                .show_ui(ui, |ui| {
+                                    for profile in
+                                        self.profiles.iter().filter(|profile| profile.valid)
                                     {
-                                        self.start_profile_operation(
-                                            ProfileOperation::UnassignApp(assignment.app_id),
+                                        ui.selectable_value(
+                                            &mut self.profile_app_target,
+                                            Some(profile.name.clone()),
+                                            &profile.name,
                                         );
                                     }
                                 });
-                            }
                         });
-                    if self.profile_error.is_some() {
-                        ui.colored_label(
-                            palette.danger,
-                            self.profile_error.clone().unwrap_or_default(),
-                        );
-                    }
-                    if self.profile_receiver.is_none()
-                        && ui.button(self.strings.refresh_profiles()).clicked()
-                    {
-                        self.profile_loaded = false;
-                        self.start_profile_operation(ProfileOperation::List);
-                    }
-                });
+                        let app_id = self.profile_app_id_draft.trim().to_owned();
+                        let target_profile = self.profile_app_target.clone();
+                        if ui
+                            .add_enabled(
+                                !app_id.is_empty()
+                                    && target_profile.is_some()
+                                    && self.profile_receiver.is_none(),
+                                egui::Button::new(self.strings.profile_assign_app()),
+                            )
+                            .clicked()
+                        {
+                            if let Some(profile) = target_profile {
+                                self.start_profile_operation(ProfileOperation::AssignApp {
+                                    app_id,
+                                    profile,
+                                });
+                            }
+                        }
+                        egui::ScrollArea::vertical()
+                            .max_height(140.0)
+                            .show(ui, |ui| {
+                                for assignment in self.profile_app_assignments.clone() {
+                                    ui.horizontal(|ui| {
+                                        ui.small(format!(
+                                            "{} → {}",
+                                            assignment.app_id, assignment.profile
+                                        ));
+                                        if ui
+                                            .add_enabled(
+                                                self.profile_receiver.is_none(),
+                                                egui::Button::new(
+                                                    self.strings.profile_unassign_app(),
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.start_profile_operation(
+                                                ProfileOperation::UnassignApp(assignment.app_id),
+                                            );
+                                        }
+                                    });
+                                }
+                            });
+                        if self.profile_error.is_some() {
+                            ui.colored_label(
+                                palette.danger,
+                                self.profile_error.clone().unwrap_or_default(),
+                            );
+                        }
+                        if self.profile_receiver.is_none()
+                            && ui.button(self.strings.refresh_profiles()).clicked()
+                        {
+                            self.profile_loaded = false;
+                            self.start_profile_operation(ProfileOperation::List);
+                        }
+                    });
+                }
                 if ui.button(self.strings.reload()).clicked() {
                     self.request_action(PendingAction::Reload);
                     ui.close();
@@ -469,7 +532,12 @@ impl GuiApp {
                     self.open_getting_started();
                     ui.close();
                 }
-                if self.library_is_synchronized()
+                if ui.button(self.strings.set_picker_shortcut()).clicked() {
+                    self.set_picker_shortcut();
+                    ui.close();
+                }
+                if advanced_experience
+                    && self.library_is_synchronized()
                     && ui
                         .add_enabled(
                             self.sync_task.is_none(),
@@ -480,16 +548,20 @@ impl GuiApp {
                     self.start_sync();
                     ui.close();
                 }
-                if ui.button(self.strings.import_espanso()).clicked() {
-                    self.import_open = true;
-                    self.import_preview = None;
-                    ui.close();
+                if advanced_experience {
+                    if ui.button(self.strings.import_espanso()).clicked() {
+                        self.import_open = true;
+                        self.import_preview = None;
+                        ui.close();
+                    }
                 }
-                if ui.button(self.strings.review_packs()).clicked() {
-                    self.pack_dialog_open = true;
-                    self.pack_review = None;
-                    self.pack_error = None;
-                    ui.close();
+                if developer_experience {
+                    if ui.button(self.strings.review_packs()).clicked() {
+                        self.pack_dialog_open = true;
+                        self.pack_review = None;
+                        self.pack_error = None;
+                        ui.close();
+                    }
                 }
                 ui.separator();
                 if ui.button(self.strings.settings()).clicked() {

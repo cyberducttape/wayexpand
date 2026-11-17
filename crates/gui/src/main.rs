@@ -571,6 +571,10 @@ struct GuiApp {
     /// The user's basic/advanced editor choice this session; `None` follows
     /// the snippet (advanced options open when it uses them).
     editor_advanced: Option<bool>,
+    /// The interface's default level of detail. Everyday is intentionally
+    /// the first-run default; advanced configuration remains available from
+    /// the visible experience switcher.
+    experience: GuiExperience,
     /// Whether the diagnostics overview shows its technical evidence grid.
     diagnostics_details_open: bool,
     /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
@@ -730,6 +734,24 @@ struct PendingSave {
 enum SettingsTab {
     Appearance,
     Engine,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum GuiExperience {
+    #[default]
+    Everyday,
+    Advanced,
+    DeveloperAdmin,
+}
+
+impl GuiExperience {
+    fn includes_advanced(self) -> bool {
+        !matches!(self, Self::Everyday)
+    }
+
+    fn includes_developer_admin(self) -> bool {
+        matches!(self, Self::DeveloperAdmin)
+    }
 }
 
 /// A detection worker cannot be forcefully cancelled while it is inside a
@@ -947,8 +969,12 @@ impl GuiApp {
             form_preview_values: std::collections::HashMap::new(),
             // Collapsed by default so the snippet form gets the window's
             // height; its header stays visible as a one-line bar.
-            try_live_open: false,
+            // The in-process matcher check is useful even when a desktop
+            // route is not set up yet, so make it visible in the everyday
+            // workspace instead of hiding it behind an extra click.
+            try_live_open: true,
             editor_advanced: None,
+            experience: GuiExperience::Everyday,
             diagnostics_details_open: false,
             setup_task: None,
             sync_task: None,
@@ -1077,7 +1103,12 @@ impl eframe::App for GuiApp {
         self.render_status_bar(root, &palette);
         self.render_snippet_list(root, &palette);
         self.render_editor_actions(root, &palette);
-        self.render_try_live_panel(root, &palette);
+        // First run already has a dedicated, guided matcher/desktop test.
+        // Avoid showing a second preview panel until the user reaches the
+        // everyday snippet workspace.
+        if !self.onboarding_visible {
+            self.render_try_live_panel(root, &palette);
+        }
         self.render_editor(root, &palette);
         self.render_pending_action(ctx, &palette);
         self.render_evdev_setup(ctx, &palette);
