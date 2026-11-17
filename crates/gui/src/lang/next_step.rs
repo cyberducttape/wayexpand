@@ -75,13 +75,13 @@ impl Strings {
             }
             (Problem::InputSourceNotSelected, Id) => "WayExpand bukan metode masukan yang dipilih.",
             (Problem::InputStatusPending, En) => {
-                "WayExpand is checking whether the desktop selected its input method."
+                "WayExpand cannot confirm the current input-method setup yet."
             }
             (Problem::InputStatusPending, De) => {
-                "WayExpand prüft, ob der Desktop die Eingabemethode ausgewählt hat."
+                "WayExpand kann die aktuelle Einrichtung der Eingabemethode noch nicht bestätigen."
             }
             (Problem::InputStatusPending, Id) => {
-                "WayExpand sedang memeriksa apakah desktop memilih metode masukannya."
+                "WayExpand belum dapat memastikan penyiapan metode input saat ini."
             }
             (Problem::IbusEngineUnavailable, En) => {
                 "The selected WayExpand input source has no running engine."
@@ -252,6 +252,15 @@ impl Strings {
     pub fn next_step_instruction(&self, problem: Problem, gnome_ibus: bool) -> &'static str {
         use Language::{English as En, German as De, Indonesian as Id};
         match (problem, self.lang) {
+            (Problem::InputStatusPending, En) => {
+                "Refresh this check. If it remains unknown, open Diagnostics → IBus to see which registration, selection, engine, or consent check needs attention. Quick Picker can copy a snippet for manual paste meanwhile."
+            }
+            (Problem::InputStatusPending, De) => {
+                "Aktualisieren Sie diese Prüfung. Bleibt der Status unbekannt, öffnen Sie Diagnose → IBus, um zu sehen, ob Registrierung, Auswahl, Engine oder Zustimmung betroffen ist. Bis dahin kann der Schnellwähler ein Snippet zum manuellen Einfügen kopieren."
+            }
+            (Problem::InputStatusPending, Id) => {
+                "Perbarui pemeriksaan ini. Jika tetap tidak diketahui, buka Diagnostik → IBus untuk melihat pemeriksaan pendaftaran, pemilihan, mesin, atau izin yang perlu ditangani. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel manual."
+            }
             (Problem::InputSourceNotSelected, En) if gnome_ibus => {
                 "Text expansion is unavailable because GNOME has not selected WayExpand. Select it in Settings → Keyboard or the input-source menu, then run a live typing test. Quick Picker can copy a snippet for you to paste meanwhile."
             }
