@@ -827,6 +827,7 @@ mod tests {
                 "matching_unavailable_reason=none\ninput_events_total=9\n\
                  recent_expansion_outcomes=[{\"at_unix\":4,\"completion\":\"input arrived before output\"}]\n",
             ),
+            terminal_paste_last_failure: None,
         };
         let value = report_json(
             Some(&route),
