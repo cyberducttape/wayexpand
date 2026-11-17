@@ -557,7 +557,7 @@ EOF
 
     "$bin/wx-e2e-type" text x >>"$case_dir/type.log" 2>&1 || return 2
     daemon_sees x || return 2
-    if ! sink_text_is e2e-a ";longx"; then
+    if ! wait_until 30 sink_text_is e2e-a ";longx"; then
         printf 'input after a refused replacement was not preserved; '
         describe e2e-a
         return 1

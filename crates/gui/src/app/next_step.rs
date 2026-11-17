@@ -166,9 +166,7 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
                 }
                 O::NotApplied => Some((Problem::OutputNotApplied, Action::InspectText)),
                 O::BlockedByPolicy => Some((Problem::OutputBlockedByPolicy, Action::InspectText)),
-                O::InterruptedByTyping => {
-                    Some((Problem::OutputInterrupted, Action::TestInApplication))
-                }
+                O::InterruptedByTyping => Some((Problem::OutputInterrupted, Action::InspectText)),
                 O::SnippetActionFailed => {
                     Some((Problem::SnippetActionFailed, Action::ReviewSnippet))
                 }
@@ -354,6 +352,7 @@ impl GuiApp {
         };
         let matching_block =
             runtime::status_field(&self.daemon_status, "matching_unavailable_reason")
+                .as_deref()
                 .and_then(wayexpand_core::MatchingBlock::from_reason);
         Situation {
             daemon_reachable: self.daemon_reachable,
@@ -386,7 +385,7 @@ impl GuiApp {
             return None;
         }
         let status = wayexpand_core::DaemonStatus::parse(&self.daemon_status);
-        if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) {
+        if status.status_schema() != Some(wayexpand_core::CONTROL_STATUS_SCHEMA) {
             return None;
         }
         let diagnosis = wayexpand_core::ExpansionDiagnosis::from_status(&status);

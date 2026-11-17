@@ -799,6 +799,7 @@ impl GuiApp {
                 | P::IbusEngineUnavailable
                 | P::InputStatusStale
                 | P::ReplacementNotAllowed => (S::NeedsSetup, palette.warning),
+                P::StatusUnknown | P::RouteStatusUnknown => (S::Checking, palette.muted),
             };
         }
         let ibus_route = ibus_only || control_only && self.ibus_route_active();
