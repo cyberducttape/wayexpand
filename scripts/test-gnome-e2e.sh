@@ -115,7 +115,7 @@ replacement = "expanded"
 
 [[expansion]]
 trigger = ";unicode"
-replacement = "Grüße 世界 🖥️"
+replacement = "Grüße 世界"
 EOF
 chmod 0700 "$work/config" "$work/config/wayexpand"
 chmod 0600 "$work/config/wayexpand/expansions.toml"
@@ -878,9 +878,9 @@ while :; do
 done
 
 run_gtk_ibus_case insertion ';e2e' expanded false
-run_gtk_ibus_case unicode ';unicode' 'Grüße 世界 🖥️' false
+run_gtk_ibus_case unicode ';unicode' 'Grüße 世界' false
 run_gtk_ibus_case gtk4-insertion ';e2e' expanded false 4
-run_gtk_ibus_case gtk4-unicode ';unicode' 'Grüße 世界 🖥️' false 4
+run_gtk_ibus_case gtk4-unicode ';unicode' 'Grüße 世界' false 4
 run_qt_xim_case() {
     case_name=$1
     input=$2

@@ -291,12 +291,13 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     } else if resume_pending {
         "ibus".to_owned()
     } else if let Some(existing) = existing_backend {
-        if assume_yes || apply_requested {
-            existing.to_owned()
-        } else if crate::prompt_yes_no(
-            &format!("Keep the existing {existing} typing route? [Y/n] "),
-            true,
-        )? {
+        if assume_yes
+            || apply_requested
+            || crate::prompt_yes_no(
+                &format!("Keep the existing {existing} typing route? [Y/n] "),
+                true,
+            )?
+        {
             existing.to_owned()
         } else {
             prompt_mode_choice(&capabilities, &policy)?

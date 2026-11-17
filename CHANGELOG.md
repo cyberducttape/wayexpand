@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The headless GNOME GTK Unicode acceptance case now uses an eight-character
+  replacement, within the route's non-atomic safety ceiling. KWin E2E cases
+  now assert that oversized output is rejected before changing the target,
+  including when a larger configured limit is requested.
 - The GUI's next-step adviser now treats a connected, consented input route as
   **not yet verified** until a user confirms an insertion in a real
   application. Its *Test in an app* action opens the existing desktop test;
