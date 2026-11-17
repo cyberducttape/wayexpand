@@ -1173,7 +1173,13 @@ jobs:
   package-smoke:
     name: Package Install Smoke (${{ matrix.image }})
     needs: [change-scope, packaging]
-    if: needs.change-scope.outputs.integration == 'true'
+    # Each image is a required check. A job skipped at job level reports one
+    # unexpanded "Package Install Smoke (${{ matrix.image }})" instead, which
+    # leaves the three required checks missing and blocks docs-only pull
+    # requests forever. So the matrix always expands and the steps skip when
+    # nothing that affects packages changed. With such changes, a failed
+    # package build still skips this job and keeps the merge blocked.
+    if: ${{ !cancelled() && (needs.change-scope.outputs.integration != 'true' || needs.packaging.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -1190,14 +1196,20 @@ jobs:
           - image: fedora:45
             package: rpm
     steps:
+      - name: Nothing that affects packages changed
+        if: needs.change-scope.outputs.integration != 'true'
+        run: echo 'Skipped because this change does not affect the packages.'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.change-scope.outputs.integration == 'true'
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.change-scope.outputs.integration == 'true'
         with:
           name: ci-packages
           path: dist
       - name: Upgrade, rollback, reinstall, and remove the package
+        if: needs.change-scope.outputs.integration == 'true'
         env:
           WAYEXPAND_PACKAGE_SMOKE_DISPOSABLE: "1"
         run: |
