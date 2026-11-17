@@ -313,12 +313,15 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
         }
         Some(true) => {}
     }
-    // The daemon's explicit matching block is stronger evidence than a
-    // missing build identity. This also keeps a paused route from being
-    // mislabeled as an unverified or unknown service.
+    // A known pause is actionable regardless of whether this build has a
+    // route-state record. Do not let missing route telemetry hide the Resume
+    // action from the user's diagnosis.
     if s.paused {
         return Some((Problem::Paused, Action::Resume));
     }
+    // The daemon's explicit matching block is stronger evidence than a
+    // missing build identity and keeps a blocked route from being mislabeled
+    // as an unverified or unknown service.
     match s.build {
         Some(runtime::DaemonBuildState::RestartRequired) => {
             return Some((Problem::RestartNeeded, Action::Restart));
@@ -734,7 +737,10 @@ mod tests {
 
     #[test]
     fn unknown_general_state_is_not_claimed_but_gnome_diagnostics_get_a_refresh_action() {
-        assert_eq!(next_step(&Situation::default()), None);
+        assert_eq!(
+            next_step(&Situation::default()),
+            Some((Problem::StatusUnknown, Action::CheckAgain))
+        );
         assert_eq!(
             next_step(&Situation {
                 gnome_ibus: true,

@@ -2587,7 +2587,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     );
     // The local matcher check above is reported, but never as a desktop
     // verification.
-    assert!(guide_semantics.contains("Matcher preview matched."));
+    assert!(guide_semantics.contains("Matcher preview: this rule matches locally."));
     assert!(!guide_semantics.contains("Working in tested application"));
     assert!(!guide_semantics.contains("Verified working: yes"));
     // The copy-and-paste fallback is always offered until a real test passes.
@@ -3778,14 +3778,24 @@ fn kde_header_requires_selected_engine_and_fresh_process_evidence() {
     app.diagnostics_checked_at = Some(Instant::now());
     app.ibus_route = Some(IbusChainReport {
         desktop: IbusDesktop::KdeWayland,
-        checks: vec![IbusCheck {
-            id: "selected",
-            title: "Engine selected",
-            state: IbusCheckState::Warn,
-            problem_id: Some("WX-IBUS-002"),
-            detail: "another engine is selected".into(),
-            fix: Some("select WayExpand".into()),
-        }],
+        checks: vec![
+            IbusCheck {
+                id: "registered",
+                title: "Engine registered",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "registered".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "selected",
+                title: "Engine selected",
+                state: IbusCheckState::Warn,
+                problem_id: Some("WX-IBUS-002"),
+                detail: "another engine is selected".into(),
+                fix: Some("select WayExpand".into()),
+            },
+        ],
         activity: Some(live_ibus_reading(pid, started)),
     });
     assert!(!app.ibus_route_active());
@@ -3797,7 +3807,7 @@ fn kde_header_requires_selected_engine_and_fresh_process_evidence() {
         ))
     );
 
-    app.ibus_route.as_mut().unwrap().checks[0].state = IbusCheckState::Pass;
+    app.ibus_route.as_mut().unwrap().checks[1].state = IbusCheckState::Pass;
     app.diagnostics_checked_at = Some(Instant::now() - std::time::Duration::from_secs(61));
     assert!(!app.ibus_route_active());
     assert_eq!(
@@ -3829,6 +3839,7 @@ fn gnome_route_readiness_follows_the_engine_not_the_companion_daemon() {
         desktop: IbusDesktop::Gnome,
         checks: vec![
             check("gnome-source-registered"),
+            check("registered"),
             check("gnome-source-active"),
             check("selected"),
             check("consent"),
@@ -4426,6 +4437,14 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
         desktop: IbusDesktop::KdeWayland,
         checks: vec![
             IbusCheck {
+                id: "registered",
+                title: "Engine registered",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "registered".into(),
+                fix: None,
+            },
+            IbusCheck {
                 id: "selected",
                 title: "Engine selected",
                 state: IbusCheckState::Pass,
@@ -4450,6 +4469,14 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
     app.ibus_route = Some(IbusChainReport {
         desktop: IbusDesktop::KdeWayland,
         checks: vec![
+            IbusCheck {
+                id: "registered",
+                title: "Engine registered",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "registered".into(),
+                fix: None,
+            },
             IbusCheck {
                 id: "selected",
                 title: "Engine selected",
@@ -4627,6 +4654,11 @@ fn diagnostics_answer_why_a_trigger_did_not_expand() {
         "{semantics}"
     );
     assert!(semantics.contains("WayExpand is paused."), "{semantics}");
+    assert!(
+        semantics.contains("Select Resume in the menu at the top of the window"),
+        "{semantics}"
+    );
+    assert!(semantics.contains("Resume"), "{semantics}");
 
     app.daemon_status = "running\nsource=evdev\nbackend=libei\n\
         matching_unavailable_reason=application_scope_denied\nterminal_apps_only=true\n\

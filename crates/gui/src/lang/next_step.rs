@@ -279,6 +279,15 @@ impl Strings {
     pub fn next_step_instruction(&self, problem: Problem, gnome_ibus: bool) -> &'static str {
         use Language::{English as En, German as De, Indonesian as Id};
         match (problem, self.lang) {
+            (Problem::Paused, En) => {
+                "Select Resume in the menu at the top of the window, then retry your trigger. Quick Picker remains available for copy and paste."
+            }
+            (Problem::Paused, De) => {
+                "Wählen Sie oben im Fenstermenü „Fortsetzen“ und versuchen Sie den Trigger erneut. Der Schnellwähler bleibt zum Kopieren und Einfügen verfügbar."
+            }
+            (Problem::Paused, Id) => {
+                "Pilih Lanjutkan di menu bagian atas jendela, lalu coba pemicu lagi. Quick Picker tetap tersedia untuk menyalin dan menempel."
+            }
             (Problem::InputStatusPending, En) => {
                 "Refresh this check. If it remains unknown, open Diagnostics → IBus to see which registration, selection, engine, or consent check needs attention. Quick Picker can copy a snippet for manual paste meanwhile."
             }
