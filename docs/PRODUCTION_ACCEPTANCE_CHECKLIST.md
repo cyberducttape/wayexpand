@@ -45,10 +45,12 @@ session evidence; unit tests alone do not satisfy them.
       (8 characters, about 100 ms, by default), and clipboard/manual paste
       when the active route cannot meet those conditions. The setting can
       raise the keysym protocol ceiling for insert-only workflows, but a hard
-      eight-character ceiling now applies to every automatic non-atomic
-      replacement regardless of consent or configured limit. Longer
-      replacements use clipboard/manual paste. The throughput estimate is not
-      certification evidence.
+      eight-character ceiling applies to paced synthetic-key replacement.
+      A configured terminal clipboard-paste route can submit a longer payload
+      as one paste operation, but trigger deletion remains non-atomic and
+      requires the same compatibility consent and focus checks. Longer
+      replacements without that route use clipboard/manual paste. The
+      throughput estimate is not certification evidence.
 - [ ] Pass a compositor-specific integration matrix. See
       [CERTIFICATION_MATRIX](CERTIFICATION_MATRIX.md).
 - [ ] Record zero unintended deletions, duplicate insertions, or wrong-window

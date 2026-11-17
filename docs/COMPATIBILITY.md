@@ -756,6 +756,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "terminal_paste_total": 0,
   "terminal_paste_fallbacks_total": 0,
   "terminal_paste_unread_total": 0,
+  "terminal_paste_last_failure": "none",
   "input_events_total": 42,
   "output_reconnect_total": 0,
   "input_reconnect_total": 0,
@@ -850,6 +851,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `terminal_paste_total` (integer): Replacements the focused terminal read from the clipboard since daemon start. Added in status schema 44.
 - `terminal_paste_fallbacks_total` (integer): Pastes that could not start (no data control, or a clipboard holding non-text data) and were typed instead. Added in status schema 44.
 - `terminal_paste_unread_total` (integer): Paste keys pressed that the terminal never answered by reading the clipboard; such outcomes are uncertain. Added in status schema 44.
+- `terminal_paste_last_failure` (string): Content-free failure category from the latest output transaction, or `none`. Categories distinguish trigger-erasure focus refusal, EIS device/disconnect/backlog/flush failures, cancellation, input interruption, safety-check failure, and paste-key failure. It never contains an error string or text content. Added in status contract version 26.
 - `input_events_total` (integer): Count of text/key/backspace/delimiter events accepted by the matching engine since daemon start. It contains no key or text values and is intended for sanitized live diagnostics. Added in status schema 27.
 - `evdev_raw_key_events_total` (integer): Count of raw key press, release, and repeat events processed by the evdev source since daemon start. It contains no keycodes or text and distinguishes device activity from matcher input. Added in status schema 34.
 - `evdev_layout_unavailable_key_events_total` (integer): Count of evdev key events discarded because no trustworthy active keyboard layout snapshot was available. Added in status schema 34.
@@ -1164,10 +1166,13 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 - `Settings::keystroke_max_chars` (integer 1–5000, default 8, omitted from
   saved TOML at the default) — the longest insert-only payload a keystroke-
   typed route (the libei keysym fallback) accepts. Automatic trigger
-  replacement on any non-atomic route has a separate hard eight-character
+  paced synthetic-key trigger replacement has a separate hard eight-character
   output ceiling that cannot be raised by this setting or compatibility
-  consent; longer output is refused before the trigger is erased. It is
-  reported as `inject_max_text_chars`. Older
+  consent; longer output is refused before the trigger is erased. A configured
+  terminal clipboard-paste route may carry a longer payload as one paste
+  operation, but trigger deletion remains non-atomic and still requires the
+  same compatibility consent and focus checks. It is reported as
+  `inject_max_text_chars`. Older
   readers that reject unknown fields will not load a config that sets it.
 - `Settings::terminal_apps` (array of scope filters, default empty, omitted
   from saved TOML when empty) — terminal apps may use `app_id_exact:` (the

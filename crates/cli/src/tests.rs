@@ -940,13 +940,14 @@ fn status_json_matches_documented_stable_contract() {
          terminal_paste=off\n\
          terminal_paste_total=0\n\
          terminal_paste_fallbacks_total=0\n\
-         terminal_paste_unread_total=0";
+         terminal_paste_unread_total=0\n\
+         terminal_paste_last_failure=none";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
-    assert_eq!(contract["schema_version"], 25);
+    assert_eq!(contract["schema_version"], 26);
     assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
     assert_ne!(
         contract["schema_version"],

@@ -300,12 +300,13 @@ impl ExpansionEngine {
             result.insert.chars().count() + usize::from(result.reinsert_after.is_some());
         if erases
             && !capabilities.has_atomic_replacement_contract()
+            && !capabilities.clipboard_assisted_replace
             && replacement_chars > crate::MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS
         {
             return Err(InjectorError {
                 backend: injector.name(),
                 message: format!(
-                    "automatic non-atomic replacement is limited to {} characters; use Quick Picker clipboard/manual paste or an atomic route for longer text",
+                    "automatic non-atomic keystroke replacement is limited to {} characters; use a configured clipboard-assisted route, Quick Picker clipboard/manual paste, or an atomic route for longer text",
                     crate::MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS
                 ),
                 retryable: false,

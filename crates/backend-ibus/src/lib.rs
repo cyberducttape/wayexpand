@@ -71,6 +71,7 @@ pub fn content_type_is_sensitive(purpose: u32, hints: u32) -> bool {
 /// replacement is not atomic.
 pub fn injector_capabilities() -> InjectorCapabilities {
     InjectorCapabilities {
+        clipboard_assisted_replace: false,
         insertion_mode: "ibus commit-text",
         max_text_chars: 0,
         expected_throughput_chars_per_sec: None,

@@ -119,6 +119,7 @@ pub(crate) fn adjust_capabilities(mut capabilities: InjectorCapabilities) -> Inj
     if active_mode() != TerminalPaste::Off {
         capabilities.max_text_chars = 0;
         capabilities.full_unicode = true;
+        capabilities.clipboard_assisted_replace = true;
     }
     capabilities
 }

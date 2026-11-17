@@ -17,6 +17,7 @@ impl LibeiSession {
         let keysym_fallback = matches!(self.mode, TextMode::Keysym(_));
         let direct_commit = self.fcitx5.is_some();
         InjectorCapabilities {
+            clipboard_assisted_replace: false,
             insertion_mode: if direct_commit {
                 "Fcitx5 direct commit (libei fallback available)"
             } else if keysym_fallback {

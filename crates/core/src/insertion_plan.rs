@@ -6,9 +6,11 @@
 
 use crate::CompatibilityMode;
 
-/// Hard ceiling for automatic trigger replacement on routes that cannot
-/// replace atomically. Compatibility consent cannot raise this limit; longer
-/// text uses the clipboard/manual-paste workflow.
+/// Hard ceiling for automatic trigger replacement by paced synthetic
+/// keystrokes on routes that cannot replace atomically. A configured
+/// clipboard-assisted replacement may exceed it because the replacement
+/// payload is submitted as one paste operation; trigger deletion remains
+/// separate and still requires the normal compatibility and focus checks.
 pub const MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS: usize = 8;
 
 /// Estimate paced synthetic output with conservative ceiling arithmetic.

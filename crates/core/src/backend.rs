@@ -646,6 +646,11 @@ pub struct InjectorCapabilities {
     /// protocol transaction. This does not confirm that the target application
     /// applied or rendered the expected text.
     pub atomic_replace: bool,
+    /// The configured route can deliver replacement text as a clipboard paste
+    /// instead of paced synthetic keystrokes. Trigger deletion still happens
+    /// separately, so this does not make replacement atomic or bypass the
+    /// explicit compatibility/focus admission checks.
+    pub clipboard_assisted_replace: bool,
     /// How safely the trigger erase is tied to this expansion's trigger.
     pub replacement_guarantee: ReplacementGuarantee,
     /// Every valid Unicode replacement can be represented without depending
