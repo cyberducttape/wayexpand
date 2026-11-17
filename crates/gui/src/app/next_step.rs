@@ -269,6 +269,15 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
         if s.daemon_reachable == Some(true) && s.paused {
             return Some((Problem::Paused, Action::Resume));
         }
+        match s.ibus_engine_registered {
+            IbusCheckState::Fail => {
+                return Some((Problem::IbusEngineNotRegistered, Action::RunSetup));
+            }
+            IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
+                return Some((Problem::InputStatusPending, Action::CheckAgain));
+            }
+            IbusCheckState::Pass => {}
+        }
         match s.ibus_selection {
             IbusCheckState::Fail | IbusCheckState::Warn => {
                 return Some((Problem::InputSourceNotSelected, Action::RunSetup));
@@ -679,6 +688,7 @@ mod tests {
                 Situation {
                     control_only: true,
                     ibus_active: true,
+                    ibus_engine_registered: IbusCheckState::Pass,
                     ibus_selection: IbusCheckState::Pass,
                     replacement_allowed: true,
                     ..running(RouteState::Connected)
@@ -900,6 +910,7 @@ mod tests {
     fn an_app_that_cannot_replace_text_points_to_the_quick_picker() {
         let kde_ibus = Situation {
             ibus_active: true,
+            ibus_engine_registered: IbusCheckState::Pass,
             ibus_selection: IbusCheckState::Pass,
             daemon_reachable: Some(false),
             replacement_allowed: true,
@@ -925,6 +936,7 @@ mod tests {
     fn kde_live_engine_is_not_ready_when_another_ibus_engine_is_selected() {
         let deselected = Situation {
             ibus_active: true,
+            ibus_engine_registered: IbusCheckState::Pass,
             ibus_selection: IbusCheckState::Fail,
             daemon_reachable: Some(false),
             replacement_allowed: true,
