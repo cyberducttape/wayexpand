@@ -472,9 +472,9 @@ texts! {
         "Auslöser zuerst in WayExpand ausprobieren",
         "Coba pemicu di dalam WayExpand dulu";
     first_run_trigger_works_inside =>
-        "Matcher preview matched. This checks the snippet only; test in an app to verify typing and replacement.",
-        "Die Matcher-Vorschau passt. Das prüft nur das Snippet; testen Sie in einer App, ob Eingabe und Ersetzung funktionieren.",
-        "Pratinjau pencocok cocok. Ini hanya memeriksa cuplikan; uji di aplikasi untuk memastikan pengetikan dan penggantian.";
+        "Matcher preview: this rule matches locally. It does not verify keyboard input or text replacement in an application.",
+        "Matcher-Vorschau: Diese Regel passt lokal. Tastatureingabe und Textersetzung in einer Anwendung werden dadurch nicht verifiziert.",
+        "Pratinjau matcher: aturan ini cocok secara lokal. Ini tidak memverifikasi input keyboard atau penggantian teks di aplikasi.";
     first_run_troubleshooting_details =>
         "Troubleshooting details",
         "Details zur Fehlerbehebung",

@@ -693,7 +693,7 @@ impl GuiApp {
                         {
                             if matcher_passed {
                                 ui.colored_label(
-                                    palette.success,
+                                    palette.muted,
                                     self.strings.first_run_trigger_works_inside(),
                                 );
                             } else if ui.link(self.strings.first_run_try_inside()).clicked() {
