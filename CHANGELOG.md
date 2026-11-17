@@ -4,6 +4,21 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The GUI no longer counts the control-only service (Quick Picker and
+  hotkeys) as a connected typing route when the IBus engine is not active.
+  The first-run guide ticked *Connect your desktop* and then asked for
+  replacement consent; it now says nothing reads typing yet and offers guided
+  setup, and the header shows *Needs setup*.
+- New `wayexpand why` says why the last trigger did not expand: matching is
+  off (and why), no typing arrives, nothing matched, or what stopped the last
+  expansion, with what to do. It combines the service's and the IBus engine's
+  content-free history and never shows typed text. Diagnostics in the GUI
+  opens with the same answer. `wayexpand help` shows it among its examples.
+- The main window shows what the Quick Picker will do before you open it: a
+  second header chip reads *Quick Picker: types*, *copies* or *off*, with the
+  reason in its tooltip. It uses the picker's own rule (atomic replacement
+  and an exact window identity, plus organization policy). The main chip's
+  tooltip and screen-reader label now say it describes typed triggers.
 - Documentation matches the current behaviour:
   - the Quick Picker types directly only on a route that is both atomic and
     able to identify the exact window, which no standard route combines

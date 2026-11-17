@@ -1336,6 +1336,102 @@ fn clipboard_fallback_allowed_by_policy(policy: &wayexpand_core::OrganizationPol
         .require_verified_insert_target
 }
 
+/// What the Quick Picker would do with a snippet if it opened now. The main
+/// window shows this beside the typed-trigger state, because the two differ
+/// on most routes: triggers can expand while the picker can only copy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PickerReadiness {
+    /// Enter types the snippet into the window the picker was opened from.
+    TypesDirectly,
+    /// Enter copies the snippet for the user to paste, for this reason.
+    Copies(CopyReason),
+    /// Policy forbids copying and the picker cannot type here either.
+    Unavailable(CopyReason),
+}
+
+/// Why the Quick Picker cannot type directly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CopyReason {
+    /// No WayExpand service answers, so nothing can type for the picker.
+    ServiceOff,
+    /// The typing route cannot replace text in one step.
+    NotAtomic,
+    /// No exact identity for the window the picker was opened from.
+    NoWindowIdentity,
+}
+
+/// What organization policy lets the Quick Picker do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PickerPolicy {
+    /// Copying for a manual paste is allowed when the picker cannot type.
+    pub(crate) clipboard_allowed: bool,
+    /// The daemon withholds the focused window from control clients
+    /// (`disable_control_socket_mutations`), so the picker has no target.
+    pub(crate) focus_withheld: bool,
+}
+
+impl PickerPolicy {
+    /// Merge the administrator policy into the user's embedded one the way
+    /// `Config::apply_administrator_policy` does. An unreadable
+    /// administrator policy forbids everything: the picker itself refuses
+    /// to start then.
+    pub(crate) fn merge(
+        user: &wayexpand_core::OrganizationPolicy,
+        administrator: Option<&wayexpand_core::OrganizationPolicy>,
+    ) -> Self {
+        let Some(administrator) = administrator else {
+            return Self {
+                clipboard_allowed: false,
+                focus_withheld: true,
+            };
+        };
+        let effective = if administrator.governs_expansion() {
+            administrator.effective_enforcement_policy()
+        } else {
+            let mut merged = user.clone();
+            merged.require_verified_insert_target |= administrator.require_verified_insert_target;
+            merged.disable_control_socket_mutations |=
+                administrator.disable_control_socket_mutations;
+            merged
+        };
+        Self {
+            clipboard_allowed: clipboard_fallback_allowed_by_policy(&effective),
+            focus_withheld: effective.disable_control_socket_mutations,
+        }
+    }
+}
+
+/// The picker's direct-insert rule (`picker_focus_state`), read from the
+/// daemon status the main window already polls: atomic replacement and an
+/// exact window identity the daemon will share, all required.
+/// `daemon_status` is `None` while no service answers.
+pub(crate) fn picker_readiness(
+    daemon_status: Option<&str>,
+    policy: PickerPolicy,
+) -> PickerReadiness {
+    let field = |name: &str| {
+        daemon_status.and_then(|status| {
+            status
+                .lines()
+                .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
+        })
+    };
+    let reason = if daemon_status.is_none() {
+        Some(CopyReason::ServiceOff)
+    } else if field("inject_atomic_replace") != Some("true") {
+        Some(CopyReason::NotAtomic)
+    } else if policy.focus_withheld || field("window_identity_exact") != Some("true") {
+        Some(CopyReason::NoWindowIdentity)
+    } else {
+        None
+    };
+    match reason {
+        None => PickerReadiness::TypesDirectly,
+        Some(reason) if policy.clipboard_allowed => PickerReadiness::Copies(reason),
+        Some(reason) => PickerReadiness::Unavailable(reason),
+    }
+}
+
 fn picker_expansion_is_eligible(expansion: &ExpansionConfig, safe_direct_insert: bool) -> bool {
     picker_availability(expansion, safe_direct_insert) == Availability::Available
 }
@@ -2175,5 +2271,100 @@ mod tests {
             assert_eq!(scoped(&copy_only), Availability::AppRestricted);
             assert_eq!(scoped(&direct), Availability::Available);
         }
+    }
+
+    #[test]
+    fn picker_readiness_types_only_with_atomic_replace_and_exact_identity() {
+        use super::{picker_readiness, CopyReason as R, PickerPolicy, PickerReadiness as P};
+        let open = PickerPolicy {
+            clipboard_allowed: true,
+            focus_withheld: false,
+        };
+        let both = "running\ninject_atomic_replace=true\nwindow_identity_exact=true\n";
+        assert_eq!(picker_readiness(Some(both), open), P::TypesDirectly);
+        assert_eq!(picker_readiness(None, open), P::Copies(R::ServiceOff));
+        assert_eq!(
+            picker_readiness(
+                Some("inject_atomic_replace=false\nwindow_identity_exact=true\n"),
+                open
+            ),
+            P::Copies(R::NotAtomic)
+        );
+        assert_eq!(
+            picker_readiness(Some("inject_atomic_replace=true\n"), open),
+            P::Copies(R::NoWindowIdentity)
+        );
+        // A prefix of another field must not count.
+        assert_eq!(
+            picker_readiness(
+                Some("inject_atomic_replace_x=true\nwindow_identity_exact=true\n"),
+                open
+            ),
+            P::Copies(R::NotAtomic)
+        );
+        let withheld = PickerPolicy {
+            focus_withheld: true,
+            ..open
+        };
+        assert_eq!(
+            picker_readiness(Some(both), withheld),
+            P::Copies(R::NoWindowIdentity)
+        );
+        let strict = PickerPolicy {
+            clipboard_allowed: false,
+            focus_withheld: false,
+        };
+        assert_eq!(picker_readiness(Some(both), strict), P::TypesDirectly);
+        assert_eq!(
+            picker_readiness(None, strict),
+            P::Unavailable(R::ServiceOff)
+        );
+    }
+
+    #[test]
+    fn picker_policy_merges_like_the_configuration_loader() {
+        use super::PickerPolicy;
+        use wayexpand_core::OrganizationPolicy;
+        let open = OrganizationPolicy::default();
+        assert_eq!(
+            PickerPolicy::merge(&open, Some(&open)),
+            PickerPolicy {
+                clipboard_allowed: true,
+                focus_withheld: false
+            }
+        );
+        // No readable administrator policy: the picker refuses to start.
+        assert!(!PickerPolicy::merge(&open, None).clipboard_allowed);
+        // A control-socket-only administrator policy tightens the user's
+        // safe-mode policy. Outside safe mode the user's policy is audit
+        // only and enforces neither setting; the picker does the same.
+        let admin = OrganizationPolicy {
+            require_verified_insert_target: true,
+            disable_control_socket_mutations: true,
+            ..OrganizationPolicy::default()
+        };
+        assert!(!admin.governs_expansion());
+        let safe = OrganizationPolicy {
+            safe_mode: true,
+            ..OrganizationPolicy::default()
+        };
+        let merged = PickerPolicy::merge(&safe, Some(&admin));
+        assert!(!merged.clipboard_allowed);
+        assert!(merged.focus_withheld);
+        assert!(PickerPolicy::merge(&open, Some(&admin)).clipboard_allowed);
+        // The user's own stricter setting survives a permissive administrator.
+        let user = OrganizationPolicy {
+            require_verified_insert_target: true,
+            ..safe.clone()
+        };
+        assert!(!PickerPolicy::merge(&user, Some(&open)).clipboard_allowed);
+        // An administrator policy that governs expansion replaces the user's.
+        let governing = OrganizationPolicy {
+            safe_mode: true,
+            require_verified_insert_target: true,
+            ..OrganizationPolicy::default()
+        };
+        assert!(governing.governs_expansion());
+        assert!(!PickerPolicy::merge(&open, Some(&governing)).clipboard_allowed);
     }
 }

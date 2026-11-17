@@ -171,6 +171,43 @@ impl GuiApp {
         self.render_config_backup_dialog(ctx, palette);
     }
 
+    /// The plain answer to "why didn't my trigger expand?" for the keyboard
+    /// service, from its content-free status. IBus fields have their own
+    /// verdicts in the IBus section.
+    pub(crate) fn render_why_card(&self, ui: &mut egui::Ui, palette: &Palette) {
+        if self.daemon_reachable != Some(true)
+            || runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin")
+        {
+            return;
+        }
+        let diagnosis = wayexpand_core::ExpansionDiagnosis::from_status(
+            &wayexpand_core::DaemonStatus::parse(&self.daemon_status),
+        );
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let verdict = diagnosis.verdict(now);
+        let (answer, fix) = self
+            .strings
+            .why_verdict(verdict, diagnosis.terminal_apps_only);
+        let color = match verdict {
+            wayexpand_core::Verdict::LastExpanded => palette.muted,
+            _ => palette.warning,
+        };
+        theme::section_header(ui, "", self.strings.why_title());
+        theme::card(ui, palette, |ui| {
+            ui.label(
+                RichText::new(self.strings.why_intro())
+                    .small()
+                    .color(palette.muted),
+            );
+            ui.add(egui::Label::new(RichText::new(answer).color(color)).wrap());
+            if let Some(fix) = fix {
+                ui.add(egui::Label::new(RichText::new(fix).small()).wrap());
+            }
+        });
+    }
+
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         if let Some(report) = self.setup_failure_report.as_deref() {
             ui.group(|ui| {
@@ -587,6 +624,7 @@ impl GuiApp {
             });
         }
 
+        self.render_why_card(ui, palette);
         ui.collapsing(self.strings.recent_expansion_outcomes(), |ui| {
             let traces = capabilities
                 .map(|caps| caps.recent_expansion_outcomes.as_slice())

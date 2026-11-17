@@ -218,6 +218,10 @@ struct GuiApp {
     setup_record_saved: bool,
     /// The running IBus engine's instance (`ibus:<pid>:<started>`).
     ibus_instance: Option<String>,
+    /// The administrator policy as loaded at startup (`None` when it could
+    /// not be read). With the library's own policy it decides what the
+    /// Quick Picker may do; the picker reads it fresh on every launch.
+    administrator_policy: Option<wayexpand_core::OrganizationPolicy>,
     /// Why the last attempt to set it failed (a conflict, usually).
     picker_shortcut_error: Option<String>,
     /// Snippet indices the desktop test may use, keyed by library revision
@@ -641,6 +645,7 @@ impl GuiApp {
             setup_record: setup_record::load(),
             setup_record_saved: true,
             ibus_instance: None,
+            administrator_policy: wayexpand_core::load_organization_policy().ok(),
             picker_shortcut_error: None,
             desktop_test_cache: None,
             visible_indices_cache: None,

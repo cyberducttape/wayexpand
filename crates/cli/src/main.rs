@@ -185,6 +185,7 @@ fn run() -> Result<()> {
         Some("upgrade-status") => upgrade_status_command(args)?,
         Some("upgrade") => commands::system::upgrade_command(args)?,
         Some("explain") => explain_command(args)?,
+        Some("why") => commands::why::why_command(args)?,
         Some("stats") => stats_command(args)?,
         Some("sync") => sync_command(args)?,
         Some("certify") => certify_command(args)?,

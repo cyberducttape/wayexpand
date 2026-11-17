@@ -1,10 +1,73 @@
 //! Quick Picker messages (see `picker::PickerMessage`).
 
 use super::{Language, Strings};
-use crate::picker::PickerMessage as M;
+use crate::picker::{
+    CopyReason, CopyReason as C, PickerMessage as M, PickerReadiness, PickerReadiness as R,
+};
 use wayexpand_core::InsertFailure as F;
 
 impl Strings {
+    /// The short header chip for what the Quick Picker does now.
+    pub(crate) fn picker_readiness_chip(&self, readiness: PickerReadiness) -> &'static str {
+        use Language::{English as En, German as De, Indonesian as Id};
+        match (readiness, self.lang) {
+            (R::TypesDirectly, En) => "Quick Picker: types",
+            (R::TypesDirectly, De) => "Schnellwähler: tippt",
+            (R::TypesDirectly, Id) => "Picker: mengetik",
+            (R::Copies(_), En) => "Quick Picker: copies",
+            (R::Copies(_), De) => "Schnellwähler: kopiert",
+            (R::Copies(_), Id) => "Picker: menyalin",
+            (R::Unavailable(_), En) => "Quick Picker: off",
+            (R::Unavailable(_), De) => "Schnellwähler: aus",
+            (R::Unavailable(_), Id) => "Picker: mati",
+        }
+    }
+
+    /// One sentence on what the Quick Picker does now, and why.
+    pub(crate) fn picker_readiness_detail(&self, readiness: PickerReadiness) -> String {
+        use Language::{English as En, German as De, Indonesian as Id};
+        let reason = |reason: CopyReason| match (reason, self.lang) {
+            (C::ServiceOff, En) => "the WayExpand service is not running",
+            (C::ServiceOff, De) => "der WayExpand-Dienst läuft nicht",
+            (C::ServiceOff, Id) => "layanan WayExpand tidak berjalan",
+            (C::NotAtomic, En) => "this typing route cannot replace text in one step",
+            (C::NotAtomic, De) => "dieser Eingabeweg kann Text nicht in einem Schritt ersetzen",
+            (C::NotAtomic, Id) => {
+                "jalur pengetikan ini tidak dapat mengganti teks dalam satu langkah"
+            }
+            (C::NoWindowIdentity, En) => {
+                "WayExpand cannot tell exactly which window you were using"
+            }
+            (C::NoWindowIdentity, De) => {
+                "WayExpand kann das zuletzt benutzte Fenster nicht genau bestimmen"
+            }
+            (C::NoWindowIdentity, Id) => {
+                "WayExpand tidak dapat memastikan jendela yang sedang Anda pakai"
+            }
+        };
+        match (readiness, self.lang) {
+            (R::TypesDirectly, En) => "Quick Picker: Enter types the snippet into the app you were using.".into(),
+            (R::TypesDirectly, De) => "Schnellwähler: Enter tippt das Snippet in die zuletzt benutzte App.".into(),
+            (R::TypesDirectly, Id) => "Picker: Enter mengetik cuplikan ke aplikasi yang sedang Anda pakai.".into(),
+            (R::Copies(why), En) => format!("Quick Picker: Enter copies the snippet for you to paste, because {}.", reason(why)),
+            (R::Copies(why), De) => format!("Schnellwähler: Enter kopiert das Snippet zum Einfügen, weil {}.", reason(why)),
+            (R::Copies(why), Id) => format!("Picker: Enter menyalin cuplikan untuk Anda tempel, karena {}.", reason(why)),
+            (R::Unavailable(why), En) => format!("Quick Picker: cannot insert here, because {} and your organization's policy does not allow copying.", reason(why)),
+            (R::Unavailable(why), De) => format!("Schnellwähler: kann hier nicht einfügen, weil {} und die Richtlinie Ihrer Organisation kein Kopieren erlaubt.", reason(why)),
+            (R::Unavailable(why), Id) => format!("Picker: tidak dapat menyisipkan di sini, karena {} dan kebijakan organisasi Anda tidak mengizinkan penyalinan.", reason(why)),
+        }
+    }
+
+    /// Names what the main status chip is about, now that the Quick Picker
+    /// has its own.
+    pub(crate) fn typed_triggers_label(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Typed triggers",
+            Language::German => "Getippte Trigger",
+            Language::Indonesian => "Pemicu yang diketik",
+        }
+    }
+
     pub(crate) fn picker_show_unavailable(&self) -> &'static str {
         match self.lang {
             Language::English => "Show snippets that can't be used here",

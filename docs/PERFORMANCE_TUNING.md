@@ -97,6 +97,29 @@ cargo bench --locked -p wayexpand-core --bench matcher
 The benchmark measures matching itself; it does not certify a compositor or
 input backend.
 
+The editor's library search has its own benchmarks in
+`crates/gui/benches/gui_edit.rs`:
+
+```sh
+cargo bench --locked -p wayexpand-gui --bench gui_edit -- gui_search
+```
+
+`gui_search_index_build` rebuilds the sidebar's search index, which happens on
+load and after every save; `gui_search_keystroke` is one keystroke in the
+search box with every search field enabled. One run on an AMD Ryzen 7 7735U
+(2026-11-15, release build, median):
+
+| Library | Index rebuild | Search keystroke |
+|---|---|---|
+| 100 snippets | 0.05 ms | 0.01 ms |
+| 1,000 snippets | 0.5 ms | 0.1 ms |
+| 10,000 snippets | 6.6 ms | 1.1 ms |
+| 10,000 snippets, 1 kB replacements | 8.9 ms | — |
+
+A keystroke stays well inside one 60 Hz frame (16.7 ms) at the 10,000-snippet
+ceiling, and the rebuild runs once per save, not per frame. These are one
+machine's numbers, not a guarantee; rerun the benchmark on yours.
+
 Fleet integrity checks use bounded reads and the same 16 MiB per-source ceiling
 as normal configuration loading. Large snippet libraries should be split into
 validated layers rather than placed in one oversized source. Measure repeated
