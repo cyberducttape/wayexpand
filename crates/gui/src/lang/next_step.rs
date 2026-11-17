@@ -325,13 +325,13 @@ impl Strings {
                 "Jalankan `wayexpand ibus status --json` untuk memastikan pendaftaran mesin belum ada, lalu jalankan `wayexpand setup --backend ibus` dan periksa status lagi. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel manual."
             }
             (Problem::InputSourceNotSelected, En) => {
-                "Select WayExpand in your desktop's input-method settings, then run a live typing test. Quick Picker can copy a snippet for you to paste meanwhile."
+                "Run guided IBus setup to select WayExpand, then run a live typing test. Quick Picker can copy a snippet for you to paste meanwhile."
             }
             (Problem::InputSourceNotSelected, De) => {
-                "Wählen Sie WayExpand in den Eingabemethode-Einstellungen Ihres Desktops aus und führen Sie danach einen Live-Tipptest durch. Bis dahin können Sie ein Snippet mit dem Schnellwähler kopieren und einfügen."
+                "Führen Sie die geführte IBus-Einrichtung aus, um WayExpand auszuwählen, und starten Sie danach einen Live-Tipptest. Bis dahin können Sie ein Snippet mit dem Schnellwähler kopieren und einfügen."
             }
             (Problem::InputSourceNotSelected, Id) => {
-                "Pilih WayExpand di pengaturan metode input desktop Anda, lalu jalankan tes mengetik langsung. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel."
+                "Jalankan penyiapan IBus terpandu untuk memilih WayExpand, lalu lakukan tes mengetik langsung. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel."
             }
             (Problem::ApplicationDeliveryUnverified, En) => {
                 "Run a real typing test in the affected app. Matcher preview checks only whether the rule matches; it does not prove that the app received the replacement."
