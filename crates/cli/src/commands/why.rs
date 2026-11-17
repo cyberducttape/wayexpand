@@ -326,7 +326,7 @@ fn report_json(
     // Keep one plain-language conclusion alongside the detailed telemetry.
     // Consumers should not have to reconstruct an action from empty fields or
     // infer that a matcher result proves delivery into an application.
-    let diagnosis = if daemon_status_compatible == Some(false) {
+    let mut diagnosis = if daemon_status_compatible == Some(false) {
         serde_json::json!({
             "state": "daemon_schema_incompatible",
             "answer": "WayExpand cannot trust the running daemon's diagnostics because its status schema is incompatible with this CLI.",
@@ -375,6 +375,62 @@ fn report_json(
             "application_delivery_verified": false,
         })
     };
+    // Keep the two user-visible stages separate in machine-readable output.
+    // A recent outcome can prove that a trigger matched and output was
+    // submitted, but WayExpand cannot observe whether the application applied
+    // that output. Matcher previews are likewise local checks only.
+    if let Some(object) = diagnosis.as_object_mut() {
+        object.insert(
+            "pattern_match".into(),
+            serde_json::Value::String("unknown".into()),
+        );
+        object.insert(
+            "delivery_status".into(),
+            serde_json::Value::String("unknown".into()),
+        );
+        object.insert(
+            "matcher_preview_proves_application_delivery".into(),
+            serde_json::Value::Bool(false),
+        );
+    }
+    if let Some(route) = daemon {
+        let verdict = route.diagnosis.verdict(now);
+        let pattern_match = match verdict {
+            Verdict::LastStopped(_) | Verdict::LastExpanded => "confirmed_recently",
+            Verdict::NothingMatched => "not_observed_recently",
+            Verdict::NoTypingSeen => "no_input_observed",
+            Verdict::MatchingOff(_) => "blocked",
+            Verdict::InputStatusUnknown => "unknown",
+        };
+        let delivery = match verdict {
+            Verdict::LastExpanded => "submitted_unverified",
+            Verdict::LastStopped(OutcomeKind::Partial) => "partial_or_uncertain",
+            Verdict::LastStopped(OutcomeKind::Unknown) => "uncertain",
+            Verdict::LastStopped(OutcomeKind::NotApplied) => "not_submitted",
+            Verdict::LastStopped(OutcomeKind::BlockedByPolicy) => "blocked_by_policy",
+            Verdict::LastStopped(OutcomeKind::InterruptedByTyping) => "stopped_before_output",
+            Verdict::LastStopped(OutcomeKind::SnippetActionFailed) => "snippet_action_failed",
+            Verdict::LastStopped(_) => "unknown",
+            Verdict::MatchingOff(_) => "blocked",
+            Verdict::NoTypingSeen | Verdict::NothingMatched | Verdict::InputStatusUnknown => {
+                "not_observed"
+            }
+        };
+        if let Some(object) = diagnosis.as_object_mut() {
+            object.insert(
+                "pattern_match".into(),
+                serde_json::Value::String(pattern_match.into()),
+            );
+            object.insert(
+                "delivery_status".into(),
+                serde_json::Value::String(delivery.into()),
+            );
+            object.insert(
+                "matcher_preview_proves_application_delivery".into(),
+                serde_json::Value::Bool(false),
+            );
+        }
+    }
     serde_json::json!({
         "diagnosis": diagnosis,
         "daemon_status_schema": daemon_status_schema,

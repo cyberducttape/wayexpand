@@ -238,12 +238,27 @@ impl GuiApp {
         let (answer, fix) = self
             .strings
             .why_verdict(verdict, diagnosis.terminal_apps_only);
+        let action = match verdict {
+            // A harmless live test is the next useful step when no recent
+            // output transaction identifies the failure. It exercises the
+            // desktop path separately from the local matcher preview.
+            wayexpand_core::Verdict::NoTypingSeen
+            | wayexpand_core::Verdict::InputStatusUnknown
+            | wayexpand_core::Verdict::NothingMatched => super::NextAction::TestInApplication,
+            // Once output was attempted, inspect the target and transaction
+            // details before trying anything again. In particular, a partial
+            // or uncertain write must never lead to an automatic replay.
+            wayexpand_core::Verdict::LastStopped(_) | wayexpand_core::Verdict::LastExpanded => {
+                super::NextAction::InspectText
+            }
+            wayexpand_core::Verdict::MatchingOff(_) => super::NextAction::CheckAgain,
+        };
         let color = match verdict {
             wayexpand_core::Verdict::LastExpanded => palette.muted,
             _ => palette.warning,
         };
         theme::section_header(ui, "", self.strings.why_title());
-        let mut picker_requested = false;
+        let mut action_requested = false;
         theme::card(ui, palette, |ui| {
             ui.label(
                 RichText::new(self.strings.why_intro())
@@ -255,14 +270,11 @@ impl GuiApp {
                 ui.add(egui::Label::new(RichText::new(fix).small()).wrap());
             }
             ui.add_space(4.0);
-            if ui
-                .button(self.strings.action_label(super::NextAction::QuickPicker))
-                .clicked()
-            {
-                picker_requested = true;
+            if ui.button(self.strings.action_label(action)).clicked() {
+                action_requested = true;
             }
         });
-        picker_requested.then_some(super::NextAction::QuickPicker)
+        action_requested.then_some(action)
     }
 
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
