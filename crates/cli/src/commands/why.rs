@@ -528,6 +528,10 @@ fn verdict_text(diagnosis: &ExpansionDiagnosis, now: u64) -> (String, Option<Str
             .to_owned(),
             Some("type the trigger again while `wayexpand debug --live` runs".to_owned()),
         ),
+        Verdict::InputStatusUnknown => (
+            "The daemon did not report input-event counters, so WayExpand cannot tell whether your typing reached it.".to_owned(),
+            Some("Run `wayexpand debug --live`, type harmless text in the affected application, and check whether input is observed. If not, run `wayexpand doctor`. Use `wayexpand-gui --picker --copy-only` and paste meanwhile.".to_owned()),
+        ),
         Verdict::NothingMatched => (
             format!(
                 "Typing reaches this route, but nothing has expanded in the last two minutes. Usually the text did not match: a typo, a word-boundary trigger typed right after a letter, or an app filter that leaves this app out{}.",

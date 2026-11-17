@@ -38,6 +38,9 @@ impl Strings {
             (V::NothingMatched, En) => ("Typing arrives, but nothing has expanded in the last two minutes. The trigger may not match, or an app filter may exclude this app.", Some("Use Matcher preview to check the pattern. A match there is not a desktop test; then run the real-application typing test from Getting started.")),
             (V::NothingMatched, De) => ("Eingaben kommen an, aber in den letzten zwei Minuten wurde nichts ersetzt. Der Auslöser passt möglicherweise nicht oder ein App-Filter schließt diese App aus.", Some("Prüfen Sie das Muster in der Matcher-Vorschau. Ein Treffer dort ist kein Desktop-Test; führen Sie danach den echten Anwendungstest unter „Erste Schritte“ aus.")),
             (V::NothingMatched, Id) => ("Ketikan masuk, tetapi tidak ada yang diperluas dalam dua menit terakhir. Pemicu mungkin tidak cocok atau filter aplikasi mengecualikan aplikasi ini.", Some("Periksa pola di Pratinjau pencocok. Kecocokan di sana bukan uji desktop; lalu jalankan uji pengetikan aplikasi nyata dari Memulai.")),
+            (V::InputStatusUnknown, En) => ("The daemon did not report input activity, so WayExpand cannot tell whether the affected field sent typing to it.", Some("Run Debug → Live, type harmless text in the affected app, and check whether input is observed. If it is not, open Diagnostics. Use Quick Picker to copy and paste meanwhile.")),
+            (V::InputStatusUnknown, De) => ("Der Dienst meldet keine Eingabeaktivität. WayExpand kann daher nicht feststellen, ob das betroffene Feld Eingaben weitergeleitet hat.", Some("Starten Sie Diagnose → Live, tippen Sie harmlosen Text in der betroffenen App und prüfen Sie, ob Eingaben beobachtet werden. Öffnen Sie andernfalls die Diagnose. Bis dahin können Sie mit dem Schnellwähler kopieren und einfügen.")),
+            (V::InputStatusUnknown, Id) => ("Layanan tidak melaporkan aktivitas input, jadi WayExpand belum tahu apakah kolom tersebut mengirim ketikan.", Some("Jalankan Debug → Live, ketik teks aman di aplikasi terkait, lalu periksa apakah input terdeteksi. Jika tidak, buka Diagnostik. Sementara itu, gunakan Quick Picker untuk menyalin dan menempel.")),
             (V::LastStopped(kind), lang) => self.why_stopped(kind, lang),
             (V::LastExpanded, En) => ("WayExpand matched the trigger and submitted replacement output, but cannot verify that the application changed its text.", Some("Check the field. If the replacement is missing or wrong, run the real-application typing test from Getting started; do not retry uncertain output.")),
             (V::LastExpanded, De) => ("WayExpand hat die letzte Ersetzung erkannt und gesendet, kann aber nicht prüfen, ob die Anwendung ihren Text geändert hat.", Some("Prüfen Sie das Feld. Fehlt der Text oder ist er falsch, führen Sie den echten Anwendungstest unter „Erste Schritte“ aus; unsichere Ausgaben nicht wiederholen.")),
@@ -154,7 +157,12 @@ mod tests {
             .into_iter()
             .map(V::MatchingOff)
             .chain(kinds.into_iter().map(V::LastStopped))
-            .chain([V::NoTypingSeen, V::NothingMatched, V::LastExpanded]);
+            .chain([
+                V::NoTypingSeen,
+                V::InputStatusUnknown,
+                V::NothingMatched,
+                V::LastExpanded,
+            ]);
         for verdict in verdicts {
             for terminal_only in [false, true] {
                 let answers = [Language::English, Language::German, Language::Indonesian]
