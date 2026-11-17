@@ -799,7 +799,8 @@ impl GuiApp {
                 | P::InputSourceNotSelected
                 | P::IbusEngineUnavailable
                 | P::InputStatusStale
-                | P::ReplacementNotAllowed => (S::NeedsSetup, palette.warning),
+                | P::ReplacementNotAllowed
+                | P::ReplacementConsentUnknown => (S::NeedsSetup, palette.warning),
                 P::StatusUnknown | P::RouteStatusUnknown => (S::Checking, palette.muted),
             };
         }

@@ -30,6 +30,7 @@ pub(crate) enum Problem {
     IbusEngineUnavailable,
     InputStatusStale,
     ReplacementNotAllowed,
+    ReplacementConsentUnknown,
     Connecting,
     RouteFailed,
     Unsupported,
@@ -76,6 +77,7 @@ pub(crate) enum GnomeIbusReadiness {
     SourceNotSelected,
     EngineUnavailable,
     ReplacementNotAllowed,
+    ReplacementConsentUnknown,
 }
 
 /// The facts `next_step` decides from, gathered from the GUI's last status
@@ -135,19 +137,19 @@ pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
         Some(true) => {}
     }
     match s.source_registered {
-        IbusCheckState::Fail | IbusCheckState::Warn => {
+        IbusCheckState::Fail => {
             return GnomeIbusReadiness::SourceNotSetUp;
         }
-        IbusCheckState::Unknown | IbusCheckState::Skip => {
+        IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
             return GnomeIbusReadiness::DiagnosticsPending;
         }
         IbusCheckState::Pass => {}
     }
     match s.ibus_engine_registered {
-        IbusCheckState::Fail | IbusCheckState::Warn => {
+        IbusCheckState::Fail => {
             return GnomeIbusReadiness::EngineNotRegistered;
         }
-        IbusCheckState::Unknown | IbusCheckState::Skip => {
+        IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
             return GnomeIbusReadiness::DiagnosticsPending;
         }
         IbusCheckState::Pass => {}
@@ -162,11 +164,11 @@ pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
         IbusCheckState::Pass => {}
     }
     match s.consent_state {
-        IbusCheckState::Fail | IbusCheckState::Warn => {
+        IbusCheckState::Fail => {
             return GnomeIbusReadiness::ReplacementNotAllowed;
         }
-        IbusCheckState::Unknown | IbusCheckState::Skip => {
-            return GnomeIbusReadiness::DiagnosticsPending;
+        IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
+            return GnomeIbusReadiness::ReplacementConsentUnknown;
         }
         IbusCheckState::Pass => {}
     }
@@ -254,6 +256,9 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             }
             GnomeIbusReadiness::ReplacementNotAllowed => {
                 Some((Problem::ReplacementNotAllowed, Action::ReviewConsent))
+            }
+            GnomeIbusReadiness::ReplacementConsentUnknown => {
+                Some((Problem::ReplacementConsentUnknown, Action::InspectText))
             }
         };
     }
@@ -801,11 +806,11 @@ mod tests {
         };
         assert_eq!(
             gnome_ibus_readiness(&unknown_consent),
-            GnomeIbusReadiness::DiagnosticsPending
+            GnomeIbusReadiness::ReplacementConsentUnknown
         );
         assert_eq!(
             next_step(&unknown_consent),
-            Some((Problem::InputStatusPending, Action::CheckAgain))
+            Some((Problem::ReplacementConsentUnknown, Action::InspectText))
         );
     }
 

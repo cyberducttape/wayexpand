@@ -117,6 +117,15 @@ impl Strings {
             (Problem::ReplacementNotAllowed, Id) => {
                 "Mengganti teks yang diketik di desktop ini perlu persetujuan Anda dulu."
             }
+            (Problem::ReplacementConsentUnknown, En) => {
+                "WayExpand could not confirm whether replacement is allowed."
+            }
+            (Problem::ReplacementConsentUnknown, De) => {
+                "WayExpand konnte nicht bestätigen, ob Ersetzungen erlaubt sind."
+            }
+            (Problem::ReplacementConsentUnknown, Id) => {
+                "WayExpand tidak dapat memastikan apakah penggantian diizinkan."
+            }
             (Problem::Connecting, En) => "WayExpand is connecting to your desktop.",
             (Problem::Connecting, De) => "WayExpand verbindet sich mit Ihrem Desktop.",
             (Problem::Connecting, Id) => "WayExpand sedang terhubung ke desktop Anda.",
@@ -269,6 +278,15 @@ impl Strings {
             }
             (Problem::InputStatusPending, Id) => {
                 "Perbarui pemeriksaan ini. Jika tetap tidak diketahui, buka Diagnostik → IBus untuk melihat pemeriksaan pendaftaran, pemilihan, mesin, atau izin yang perlu ditangani. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel manual."
+            }
+            (Problem::ReplacementConsentUnknown, En) => {
+                "Open Diagnostics → IBus and run `wayexpand validate` to resolve the unreadable configuration or policy check. Refresh this diagnosis before enabling replacement."
+            }
+            (Problem::ReplacementConsentUnknown, De) => {
+                "Öffnen Sie Diagnose → IBus und führen Sie `wayexpand validate` aus, um die nicht lesbare Konfigurations- oder Richtlinienprüfung zu beheben. Aktualisieren Sie die Diagnose, bevor Sie Ersetzungen erlauben."
+            }
+            (Problem::ReplacementConsentUnknown, Id) => {
+                "Buka Diagnostik → IBus dan jalankan `wayexpand validate` untuk memperbaiki pemeriksaan konfigurasi atau kebijakan yang tidak terbaca. Perbarui diagnosis sebelum mengaktifkan penggantian."
             }
             (Problem::InputSourceNotSelected, En) if gnome_ibus => {
                 "Text expansion is unavailable because GNOME has not selected WayExpand. Select it in Settings → Keyboard or the input-source menu, then run a live typing test. Quick Picker can copy a snippet for you to paste meanwhile."
