@@ -69,6 +69,15 @@ impl Strings {
             (Problem::InputSourceNotSetUp, Id) => {
                 "WayExpand belum disiapkan sebagai sumber masukan GNOME."
             }
+            (Problem::IbusEngineNotRegistered, En) => {
+                "GNOME has a WayExpand input source, but IBus cannot find its engine."
+            }
+            (Problem::IbusEngineNotRegistered, De) => {
+                "GNOME hat eine WayExpand-Eingabequelle, aber IBus findet die Engine nicht."
+            }
+            (Problem::IbusEngineNotRegistered, Id) => {
+                "GNOME memiliki sumber input WayExpand, tetapi IBus tidak menemukan mesinnya."
+            }
             (Problem::InputSourceNotSelected, En) => "WayExpand is not the selected input method.",
             (Problem::InputSourceNotSelected, De) => {
                 "WayExpand ist nicht als Eingabemethode ausgewählt."
@@ -269,6 +278,15 @@ impl Strings {
             }
             (Problem::InputSourceNotSelected, Id) if gnome_ibus => {
                 "Ekspansi teks tidak tersedia karena GNOME belum memilih WayExpand. Pilih di Pengaturan → Keyboard atau menu sumber input, lalu jalankan tes mengetik langsung. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel."
+            }
+            (Problem::IbusEngineNotRegistered, En) => {
+                "Run `wayexpand ibus status --json` to confirm the missing engine registration, then run `wayexpand setup --backend ibus` and check the status again. Quick Picker can copy a snippet for manual paste meanwhile."
+            }
+            (Problem::IbusEngineNotRegistered, De) => {
+                "Führen Sie `wayexpand ibus status --json` aus, um die fehlende Engine-Registrierung zu bestätigen. Starten Sie danach `wayexpand setup --backend ibus` und prüfen Sie den Status erneut. Bis dahin kann der Schnellwähler ein Snippet zum manuellen Einfügen kopieren."
+            }
+            (Problem::IbusEngineNotRegistered, Id) => {
+                "Jalankan `wayexpand ibus status --json` untuk memastikan pendaftaran mesin belum ada, lalu jalankan `wayexpand setup --backend ibus` dan periksa status lagi. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel manual."
             }
             (Problem::InputSourceNotSelected, En) => {
                 "Select WayExpand in your desktop's input-method settings, then run a live typing test. Quick Picker can copy a snippet for you to paste meanwhile."

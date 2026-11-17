@@ -795,6 +795,7 @@ impl GuiApp {
                 P::RestartNeeded
                 | P::BuildUnknown
                 | P::InputSourceNotSetUp
+                | P::IbusEngineNotRegistered
                 | P::InputSourceNotSelected
                 | P::IbusEngineUnavailable
                 | P::InputStatusStale

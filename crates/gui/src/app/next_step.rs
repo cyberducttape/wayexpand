@@ -24,6 +24,7 @@ pub(crate) enum Problem {
     RestartNeeded,
     BuildUnknown,
     InputSourceNotSetUp,
+    IbusEngineNotRegistered,
     InputSourceNotSelected,
     InputStatusPending,
     IbusEngineUnavailable,
@@ -71,6 +72,7 @@ pub(crate) enum GnomeIbusReadiness {
     DiagnosticsPending,
     DiagnosticsStale,
     SourceNotSetUp,
+    EngineNotRegistered,
     SourceNotSelected,
     EngineUnavailable,
     ReplacementNotAllowed,
@@ -98,6 +100,9 @@ pub(crate) struct Situation {
     /// Preserve PASS/FAIL/UNKNOWN from the IBus chain. Missing evidence must
     /// never be presented as a confirmed user configuration error.
     pub source_registered: IbusCheckState,
+    /// The IBus component registry can be healthy independently of GNOME's
+    /// selectable input-source list.
+    pub ibus_engine_registered: IbusCheckState,
     pub source_active: IbusCheckState,
     pub engine_state: IbusCheckState,
     pub consent_state: IbusCheckState,
@@ -138,9 +143,27 @@ pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
         }
         IbusCheckState::Pass => {}
     }
+    match s.ibus_engine_registered {
+        IbusCheckState::Fail | IbusCheckState::Warn => {
+            return GnomeIbusReadiness::EngineNotRegistered;
+        }
+        IbusCheckState::Unknown | IbusCheckState::Skip => {
+            return GnomeIbusReadiness::DiagnosticsPending;
+        }
+        IbusCheckState::Pass => {}
+    }
     match s.source_active {
         IbusCheckState::Fail | IbusCheckState::Warn => {
             return GnomeIbusReadiness::SourceNotSelected;
+        }
+        IbusCheckState::Unknown | IbusCheckState::Skip => {
+            return GnomeIbusReadiness::DiagnosticsPending;
+        }
+        IbusCheckState::Pass => {}
+    }
+    match s.consent_state {
+        IbusCheckState::Fail | IbusCheckState::Warn => {
+            return GnomeIbusReadiness::ReplacementNotAllowed;
         }
         IbusCheckState::Unknown | IbusCheckState::Skip => {
             return GnomeIbusReadiness::DiagnosticsPending;
@@ -155,15 +178,6 @@ pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
             return GnomeIbusReadiness::DiagnosticsPending;
         }
         IbusCheckState::Pass if !s.ibus_active => {
-            return GnomeIbusReadiness::DiagnosticsPending;
-        }
-        IbusCheckState::Pass => {}
-    }
-    match s.consent_state {
-        IbusCheckState::Fail | IbusCheckState::Warn => {
-            return GnomeIbusReadiness::ReplacementNotAllowed;
-        }
-        IbusCheckState::Unknown | IbusCheckState::Skip => {
             return GnomeIbusReadiness::DiagnosticsPending;
         }
         IbusCheckState::Pass => {}
@@ -228,6 +242,9 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             }
             GnomeIbusReadiness::SourceNotSetUp => {
                 Some((Problem::InputSourceNotSetUp, Action::RunSetup))
+            }
+            GnomeIbusReadiness::EngineNotRegistered => {
+                Some((Problem::IbusEngineNotRegistered, Action::RunSetup))
             }
             GnomeIbusReadiness::SourceNotSelected => {
                 Some((Problem::InputSourceNotSelected, Action::SelectInputSource))
@@ -420,6 +437,11 @@ impl GuiApp {
             gnome_ibus,
             ibus_route_expected,
             source_registered: self.ibus_check_state("gnome-source-registered"),
+            ibus_engine_registered: if self.ibus_diagnostics_fresh() == Some(true) {
+                self.ibus_check_state("registered")
+            } else {
+                IbusCheckState::Unknown
+            },
             source_active: self.ibus_check_state("gnome-source-active"),
             engine_state: self.ibus_check_state("engine"),
             consent_state: self.ibus_check_state("consent"),
@@ -704,6 +726,7 @@ mod tests {
             gnome_ibus: true,
             ibus_active: true,
             source_registered: IbusCheckState::Fail,
+            ibus_engine_registered: IbusCheckState::Pass,
             source_active: IbusCheckState::Fail,
             engine_state: IbusCheckState::Pass,
             consent_state: IbusCheckState::Pass,
@@ -744,6 +767,7 @@ mod tests {
             gnome_ibus: true,
             ibus_active: false,
             source_registered: IbusCheckState::Pass,
+            ibus_engine_registered: IbusCheckState::Pass,
             source_active: IbusCheckState::Pass,
             engine_state: IbusCheckState::Fail,
             consent_state: IbusCheckState::Pass,
@@ -767,6 +791,7 @@ mod tests {
             gnome_ibus: true,
             ibus_active: true,
             source_registered: IbusCheckState::Pass,
+            ibus_engine_registered: IbusCheckState::Pass,
             source_active: IbusCheckState::Pass,
             engine_state: IbusCheckState::Pass,
             consent_state: IbusCheckState::Unknown,
@@ -790,6 +815,7 @@ mod tests {
             gnome_ibus: true,
             ibus_active: true,
             source_registered: IbusCheckState::Pass,
+            ibus_engine_registered: IbusCheckState::Pass,
             source_active: IbusCheckState::Warn,
             engine_state: IbusCheckState::Pass,
             consent_state: IbusCheckState::Pass,
@@ -813,6 +839,7 @@ mod tests {
             gnome_ibus: true,
             ibus_active: true,
             source_registered: IbusCheckState::Pass,
+            ibus_engine_registered: IbusCheckState::Pass,
             source_active: IbusCheckState::Pass,
             engine_state: IbusCheckState::Pass,
             consent_state: IbusCheckState::Pass,
@@ -835,6 +862,7 @@ mod tests {
         let mut state = Situation {
             gnome_ibus: true,
             source_registered: IbusCheckState::Pass,
+            ibus_engine_registered: IbusCheckState::Pass,
             source_active: IbusCheckState::Pass,
             engine_state: IbusCheckState::Fail,
             consent_state: IbusCheckState::Pass,
