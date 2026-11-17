@@ -25,6 +25,7 @@ pub(crate) enum Problem {
     BuildUnknown,
     InputSourceNotSetUp,
     InputSourceNotSelected,
+    InputStatusPending,
     IbusEngineUnavailable,
     InputStatusStale,
     ReplacementNotAllowed,
@@ -123,7 +124,9 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
         return match gnome_ibus_readiness(s) {
             GnomeIbusReadiness::Ready => field(),
             GnomeIbusReadiness::Paused => Some((Problem::Paused, Action::Resume)),
-            GnomeIbusReadiness::DiagnosticsPending => None,
+            GnomeIbusReadiness::DiagnosticsPending => {
+                Some((Problem::InputStatusPending, Action::CheckAgain))
+            }
             GnomeIbusReadiness::DiagnosticsStale => {
                 Some((Problem::InputStatusStale, Action::CheckAgain))
             }
@@ -242,8 +245,9 @@ impl GuiApp {
         let ibus_active = self.ibus_active;
         let ibus_route = gnome_ibus || ibus_active && (!daemon_running || control_only);
         let replacement_allowed = if ibus_route {
-            // Unknown until diagnostics run; only an explicit refusal counts.
-            self.ibus_check_state("consent") != IbusCheckState::Fail
+            // IBus replacement is non-atomic. Unknown consent is not consent,
+            // and must agree with the first-run gate which requires Pass.
+            self.ibus_check_state("consent") == IbusCheckState::Pass
         } else {
             self.daemon_capabilities.as_ref().is_none_or(|caps| {
                 caps.inject_atomic_replace == Some(true)
@@ -485,14 +489,14 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_claimed_while_the_state_is_unknown() {
+    fn unknown_general_state_is_not_claimed_but_gnome_diagnostics_get_a_refresh_action() {
         assert_eq!(next_step(&Situation::default()), None);
         assert_eq!(
             next_step(&Situation {
                 gnome_ibus: true,
                 ..Situation::default()
             }),
-            None
+            Some((Problem::InputStatusPending, Action::CheckAgain))
         );
     }
 

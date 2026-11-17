@@ -2200,10 +2200,10 @@ mod tests {
     use super::{
         clipboard_fallback_allowed_by_policy, copy_snippet, delivery_verdict,
         focus_returned_to_target, focus_target_from_response, format_app_scope,
-        picker_availability_with_policy, picker_copy_form_allowed,
-        picker_expansion_is_eligible, picker_focus_state, picker_form, picker_needs_daemon_focus,
-        render_picker_form, score, top_ranked, top_ranked_into, Availability, FocusInfo,
-        FocusTarget, SearchEntry, MAX_RESULTS,
+        picker_availability_with_policy, picker_copy_form_allowed, picker_expansion_is_eligible,
+        picker_focus_state, picker_form, picker_needs_daemon_focus, render_picker_form, score,
+        top_ranked, top_ranked_into, Availability, FocusInfo, FocusTarget, SearchEntry,
+        MAX_RESULTS,
     };
 
     #[test]

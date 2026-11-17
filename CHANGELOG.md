@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand why` now checks GNOME's live input-source selection and the KDE
+  IBus selection when no other typing route is active, and gives a specific
+  repair, live-input test, or copy-only fallback. Reports state explicitly
+  that matcher preview and output submission do not verify application text.
+  The GUI now refreshes while GNOME readiness is unknown, treats unknown IBus
+  replacement consent as not authorized (matching first-run), and labels a
+  matcher result as a snippet check rather than a desktop success.
 - Quick Picker now supports validated form templates with editable fields and
   an exact rendered preview before copying. Organization policy, app scope,
   clipboard/secret variables, and field validators are enforced on the copy

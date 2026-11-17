@@ -7,6 +7,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use wayexpand_backend_ibus::{
+    chain::{self, IbusChainReport, IbusCheckState, IbusDesktop},
     telemetry::{self, IbusFieldActivity},
     IbusFieldVerdict,
 };
@@ -25,6 +26,12 @@ struct DaemonRoute {
     source: String,
     backend: String,
     diagnosis: ExpansionDiagnosis,
+}
+
+struct InputMethodGuidance {
+    state: &'static str,
+    answer: &'static str,
+    action: &'static str,
 }
 
 fn daemon_route(status: &DaemonStatus) -> Option<DaemonRoute> {
@@ -59,9 +66,24 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
         .as_ref()
         .map(|status| status.status_schema() == Some(CONTROL_STATUS_SCHEMA));
     let daemon = status.as_ref().and_then(daemon_route);
-    let ibus_field = telemetry::read_status()
-        .filter(|reading| reading.live)
-        .map(|reading| newest_typed_field(&reading.status.recent_fields).cloned());
+    // GNOME and KDE select IBus through desktop input-source controls. Inspect
+    // that route only when there is no other typing daemon to diagnose, so an
+    // unused IBus installation doesn't look broken.
+    let desktop = IbusDesktop::detect();
+    let input_method_route = (daemon.is_none()
+        && daemon_status_compatible != Some(false)
+        && matches!(desktop, IbusDesktop::Gnome | IbusDesktop::KdeWayland))
+    .then(chain::diagnose);
+    let input_method_guidance = input_method_route
+        .as_ref()
+        .and_then(diagnose_input_method_route);
+    let ibus_field = if daemon.is_none() && daemon_status_compatible != Some(false) {
+        telemetry::read_status()
+            .filter(|reading| reading.live)
+            .map(|reading| newest_typed_field(&reading.status.recent_fields).cloned())
+    } else {
+        None
+    };
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
@@ -75,6 +97,7 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
                 now,
                 daemon_status_schema,
                 daemon_status_compatible,
+                input_method_guidance.as_ref(),
             ))?
         );
     } else {
@@ -84,6 +107,7 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
             now,
             daemon_status_schema,
             daemon_status_compatible,
+            input_method_guidance.as_ref(),
         );
     }
     if daemon_status_compatible == Some(false) {
@@ -97,7 +121,7 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
             ),
         ));
     }
-    if daemon.is_none() && ibus_field.is_none() {
+    if daemon.is_none() && ibus_field.is_none() && input_method_route.is_none() {
         return Err(classified_error(
             CliErrorKind::Daemon,
             "no WayExpand typing route is running",
@@ -112,12 +136,159 @@ fn newest_typed_field(fields: &[IbusFieldActivity]) -> Option<&IbusFieldActivity
     fields.iter().rev().find(|field| field.keys > 0)
 }
 
+fn diagnose_input_method_route(report: &IbusChainReport) -> Option<InputMethodGuidance> {
+    if !matches!(report.desktop, IbusDesktop::Gnome | IbusDesktop::KdeWayland) {
+        return None;
+    }
+    let is_gnome = report.desktop == IbusDesktop::Gnome;
+    let registered = report.check(if is_gnome {
+        "gnome-source-registered"
+    } else {
+        "registered"
+    });
+    let registration_state = registered.map_or(IbusCheckState::Unknown, |check| check.state);
+    if registration_state != IbusCheckState::Pass {
+        return Some(match registration_state {
+            IbusCheckState::Fail => InputMethodGuidance {
+                state: "not_registered",
+                answer: if is_gnome {
+                    "WayExpand is not registered as a GNOME input source, so GNOME cannot send it your typing."
+                } else {
+                    "The WayExpand IBus engine is not registered, so KDE cannot route your typing to it."
+                },
+                action: if is_gnome {
+                    "Run `wayexpand repair --gnome-input-source`, then `wayexpand doctor --gnome`. Until then, use `wayexpand-gui --picker --copy-only` and paste manually."
+                } else {
+                    "Run `wayexpand setup --backend ibus`, then `wayexpand ibus status`. Until then, use `wayexpand-gui --picker --copy-only` and paste manually."
+                },
+            },
+            _ => InputMethodGuidance {
+                state: "registration_unknown",
+                answer: if is_gnome {
+                    "WayExpand's GNOME input-source registration could not be verified."
+                } else {
+                    "WayExpand's IBus engine registration could not be verified."
+                },
+                action: if is_gnome {
+                    "Run `wayexpand doctor --gnome --json` and follow the first failed or unknown check. You can use `wayexpand-gui --picker --copy-only` and paste manually."
+                } else {
+                    "Run `wayexpand ibus status --json` and follow the first failed or unknown check. You can use `wayexpand-gui --picker --copy-only` and paste manually."
+                },
+            },
+        });
+    }
+    if is_gnome {
+        let engine_registration = report.check("registered");
+        if !engine_registration.is_some_and(|check| check.state == IbusCheckState::Pass) {
+            let state = engine_registration.map_or(IbusCheckState::Unknown, |check| check.state);
+            return Some(InputMethodGuidance {
+                state: if state == IbusCheckState::Fail {
+                    "ibus_engine_not_registered"
+                } else {
+                    "ibus_engine_registration_unknown"
+                },
+                answer: if state == IbusCheckState::Fail {
+                    "GNOME lists WayExpand as an input source, but the IBus engine registry does not contain it."
+                } else {
+                    "WayExpand's IBus engine registry could not be verified."
+                },
+                action: "Run `wayexpand ibus status --json` and follow the engine-registration check. If the component is missing, run `wayexpand setup --backend ibus`, then rerun `wayexpand ibus status`. Use `wayexpand-gui --picker --copy-only` and paste manually meanwhile.",
+            });
+        }
+    }
+    let active = report.check(if is_gnome {
+        "gnome-source-active"
+    } else {
+        "selected"
+    });
+    let selection_state = active.map_or(IbusCheckState::Unknown, |check| check.state);
+    if selection_state != IbusCheckState::Pass {
+        return Some(match selection_state {
+            IbusCheckState::Warn | IbusCheckState::Fail => InputMethodGuidance {
+                state: "not_selected",
+                answer: if is_gnome {
+                    "Text expansion is unavailable because GNOME has not selected the WayExpand input source."
+                } else {
+                    "Text expansion is unavailable because WayExpand is not the selected IBus input method."
+                },
+                action: if is_gnome {
+                    "Select WayExpand in Settings → Keyboard or the input-source menu. Then run `wayexpand ibus watch --seconds 30` while typing harmless text in a normal field. For now, use `wayexpand-gui --picker --copy-only` and paste manually."
+                } else {
+                    "Select WayExpand from KDE's input-method controls, then run `wayexpand ibus watch --seconds 30` while typing harmless text in a normal field. For now, use `wayexpand-gui --picker --copy-only` and paste manually."
+                },
+            },
+            _ => InputMethodGuidance {
+                state: "selection_unknown",
+                answer: if is_gnome {
+                    "GNOME's active input source could not be confirmed; WayExpand cannot yet tell whether typing reaches its engine."
+                } else {
+                    "The selected IBus engine could not be confirmed; WayExpand cannot yet tell whether typing reaches it."
+                },
+                action: if is_gnome {
+                    "Run `wayexpand doctor --gnome --json` and follow its GNOME source or session-bridge finding. You can use `wayexpand-gui --picker --copy-only` and paste manually."
+                } else {
+                    "Run `wayexpand ibus status --json` and follow its first failed or unknown check. You can use `wayexpand-gui --picker --copy-only` and paste manually."
+                },
+            },
+        });
+    }
+    let consent = report
+        .check("consent")
+        .map_or(IbusCheckState::Unknown, |check| check.state);
+    if consent != IbusCheckState::Pass {
+        return Some(if consent == IbusCheckState::Fail {
+            InputMethodGuidance {
+                state: "replacement_not_allowed",
+                answer: if is_gnome { "GNOME selected WayExpand, but replacement is disabled by consent or policy." } else { "KDE selected WayExpand, but replacement is disabled by consent or policy." },
+                action: "Review `wayexpand ibus status` and authorize replacement only if you accept its non-atomic behavior; otherwise use `wayexpand-gui --picker --copy-only` and paste manually.",
+            }
+        } else {
+            InputMethodGuidance {
+                state: "replacement_consent_unknown",
+                answer: "WayExpand cannot confirm that IBus replacement is authorized, so it will not claim the route is ready.",
+                action: "Run `wayexpand validate`, then `wayexpand ibus status`. If you accept the non-atomic behavior, authorize it through guided setup; otherwise use `wayexpand-gui --picker --copy-only` and paste manually.",
+            }
+        });
+    }
+    let engine = report.check("engine");
+    if !engine.is_some_and(|check| check.state == IbusCheckState::Pass) {
+        let state = engine.map_or(IbusCheckState::Unknown, |check| check.state);
+        return Some(InputMethodGuidance {
+            state: if state == IbusCheckState::Warn {
+                "engine_not_running"
+            } else {
+                "engine_state_unknown"
+            },
+            answer: "WayExpand's engine is registered, but its running input context has not been confirmed.",
+            action: if is_gnome {
+                "Select another GNOME input source and select WayExpand again, then run `wayexpand ibus status`. If the engine still does not start, run `wayexpand doctor --gnome --json`. Use `wayexpand-gui --picker --copy-only` and paste manually meanwhile."
+            } else {
+                "Switch away from WayExpand and select it again in KDE's input-method controls, then run `wayexpand ibus status`. Use `wayexpand-gui --picker --copy-only` and paste manually meanwhile."
+            },
+        });
+    }
+    let field_input = report.check("field-input");
+    if !field_input.is_some_and(|check| check.state == IbusCheckState::Pass) {
+        return Some(InputMethodGuidance {
+            state: "field_input_unverified",
+            answer: if is_gnome { "GNOME selected WayExpand, but no normal text field has yet been confirmed to deliver input to its engine." } else { "KDE selected WayExpand, but no normal text field has yet been confirmed to deliver input to its engine." },
+            action: "Run `wayexpand ibus watch --seconds 30`, focus the affected field, and type harmless text. This checks input delivery only; use a real expansion test to confirm matching and insertion. For now, use `wayexpand-gui --picker --copy-only` and paste manually.",
+        });
+    }
+    Some(InputMethodGuidance {
+        state: "input_observed_delivery_unverified",
+        answer: "WayExpand observed input from a normal IBus field in this session, but telemetry does not identify the affected application. This does not prove a trigger matched or that the application applied replacement text.",
+        action: "Run a harmless trigger once in the affected application and inspect the visible text. A matcher preview checks only the pattern; use the real-application test in Getting started to verify delivery. Do not retry output whose result is uncertain. For a reliable manual path, use `wayexpand-gui --picker --copy-only` and paste.",
+    })
+}
+
 fn report_json(
     daemon: Option<&DaemonRoute>,
     ibus_field: Option<&Option<IbusFieldActivity>>,
     now: u64,
     daemon_status_schema: Option<u32>,
     daemon_status_compatible: Option<bool>,
+    input_method: Option<&InputMethodGuidance>,
 ) -> serde_json::Value {
     let daemon = daemon.map(|route| {
         let diagnosis = &route.diagnosis;
@@ -147,6 +318,7 @@ fn report_json(
         let field = field.as_ref();
         serde_json::json!({
             "verdict": field.map(|field| IbusFieldVerdict::of(field).label()),
+            "next_action": field.map(|field| ibus_field_action(IbusFieldVerdict::of(field))),
             "keys": field.map(|field| field.keys),
             "expansions": field.map(|field| field.expansions),
         })
@@ -155,7 +327,14 @@ fn report_json(
         "daemon_status_schema": daemon_status_schema,
         "daemon_status_compatible": daemon_status_compatible,
         "daemon": daemon,
-        "ibus": ibus
+        "ibus": ibus,
+        "desktop_input_route": input_method.map(|guidance| serde_json::json!({
+            "state": guidance.state,
+            "answer": guidance.answer,
+            "next_action": guidance.action,
+        })),
+        "matcher_preview_proves_application_delivery": false,
+        "application_delivery_verified": false
     })
 }
 
@@ -165,6 +344,7 @@ fn print_report(
     now: u64,
     daemon_status_schema: Option<u32>,
     daemon_status_compatible: Option<bool>,
+    input_method: Option<&InputMethodGuidance>,
 ) {
     if daemon_status_compatible == Some(false) {
         println!("Keyboard route");
@@ -181,10 +361,21 @@ fn print_report(
             return;
         }
     }
-    if daemon.is_none() && ibus_field.is_none() && daemon_status_compatible != Some(false) {
+    if daemon.is_none()
+        && ibus_field.is_none()
+        && input_method.is_none()
+        && daemon_status_compatible != Some(false)
+    {
         println!("No WayExpand typing route is running, so nothing can expand.");
         println!("Fix: run `wayexpand setup`, then `wayexpand doctor`.");
         return;
+    }
+    if let Some(guidance) = input_method {
+        println!("Desktop input route: {}", guidance.state.replace('_', " "));
+        println!("  {}", guidance.answer);
+        println!("  Next: {}", guidance.action);
+        println!("  A matcher preview does not verify text insertion into this application.");
+        println!();
     }
     if let Some(field) = ibus_field {
         println!("Apps through IBus");
@@ -196,6 +387,7 @@ fn print_report(
                     field.keys, field.expansions
                 );
                 println!("  {}", sentence(verdict.explanation()));
+                println!("  Next: {}", ibus_field_action(verdict));
             }
             None => {
                 println!("  No typing has reached the IBus engine yet in this login session.");
@@ -291,7 +483,7 @@ fn verdict_text(diagnosis: &ExpansionDiagnosis, now: u64) -> (String, Option<Str
                     ""
                 }
             ),
-            Some("`wayexpand explain 'the text you typed'` checks it".to_owned()),
+            Some("Run `wayexpand explain 'the trigger you typed'` to check the pattern and app filter; this does not test desktop input or insertion. Then run `wayexpand debug --test 'YOUR_TRIGGER'` in the affected app and inspect the visible text.".to_owned()),
         ),
         Verdict::LastStopped(kind) => {
             let completion = diagnosis
@@ -302,9 +494,9 @@ fn verdict_text(diagnosis: &ExpansionDiagnosis, now: u64) -> (String, Option<Str
             stopped_text(kind, completion)
         }
         Verdict::LastExpanded => (
-            "The route accepted the last expansion. If the text did not appear, the app ignored or changed it; WayExpand cannot see the app's text."
+            "WayExpand matched the trigger and submitted replacement output, but cannot verify that the application changed its text."
                 .to_owned(),
-            None,
+            Some("inspect the field; if the text is missing or wrong, run a harmless real-application test with `wayexpand debug --test 'YOUR_TRIGGER'`; do not retry uncertain output".to_owned()),
         ),
     }
 }
@@ -382,6 +574,36 @@ fn sentence(clause: &str) -> String {
     sentence
 }
 
+fn ibus_field_action(verdict: IbusFieldVerdict) -> &'static str {
+    use IbusFieldVerdict as V;
+    match verdict {
+        V::OutputEmittedUnverified => {
+            "Inspect the field before continuing; if the text is wrong, do not replay it. Run a harmless real-application test after recovery."
+        }
+        V::ReplacementContextObserved => {
+            "Type a harmless configured trigger in this field and verify the visible result; surrounding text alone does not prove insertion."
+        }
+        V::NoContentType => {
+            "Use a normal, non-sensitive text field and run `wayexpand ibus watch --seconds 30` while typing harmless text."
+        }
+        V::Sensitive => {
+            "WayExpand intentionally suppresses expansion in sensitive fields. Test in a normal text field instead."
+        }
+        V::NoSurroundingText => {
+            "This field cannot support safe automatic replacement. Open `wayexpand-gui --picker --copy-only` and paste manually."
+        }
+        V::Mismatch => {
+            "Check the exact trigger with `wayexpand explain 'THE_TRIGGER'`; inspect the field before trying again."
+        }
+        V::Policy => {
+            "Run `wayexpand policy check --json` and `wayexpand doctor --security`; ask the policy administrator before changing a restriction."
+        }
+        V::Idle => {
+            "Focus this field, run `wayexpand ibus watch --seconds 30`, and type harmless text to check input delivery."
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,6 +663,7 @@ mod tests {
             5,
             Some(CONTROL_STATUS_SCHEMA),
             Some(true),
+            None,
         );
         assert_eq!(value["daemon"]["verdict"], "last_stopped");
         assert_eq!(value["daemon"]["last_outcome"], "interrupted_by_typing");
@@ -449,7 +672,7 @@ mod tests {
             "interrupted_by_typing"
         );
         assert!(value["ibus"].is_null());
-        let no_field = report_json(None, Some(&None), 5, None, None);
+        let no_field = report_json(None, Some(&None), 5, None, None, None);
         assert!(no_field["daemon"].is_null());
         assert!(no_field["ibus"]["verdict"].is_null());
         assert!(no_field["daemon_status_schema"].is_null());
@@ -465,7 +688,7 @@ mod tests {
             CONTROL_STATUS_SCHEMA - 1
         ));
         assert!(daemon_route(&stale).is_none());
-        let stale_report = report_json(None, None, 5, stale.status_schema(), Some(false));
+        let stale_report = report_json(None, None, 5, stale.status_schema(), Some(false), None);
         assert_eq!(stale_report["daemon"], serde_json::Value::Null);
         assert_eq!(stale_report["daemon_status_compatible"], false);
 

@@ -472,9 +472,9 @@ texts! {
         "Auslöser zuerst in WayExpand ausprobieren",
         "Coba pemicu di dalam WayExpand dulu";
     first_run_trigger_works_inside =>
-        "The trigger works inside WayExpand.",
-        "Der Auslöser funktioniert in WayExpand.",
-        "Pemicu berfungsi di dalam WayExpand.";
+        "Matcher preview matched. This checks the snippet only; test in an app to verify typing and replacement.",
+        "Die Matcher-Vorschau passt. Das prüft nur das Snippet; testen Sie in einer App, ob Eingabe und Ersetzung funktionieren.",
+        "Pratinjau pencocok cocok. Ini hanya memeriksa cuplikan; uji di aplikasi untuk memastikan pengetikan dan penggantian.";
     first_run_troubleshooting_details =>
         "Troubleshooting details",
         "Details zur Fehlerbehebung",
