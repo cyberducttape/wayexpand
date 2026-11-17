@@ -266,6 +266,10 @@ impl TextInjector for PasteInjector {
     }
 
     fn reset_output_progress(&mut self) {
+        // A diagnostic stage belongs to one output transaction only. Clear
+        // it before preflight so a later refusal cannot inherit an older
+        // paste failure from the process-wide status field.
+        LAST_FAILURE.store(0, Ordering::Relaxed);
         self.inner.reset_output_progress();
     }
 

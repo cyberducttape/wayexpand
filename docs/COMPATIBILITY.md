@@ -990,8 +990,22 @@ one means the trigger never reached that route. Window-dependent matching
 reasons (`application_scope_denied`, `application_scope_unknown`) are ignored,
 because the focused window while the command runs is the terminal.
 
-`--json` prints `{"daemon": …, "ibus": …}`; either is `null` when that route
-is not running. `daemon` holds `source`, `backend`, `verdict`
+The text report gives one plain-language cause and a concrete next action.
+`--json` adds a top-level `diagnosis` with stable `state`, `answer`, and
+`next_action` fields, plus `pattern_match` and `delivery_status`. These describe
+separate stages: a recent match or submitted output is not proof that the
+target application changed its text. `matcher_preview_proves_application_delivery`
+and `application_delivery_verified` remain `false`; a local matcher preview
+cannot certify desktop delivery. Use the GUI's real-application typing test
+and confirm the visible result to establish that route's operation.
+`pattern_match` reports `confirmed_recently`, `not_observed_recently`,
+`no_input_observed`, `blocked`, or `unknown`; `delivery_status` reports
+`submitted_unverified`, `not_submitted`, `partial_or_uncertain`, `uncertain`,
+`blocked_by_policy`, `stopped_before_output`, `snippet_action_failed`,
+`not_observed`, or `unknown`.
+
+`daemon` and `ibus` are `null` when those routes are not available. `daemon`
+holds `source`, `backend`, `verdict`
 (`matching_off`, `no_typing_seen`, `nothing_matched`, `last_stopped`,
 `last_expanded`), `matching_block` (`capture_disconnected`,
 `keyboard_layout_unavailable`, `output_unavailable`, `policy_route`, `paused`,
@@ -1000,7 +1014,11 @@ is not running. `daemon` holds `source`, `backend`, `verdict`
 first: `at_unix`, `outcome`, and the daemon's fixed `completion` label).
 `outcome` is one of `expanded`, `expanded_cursor_misplaced`, `not_applied`,
 `unknown`, `partial`, `blocked_by_policy`, `interrupted_by_typing`,
-`snippet_action_failed` or `other`. `ibus` holds the newest typed field's
+`snippet_action_failed` or `other`. Terminal paste routes can also report a
+content-free `terminal_paste_last_failure` stage, such as trigger erasure,
+focus validation, input interruption, cancellation, or paste-key delivery.
+When output may have started, inspect the target before continuing; WayExpand
+does not automatically replay uncertain output. `ibus` holds the newest typed field's
 `verdict` (an IBus field label such as `no-surrounding-text`), `keys` and
 `expansions`, all `null` before any typing. The control-only service (stdin
 source) counts as no daemon route. Exit code 0 when either route is running,
