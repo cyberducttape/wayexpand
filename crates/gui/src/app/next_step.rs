@@ -33,6 +33,7 @@ pub(crate) enum Problem {
     RouteFailed,
     Unsupported,
     FieldCannotReplace,
+    ApplicationDeliveryUnverified,
 }
 
 /// The one thing to do about it.
@@ -46,6 +47,7 @@ pub(crate) enum Action {
     ReviewConsent,
     CheckAgain,
     QuickPicker,
+    TestInApplication,
 }
 
 /// One authoritative interpretation of GNOME IBus evidence. Both the
@@ -90,6 +92,10 @@ pub(crate) struct Situation {
     pub replacement_allowed: bool,
     /// The last normal field refused replacement (no surrounding text).
     pub field_cannot_replace: bool,
+    /// A user-confirmed insertion in an application still covers this
+    /// desktop session, build, and route. Matcher previews and backend
+    /// acknowledgements do not satisfy this condition.
+    pub application_delivery_verified: bool,
 }
 
 pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
@@ -116,13 +122,21 @@ pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
     GnomeIbusReadiness::Ready
 }
 
-/// The most important problem and its action, or `None` when expansion
-/// should work (or the state is still being checked).
+/// The most important problem and its action, or `None` only when a real
+/// application insertion has been confirmed for the current route.
 pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     use runtime::RouteState as R;
     let field = || {
-        s.field_cannot_replace
-            .then_some((Problem::FieldCannotReplace, Action::QuickPicker))
+        if s.field_cannot_replace {
+            Some((Problem::FieldCannotReplace, Action::QuickPicker))
+        } else if !s.application_delivery_verified {
+            Some((
+                Problem::ApplicationDeliveryUnverified,
+                Action::TestInApplication,
+            ))
+        } else {
+            None
+        }
     };
     if s.gnome_ibus {
         return match gnome_ibus_readiness(s) {
@@ -179,10 +193,10 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     }
     match s.build {
         Some(runtime::DaemonBuildState::RestartRequired) => {
-            return Some((Problem::RestartNeeded, Action::Restart))
+            return Some((Problem::RestartNeeded, Action::Restart));
         }
         Some(runtime::DaemonBuildState::Unverified) => {
-            return Some((Problem::BuildUnknown, Action::Restart))
+            return Some((Problem::BuildUnknown, Action::Restart));
         }
         _ => {}
     }
@@ -288,6 +302,7 @@ impl GuiApp {
             replacement_allowed,
             field_cannot_replace: ibus_route
                 && self.ibus_check_state("surrounding-text") == IbusCheckState::Fail,
+            application_delivery_verified: self.expansion_observed(),
         }
     }
 
@@ -325,9 +340,7 @@ impl GuiApp {
         next_step(&self.situation())
     }
 
-    /// Do `action`. Each runs an existing, confirmed path: guided setup,
-    /// the service-restart confirmation, the GNOME source repair, the
-    /// copy-only picker.
+    /// Run the concrete repair or verification associated with the finding.
     pub(crate) fn perform_next_step(&mut self, action: Action) {
         match action {
             Action::TurnOn | Action::RunSetup => self.start_guided_setup(),
@@ -343,6 +356,7 @@ impl GuiApp {
             Action::SelectInputSource => self.retry_gnome_source_activation(),
             Action::CheckAgain => self.refresh_diagnostics(true),
             Action::QuickPicker => self.open_copy_only_picker(),
+            Action::TestInApplication => self.start_onboarding_desktop_test(),
         }
     }
 
@@ -417,8 +431,8 @@ impl GuiApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        gnome_ibus_readiness, next_step, Action, GnomeIbusReadiness, IbusCheckState, Problem,
-        Situation,
+        Action, GnomeIbusReadiness, IbusCheckState, Problem, Situation, gnome_ibus_readiness,
+        next_step,
     };
     use crate::runtime::{DaemonBuildState, RouteState};
 
@@ -428,6 +442,7 @@ mod tests {
             route_state: Some(route),
             build: Some(DaemonBuildState::Current),
             replacement_allowed: true,
+            application_delivery_verified: true,
             ..Situation::default()
         }
     }
@@ -530,6 +545,7 @@ mod tests {
             ibus_active: true,
             replacement_allowed: true,
             diagnostics_fresh: Some(true),
+            application_delivery_verified: true,
             ..Situation::default()
         };
         assert_eq!(
@@ -668,6 +684,7 @@ mod tests {
         );
         state.diagnostics_fresh = Some(true);
         assert_eq!(gnome_ibus_readiness(&state), GnomeIbusReadiness::Ready);
+        state.application_delivery_verified = true;
         assert_eq!(next_step(&state), None);
     }
 
@@ -679,6 +696,7 @@ mod tests {
             daemon_reachable: Some(false),
             replacement_allowed: true,
             field_cannot_replace: true,
+            application_delivery_verified: true,
             ..Situation::default()
         };
         assert_eq!(
@@ -702,6 +720,7 @@ mod tests {
             ibus_selection: IbusCheckState::Fail,
             daemon_reachable: Some(false),
             replacement_allowed: true,
+            application_delivery_verified: true,
             ..Situation::default()
         };
         assert_eq!(

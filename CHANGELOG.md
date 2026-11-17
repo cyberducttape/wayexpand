@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The GUI's next-step adviser now treats a connected, consented input route as
+  **not yet verified** until a user confirms an insertion in a real
+  application. Its *Test in an app* action opens the existing desktop test;
+  matcher previews and backend acknowledgements cannot mark delivery as
+  verified. This check is scoped to the current desktop session, build, and
+  route instance, and the Quick Picker remains the action for fields that
+  refuse safe replacement.
 - `wayexpand why` now checks GNOME's live input-source selection and the KDE
   IBus selection when no other typing route is active, and gives a specific
   repair, live-input test, or copy-only fallback. Reports state explicitly

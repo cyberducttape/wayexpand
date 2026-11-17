@@ -783,6 +783,7 @@ impl GuiApp {
                 P::Unsupported => (S::CopyOnly, palette.muted),
                 P::NoTypingRoute => (S::NeedsSetup, palette.warning),
                 P::FieldCannotReplace => (S::Limited, palette.warning),
+                P::ApplicationDeliveryUnverified => (S::NeedsVerification, palette.accent),
                 P::InputStatusPending => (S::Checking, palette.muted),
                 P::RestartNeeded
                 | P::BuildUnknown
@@ -842,10 +843,9 @@ impl GuiApp {
     /// route, "<source> → <backend>" for a connected daemon, `None` while
     /// unknown.
     pub(crate) fn current_route_label(&self) -> Option<String> {
-        let situation = self.situation();
-        if self.ibus_route_active()
-            && (self.daemon_reachable != Some(true) || situation.control_only)
-        {
+        let control_only =
+            runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin");
+        if self.ibus_route_active() && (self.daemon_reachable != Some(true) || control_only) {
             return Some("ibus".into());
         }
         if self.daemon_reachable != Some(true)

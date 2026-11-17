@@ -8,56 +8,143 @@ impl Strings {
         use Language::{English as En, German as De, Indonesian as Id};
         match (problem, self.lang) {
             (Problem::ServiceOff, En) => "WayExpand is off, so snippets do not expand.",
-            (Problem::ServiceOff, De) => "WayExpand ist aus, deshalb werden Snippets nicht ersetzt.",
+            (Problem::ServiceOff, De) => {
+                "WayExpand ist aus, deshalb werden Snippets nicht ersetzt."
+            }
             (Problem::ServiceOff, Id) => "WayExpand mati, jadi cuplikan tidak diperluas.",
-            (Problem::NoTypingRoute, En) => "Only the Quick Picker and hotkeys are on: nothing reads what you type yet.",
-            (Problem::NoTypingRoute, De) => "Nur Schnellwähler und Tastenkürzel sind aktiv: Noch liest nichts mit, was Sie tippen.",
-            (Problem::NoTypingRoute, Id) => "Hanya Picker dan pintasan yang aktif: belum ada yang membaca ketikan Anda.",
+            (Problem::NoTypingRoute, En) => {
+                "Only the Quick Picker and hotkeys are on: nothing reads what you type yet."
+            }
+            (Problem::NoTypingRoute, De) => {
+                "Nur Schnellwähler und Tastenkürzel sind aktiv: Noch liest nichts mit, was Sie tippen."
+            }
+            (Problem::NoTypingRoute, Id) => {
+                "Hanya Picker dan pintasan yang aktif: belum ada yang membaca ketikan Anda."
+            }
             (Problem::Paused, En) => "Expansion is paused.",
             (Problem::Paused, De) => "Die Ersetzung ist pausiert.",
             (Problem::Paused, Id) => "Ekspansi dijeda.",
-            (Problem::PermissionNeeded, En) => "Your desktop has not yet allowed WayExpand to read and type text.",
-            (Problem::PermissionNeeded, De) => "Ihr Desktop hat WayExpand noch nicht erlaubt, Text zu lesen und zu tippen.",
-            (Problem::PermissionNeeded, Id) => "Desktop Anda belum mengizinkan WayExpand membaca dan mengetik teks.",
-            (Problem::PermissionRevoked, En) => "Your desktop withdrew WayExpand's permission to type.",
-            (Problem::PermissionRevoked, De) => "Ihr Desktop hat WayExpand die Erlaubnis zum Tippen entzogen.",
-            (Problem::PermissionRevoked, Id) => "Desktop Anda mencabut izin WayExpand untuk mengetik.",
-            (Problem::RestartNeeded, En) => "The running WayExpand service is from an older version.",
-            (Problem::RestartNeeded, De) => "Der laufende WayExpand-Dienst stammt aus einer älteren Version.",
-            (Problem::RestartNeeded, Id) => "Layanan WayExpand yang berjalan berasal dari versi lama.",
-            (Problem::BuildUnknown, En) => "The running WayExpand service cannot say which version it is.",
-            (Problem::BuildUnknown, De) => "Der laufende WayExpand-Dienst kann seine Version nicht angeben.",
-            (Problem::BuildUnknown, Id) => "Layanan WayExpand yang berjalan tidak dapat menyebutkan versinya.",
-            (Problem::InputSourceNotSetUp, En) => "WayExpand is not set up as a GNOME input source yet.",
-            (Problem::InputSourceNotSetUp, De) => "WayExpand ist noch nicht als GNOME-Eingabequelle eingerichtet.",
-            (Problem::InputSourceNotSetUp, Id) => "WayExpand belum disiapkan sebagai sumber masukan GNOME.",
+            (Problem::PermissionNeeded, En) => {
+                "Your desktop has not yet allowed WayExpand to read and type text."
+            }
+            (Problem::PermissionNeeded, De) => {
+                "Ihr Desktop hat WayExpand noch nicht erlaubt, Text zu lesen und zu tippen."
+            }
+            (Problem::PermissionNeeded, Id) => {
+                "Desktop Anda belum mengizinkan WayExpand membaca dan mengetik teks."
+            }
+            (Problem::PermissionRevoked, En) => {
+                "Your desktop withdrew WayExpand's permission to type."
+            }
+            (Problem::PermissionRevoked, De) => {
+                "Ihr Desktop hat WayExpand die Erlaubnis zum Tippen entzogen."
+            }
+            (Problem::PermissionRevoked, Id) => {
+                "Desktop Anda mencabut izin WayExpand untuk mengetik."
+            }
+            (Problem::RestartNeeded, En) => {
+                "The running WayExpand service is from an older version."
+            }
+            (Problem::RestartNeeded, De) => {
+                "Der laufende WayExpand-Dienst stammt aus einer älteren Version."
+            }
+            (Problem::RestartNeeded, Id) => {
+                "Layanan WayExpand yang berjalan berasal dari versi lama."
+            }
+            (Problem::BuildUnknown, En) => {
+                "The running WayExpand service cannot say which version it is."
+            }
+            (Problem::BuildUnknown, De) => {
+                "Der laufende WayExpand-Dienst kann seine Version nicht angeben."
+            }
+            (Problem::BuildUnknown, Id) => {
+                "Layanan WayExpand yang berjalan tidak dapat menyebutkan versinya."
+            }
+            (Problem::InputSourceNotSetUp, En) => {
+                "WayExpand is not set up as a GNOME input source yet."
+            }
+            (Problem::InputSourceNotSetUp, De) => {
+                "WayExpand ist noch nicht als GNOME-Eingabequelle eingerichtet."
+            }
+            (Problem::InputSourceNotSetUp, Id) => {
+                "WayExpand belum disiapkan sebagai sumber masukan GNOME."
+            }
             (Problem::InputSourceNotSelected, En) => "WayExpand is not the selected input method.",
-            (Problem::InputSourceNotSelected, De) => "WayExpand ist nicht als Eingabemethode ausgewählt.",
+            (Problem::InputSourceNotSelected, De) => {
+                "WayExpand ist nicht als Eingabemethode ausgewählt."
+            }
             (Problem::InputSourceNotSelected, Id) => "WayExpand bukan metode masukan yang dipilih.",
-            (Problem::InputStatusPending, En) => "WayExpand is checking whether the desktop selected its input method.",
-            (Problem::InputStatusPending, De) => "WayExpand prüft, ob der Desktop die Eingabemethode ausgewählt hat.",
-            (Problem::InputStatusPending, Id) => "WayExpand sedang memeriksa apakah desktop memilih metode masukannya.",
-            (Problem::IbusEngineUnavailable, En) => "The selected WayExpand input source has no running engine.",
-            (Problem::IbusEngineUnavailable, De) => "Für die ausgewählte WayExpand-Eingabequelle läuft keine Engine.",
-            (Problem::IbusEngineUnavailable, Id) => "Sumber masukan WayExpand yang dipilih tidak memiliki mesin aktif.",
+            (Problem::InputStatusPending, En) => {
+                "WayExpand is checking whether the desktop selected its input method."
+            }
+            (Problem::InputStatusPending, De) => {
+                "WayExpand prüft, ob der Desktop die Eingabemethode ausgewählt hat."
+            }
+            (Problem::InputStatusPending, Id) => {
+                "WayExpand sedang memeriksa apakah desktop memilih metode masukannya."
+            }
+            (Problem::IbusEngineUnavailable, En) => {
+                "The selected WayExpand input source has no running engine."
+            }
+            (Problem::IbusEngineUnavailable, De) => {
+                "Für die ausgewählte WayExpand-Eingabequelle läuft keine Engine."
+            }
+            (Problem::IbusEngineUnavailable, Id) => {
+                "Sumber masukan WayExpand yang dipilih tidak memiliki mesin aktif."
+            }
             (Problem::InputStatusStale, En) => "GNOME input status changed or is out of date.",
-            (Problem::InputStatusStale, De) => "Der GNOME-Eingabestatus hat sich geändert oder ist veraltet.",
-            (Problem::InputStatusStale, Id) => "Status masukan GNOME berubah atau sudah kedaluwarsa.",
-            (Problem::ReplacementNotAllowed, En) => "Replacing typed text on this desktop needs your approval first.",
-            (Problem::ReplacementNotAllowed, De) => "Das Ersetzen getippten Texts braucht auf diesem Desktop zuerst Ihre Zustimmung.",
-            (Problem::ReplacementNotAllowed, Id) => "Mengganti teks yang diketik di desktop ini perlu persetujuan Anda dulu.",
+            (Problem::InputStatusStale, De) => {
+                "Der GNOME-Eingabestatus hat sich geändert oder ist veraltet."
+            }
+            (Problem::InputStatusStale, Id) => {
+                "Status masukan GNOME berubah atau sudah kedaluwarsa."
+            }
+            (Problem::ReplacementNotAllowed, En) => {
+                "Replacing typed text on this desktop needs your approval first."
+            }
+            (Problem::ReplacementNotAllowed, De) => {
+                "Das Ersetzen getippten Texts braucht auf diesem Desktop zuerst Ihre Zustimmung."
+            }
+            (Problem::ReplacementNotAllowed, Id) => {
+                "Mengganti teks yang diketik di desktop ini perlu persetujuan Anda dulu."
+            }
             (Problem::Connecting, En) => "WayExpand is connecting to your desktop.",
             (Problem::Connecting, De) => "WayExpand verbindet sich mit Ihrem Desktop.",
             (Problem::Connecting, Id) => "WayExpand sedang terhubung ke desktop Anda.",
             (Problem::RouteFailed, En) => "WayExpand lost its connection to your desktop's typing.",
-            (Problem::RouteFailed, De) => "WayExpand hat die Verbindung zur Texteingabe Ihres Desktops verloren.",
-            (Problem::RouteFailed, Id) => "WayExpand kehilangan koneksi ke pengetikan desktop Anda.",
-            (Problem::Unsupported, En) => "This desktop does not let WayExpand replace typed text. You can still insert snippets with the Quick Picker.",
-            (Problem::Unsupported, De) => "Dieser Desktop erlaubt WayExpand nicht, getippten Text zu ersetzen. Snippets lassen sich weiter mit dem Schnellwähler einfügen.",
-            (Problem::Unsupported, Id) => "Desktop ini tidak mengizinkan WayExpand mengganti teks yang diketik. Anda tetap bisa menyisipkan cuplikan dengan Quick Picker.",
-            (Problem::FieldCannotReplace, En) => "The app you typed in last does not let WayExpand replace text there. Use the Quick Picker in that app.",
-            (Problem::FieldCannotReplace, De) => "Die zuletzt benutzte App lässt WayExpand dort keinen Text ersetzen. Nutzen Sie in dieser App den Schnellwähler.",
-            (Problem::FieldCannotReplace, Id) => "Aplikasi tempat Anda terakhir mengetik tidak mengizinkan WayExpand mengganti teks di sana. Gunakan Quick Picker di aplikasi itu.",
+            (Problem::RouteFailed, De) => {
+                "WayExpand hat die Verbindung zur Texteingabe Ihres Desktops verloren."
+            }
+            (Problem::RouteFailed, Id) => {
+                "WayExpand kehilangan koneksi ke pengetikan desktop Anda."
+            }
+            (Problem::Unsupported, En) => {
+                "This desktop does not let WayExpand replace typed text. You can still insert snippets with the Quick Picker."
+            }
+            (Problem::Unsupported, De) => {
+                "Dieser Desktop erlaubt WayExpand nicht, getippten Text zu ersetzen. Snippets lassen sich weiter mit dem Schnellwähler einfügen."
+            }
+            (Problem::Unsupported, Id) => {
+                "Desktop ini tidak mengizinkan WayExpand mengganti teks yang diketik. Anda tetap bisa menyisipkan cuplikan dengan Quick Picker."
+            }
+            (Problem::FieldCannotReplace, En) => {
+                "The app you typed in last does not let WayExpand replace text there. Use the Quick Picker in that app."
+            }
+            (Problem::FieldCannotReplace, De) => {
+                "Die zuletzt benutzte App lässt WayExpand dort keinen Text ersetzen. Nutzen Sie in dieser App den Schnellwähler."
+            }
+            (Problem::FieldCannotReplace, Id) => {
+                "Aplikasi tempat Anda terakhir mengetik tidak mengizinkan WayExpand mengganti teks di sana. Gunakan Quick Picker di aplikasi itu."
+            }
+            (Problem::ApplicationDeliveryUnverified, En) => {
+                "The route is connected, but WayExpand has not verified that replacement text appears in an application."
+            }
+            (Problem::ApplicationDeliveryUnverified, De) => {
+                "Die Verbindung steht, aber WayExpand hat nicht geprüft, ob Ersetzungstext in einer Anwendung erscheint."
+            }
+            (Problem::ApplicationDeliveryUnverified, Id) => {
+                "Rute terhubung, tetapi WayExpand belum memverifikasi teks pengganti muncul di aplikasi."
+            }
         }
     }
 
@@ -88,6 +175,9 @@ impl Strings {
             (Action::QuickPicker, En) => "Open Quick Picker",
             (Action::QuickPicker, De) => "Schnellwähler öffnen",
             (Action::QuickPicker, Id) => "Buka Quick Picker",
+            (Action::TestInApplication, En) => "Test in an app",
+            (Action::TestInApplication, De) => "In einer App testen",
+            (Action::TestInApplication, Id) => "Uji di aplikasi",
         }
     }
 
@@ -191,9 +281,15 @@ impl Strings {
 impl Strings {
     pub fn verification_not_saved(&self) -> &'static str {
         match self.lang {
-            Language::English => "Your confirmation could not be saved, so it counts for this session only; WayExpand asks again after a restart.",
-            Language::German => "Ihre Bestätigung konnte nicht gespeichert werden und gilt daher nur für diese Sitzung; WayExpand fragt nach einem Neustart erneut.",
-            Language::Indonesian => "Konfirmasi Anda tidak dapat disimpan, jadi hanya berlaku untuk sesi ini; WayExpand akan bertanya lagi setelah dimulai ulang.",
+            Language::English => {
+                "Your confirmation could not be saved, so it counts for this session only; WayExpand asks again after a restart."
+            }
+            Language::German => {
+                "Ihre Bestätigung konnte nicht gespeichert werden und gilt daher nur für diese Sitzung; WayExpand fragt nach einem Neustart erneut."
+            }
+            Language::Indonesian => {
+                "Konfirmasi Anda tidak dapat disimpan, jadi hanya berlaku untuk sesi ini; WayExpand akan bertanya lagi setelah dimulai ulang."
+            }
         }
     }
 }

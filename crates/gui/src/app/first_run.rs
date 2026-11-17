@@ -116,7 +116,7 @@ impl GuiApp {
         .map(|error| error.to_string())
     }
 
-    fn begin_onboarding_desktop_test(&mut self) {
+    pub(super) fn start_onboarding_desktop_test(&mut self) {
         if !self.select_default_desktop_test() {
             self.status = Status::warning(self.strings.status_create_test_expansion_first());
             return;
@@ -686,7 +686,7 @@ impl GuiApp {
                             )
                             .clicked()
                             {
-                                self.begin_onboarding_desktop_test();
+                                self.start_onboarding_desktop_test();
                             }
                         }
                         if test_snippet.is_some()
@@ -859,8 +859,8 @@ impl GuiApp {
 #[cfg(test)]
 mod guided_setup_tests {
     use super::{
-        first_run_outcome, first_run_outcome_label, replacement_test_is_admitted,
-        uses_gnome_ibus_route, FirstRunOutcome,
+        FirstRunOutcome, first_run_outcome, first_run_outcome_label, replacement_test_is_admitted,
+        uses_gnome_ibus_route,
     };
     use crate::runtime::ReplacementAssurance;
     use wayexpand_core::CompatibilityMode;
