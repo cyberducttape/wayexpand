@@ -570,13 +570,29 @@ fn verdict_text(
                 "WayExpand matched the trigger, but could not confirm trigger deletion before the terminal paste. The field may be unchanged or partly changed.".into(),
                 Some("Inspect the field before typing again; do not replay uncertain output. Run `wayexpand doctor`, then use Quick Picker in copy-only mode for manual paste meanwhile.".into()),
             ),
-            Some("focus_check_failed") => return (
-                "WayExpand matched the trigger, but focus changed before the terminal paste key was sent.".into(),
-                Some("Return focus to the intended terminal field and run a harmless real-application test. Check the field before retrying this trigger.".into()),
+            Some("focus_changed") => return (
+                "WayExpand matched the trigger and sent its deletion, but the focused window changed before the terminal paste key. The replacement was not submitted.".into(),
+                Some("Inspect the original field and the newly focused window before continuing; do not replay this output. Restore focus to the intended terminal and run one harmless real-application test.".into()),
+            ),
+            Some("focus_unconfirmed") => return (
+                "WayExpand matched the trigger and sent its deletion, but could not verify the focused target before the terminal paste key. The replacement was not submitted.".into(),
+                Some("Inspect the field before continuing; the trigger may be gone. Run `wayexpand doctor` to restore focus tracking, then use Quick Picker in copy-only mode meanwhile.".into()),
+            ),
+            Some("input_interrupted") => return (
+                "WayExpand matched the trigger and sent its deletion, but new input interrupted the transaction before the terminal paste key. The replacement was not submitted.".into(),
+                Some("Inspect the field before continuing; the trigger may be gone and the new input may be nearby. Do not replay this output. Run one harmless real-application test after input stops.".into()),
+            ),
+            Some("output_cancelled") => return (
+                "WayExpand matched the trigger and sent its deletion, but the output transaction was cancelled before the terminal paste key. The replacement was not submitted.".into(),
+                Some("Inspect the field before continuing; the trigger may be gone. Refresh diagnostics and do not replay this output.".into()),
+            ),
+            Some("safety_checkpoint_failed") => return (
+                "WayExpand matched the trigger and sent its deletion, but a safety check stopped the terminal paste before replacement output was submitted.".into(),
+                Some("Inspect the field before continuing; the trigger may be gone. Run `wayexpand doctor` and do not replay this output until the target state is clear.".into()),
             ),
             Some("paste_key_failed") => return (
-                "WayExpand matched the trigger and removed it, but the terminal paste key was not accepted.".into(),
-                Some("Inspect the field before continuing, then verify that this terminal accepts Ctrl+Shift+V. Use Quick Picker in copy-only mode meanwhile.".into()),
+                "WayExpand matched the trigger and sent its deletion, but could not confirm delivery of the terminal paste key. The application may or may not have received the replacement.".into(),
+                Some("Inspect the field before continuing; do not retry uncertain output. Then verify that this terminal accepts Ctrl+Shift+V. Use Quick Picker in copy-only mode meanwhile.".into()),
             ),
             _ => {}
         }

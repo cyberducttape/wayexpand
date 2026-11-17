@@ -92,8 +92,12 @@ pub(crate) fn totals() -> PasteTotals {
         unread: UNREAD.load(Ordering::Relaxed),
         last_failure: match LAST_FAILURE.load(Ordering::Relaxed) {
             1 => "trigger_erase_failed",
-            2 => "focus_check_failed",
-            3 => "paste_key_failed",
+            2 => "focus_changed",
+            3 => "focus_unconfirmed",
+            4 => "input_interrupted",
+            5 => "output_cancelled",
+            6 => "safety_checkpoint_failed",
+            7 => "paste_key_failed",
             _ => "none",
         },
     }
@@ -162,10 +166,24 @@ impl PasteInjector {
             // The clipboard can take a moment; do not press the paste key
             // into a window that took focus meanwhile.
             if let Err(message) = checkpoint.check() {
-                LAST_FAILURE.store(2, Ordering::Relaxed);
+                let (failure, reason) = if message
+                    == wayexpand_core::InjectorError::REFUSAL_FOCUS_CHANGED
+                {
+                    (2, "focus changed")
+                } else if message == wayexpand_core::InjectorError::REFUSAL_FOCUS_UNCONFIRMED {
+                    (3, "focus could not be confirmed")
+                } else if message == wayexpand_core::InjectorError::input_interrupted_message() {
+                    (4, "new input interrupted output")
+                } else if message.starts_with("output was cancelled") {
+                    (5, "output was cancelled")
+                } else {
+                    (6, "safety checkpoint failed")
+                };
+                LAST_FAILURE.store(failure, Ordering::Relaxed);
                 tracing::warn!(
                     stage = "focus_check",
-                    "terminal paste stopped before paste key"
+                    reason,
+                    "terminal paste stopped after trigger erase and before paste key"
                 );
                 return Err(InjectorError {
                     backend: name,
@@ -174,7 +192,7 @@ impl PasteInjector {
                 });
             }
             if let Err(error) = inner.inject_key_with_modifiers(KEY_V, PASTE_MODIFIERS) {
-                LAST_FAILURE.store(3, Ordering::Relaxed);
+                LAST_FAILURE.store(7, Ordering::Relaxed);
                 tracing::warn!(stage = "paste_key", "terminal paste key was not accepted");
                 return Err(error);
             }
