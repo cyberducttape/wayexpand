@@ -452,7 +452,7 @@ impl GuiApp {
         // actually received keys, and only while its engine diagnostics still
         // belong to the live process. Otherwise keep the conclusion unknown.
         let latest_ibus_field_verdict = (self.ibus_diagnostics_fresh() == Some(true))
-            .then(|| self.ibus_route.as_ref())
+            .then_some(self.ibus_route.as_ref())
             .flatten()
             .and_then(|report| report.activity.as_ref())
             .filter(|activity| activity.live)

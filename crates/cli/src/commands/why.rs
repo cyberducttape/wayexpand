@@ -26,6 +26,7 @@ struct DaemonRoute {
     source: String,
     backend: String,
     diagnosis: ExpansionDiagnosis,
+    terminal_paste_last_failure: Option<String>,
 }
 
 struct InputMethodGuidance {
@@ -46,6 +47,10 @@ fn daemon_route(status: &DaemonStatus) -> Option<DaemonRoute> {
         source: status.field("source").unwrap_or_default().to_owned(),
         backend: status.field("backend").unwrap_or_default().to_owned(),
         diagnosis: ExpansionDiagnosis::from_status(status),
+        terminal_paste_last_failure: status
+            .field("terminal_paste_last_failure")
+            .filter(|failure| *failure != "none")
+            .map(str::to_owned),
     })
 }
 
@@ -312,6 +317,7 @@ fn report_json(
                 _ => None,
             },
             "terminal_apps_only": diagnosis.terminal_apps_only,
+            "terminal_paste_last_failure": route.terminal_paste_last_failure,
             "input_events_total": diagnosis.input_events,
             "matches_found_total": diagnosis.matches_found,
             "stopped_total": diagnosis.stopped_total,
@@ -350,7 +356,11 @@ fn report_json(
         })
     } else if let Some(route) = daemon {
         let verdict = route.diagnosis.verdict(now);
-        let (answer, next_action) = verdict_text(&route.diagnosis, now);
+        let (answer, next_action) = verdict_text(
+            &route.diagnosis,
+            now,
+            route.terminal_paste_last_failure.as_deref(),
+        );
         serde_json::json!({
             "state": verdict.code(),
             "answer": answer,
@@ -523,7 +533,8 @@ fn print_report(
             print!(", terminal apps only");
         }
         println!(")");
-        let (answer, fix) = verdict_text(diagnosis, now);
+        let (answer, fix) =
+            verdict_text(diagnosis, now, route.terminal_paste_last_failure.as_deref());
         println!("  {answer}");
         if let Some(fix) = fix {
             println!("  Fix: {fix}");
@@ -546,9 +557,31 @@ fn print_report(
 }
 
 /// The answer for the keyboard route and, when there is one, what to do.
-fn verdict_text(diagnosis: &ExpansionDiagnosis, now: u64) -> (String, Option<String>) {
+fn verdict_text(
+    diagnosis: &ExpansionDiagnosis,
+    now: u64,
+    terminal_paste_failure: Option<&str>,
+) -> (String, Option<String>) {
     use MatchingBlock as B;
-    match diagnosis.verdict(now) {
+    let verdict = diagnosis.verdict(now);
+    if matches!(verdict, Verdict::LastStopped(OutcomeKind::NotApplied)) {
+        match terminal_paste_failure {
+            Some("trigger_erase_failed") => return (
+                "WayExpand matched the trigger, but could not confirm trigger deletion before the terminal paste. The field may be unchanged or partly changed.".into(),
+                Some("Inspect the field before typing again; do not replay uncertain output. Run `wayexpand doctor`, then use Quick Picker in copy-only mode for manual paste meanwhile.".into()),
+            ),
+            Some("focus_check_failed") => return (
+                "WayExpand matched the trigger, but focus changed before the terminal paste key was sent.".into(),
+                Some("Return focus to the intended terminal field and run a harmless real-application test. Check the field before retrying this trigger.".into()),
+            ),
+            Some("paste_key_failed") => return (
+                "WayExpand matched the trigger and removed it, but the terminal paste key was not accepted.".into(),
+                Some("Inspect the field before continuing, then verify that this terminal accepts Ctrl+Shift+V. Use Quick Picker in copy-only mode meanwhile.".into()),
+            ),
+            _ => {}
+        }
+    }
+    match verdict {
         Verdict::MatchingOff(block) => {
             let (answer, fix) = match block {
                 B::CaptureDisconnected => (
@@ -756,7 +789,7 @@ mod tests {
             .map(|command| command.name)
             .collect::<Vec<_>>();
         for body in bodies {
-            let (answer, fix) = verdict_text(&diagnosis(body), 1);
+            let (answer, fix) = verdict_text(&diagnosis(body), 1, None);
             assert!(answer.ends_with('.'), "{body}: {answer}");
             let commands = fix
                 .iter()

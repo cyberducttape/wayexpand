@@ -68,6 +68,10 @@ pub(crate) fn active_mode() -> TerminalPaste {
 static PASTED: AtomicU64 = AtomicU64::new(0);
 static FALLBACKS: AtomicU64 = AtomicU64::new(0);
 static UNREAD: AtomicU64 = AtomicU64::new(0);
+/// Last failed stage of a terminal paste transaction. This is a small,
+/// content-free enum so a refusal can be diagnosed without logging the
+/// trigger, replacement, clipboard data, or backend error text.
+static LAST_FAILURE: AtomicU8 = AtomicU8::new(0);
 
 /// Content-free paste counters for daemon status.
 pub(crate) struct PasteTotals {
@@ -78,6 +82,7 @@ pub(crate) struct PasteTotals {
     /// Paste keys pressed that the terminal never answered by reading the
     /// clipboard.
     pub(crate) unread: u64,
+    pub(crate) last_failure: &'static str,
 }
 
 pub(crate) fn totals() -> PasteTotals {
@@ -85,6 +90,12 @@ pub(crate) fn totals() -> PasteTotals {
         pasted: PASTED.load(Ordering::Relaxed),
         fallbacks: FALLBACKS.load(Ordering::Relaxed),
         unread: UNREAD.load(Ordering::Relaxed),
+        last_failure: match LAST_FAILURE.load(Ordering::Relaxed) {
+            1 => "trigger_erase_failed",
+            2 => "focus_check_failed",
+            3 => "paste_key_failed",
+            _ => "none",
+        },
     }
 }
 
@@ -135,19 +146,39 @@ impl PasteInjector {
         text: &str,
         before_press: impl FnOnce(&mut dyn TextInjector) -> Result<(), InjectorError>,
     ) -> Result<bool, InjectorError> {
+        LAST_FAILURE.store(0, Ordering::Relaxed);
         let name = self.inner.name();
         let checkpoint = self.checkpoint.clone();
         let inner = &mut self.inner;
         let outcome = paste_text(text, || {
-            before_press(inner.as_mut())?;
+            if let Err(error) = before_press(inner.as_mut()) {
+                LAST_FAILURE.store(1, Ordering::Relaxed);
+                tracing::warn!(
+                    stage = "trigger_erase",
+                    "terminal paste stopped before paste key"
+                );
+                return Err(error);
+            }
             // The clipboard can take a moment; do not press the paste key
             // into a window that took focus meanwhile.
-            checkpoint.check().map_err(|message| InjectorError {
-                backend: name,
-                message,
-                retryable: false,
-            })?;
-            inner.inject_key_with_modifiers(KEY_V, PASTE_MODIFIERS)
+            if let Err(message) = checkpoint.check() {
+                LAST_FAILURE.store(2, Ordering::Relaxed);
+                tracing::warn!(
+                    stage = "focus_check",
+                    "terminal paste stopped before paste key"
+                );
+                return Err(InjectorError {
+                    backend: name,
+                    message,
+                    retryable: false,
+                });
+            }
+            if let Err(error) = inner.inject_key_with_modifiers(KEY_V, PASTE_MODIFIERS) {
+                LAST_FAILURE.store(3, Ordering::Relaxed);
+                tracing::warn!(stage = "paste_key", "terminal paste key was not accepted");
+                return Err(error);
+            }
+            Ok(())
         })?;
         match outcome {
             PasteOutcome::Pasted => {
@@ -229,6 +260,7 @@ impl TextInjector for PasteInjector {
     }
 
     fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
+        LAST_FAILURE.store(0, Ordering::Relaxed);
         if self.pastes(text) && self.paste(text, |_| Ok(()))? {
             return Ok(());
         }
@@ -239,6 +271,7 @@ impl TextInjector for PasteInjector {
     }
 
     fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
+        LAST_FAILURE.store(0, Ordering::Relaxed);
         if self.pastes(text) && self.paste(text, |inner| inner.erase(trigger))? {
             return Ok(());
         }
