@@ -1016,7 +1016,8 @@ first: `at_unix`, `outcome`, and the daemon's fixed `completion` label).
 `unknown`, `partial`, `blocked_by_policy`, `interrupted_by_typing`,
 `snippet_action_failed` or `other`. Terminal paste routes can also report a
 content-free `terminal_paste_last_failure` stage, such as trigger erasure,
-focus validation, input interruption, cancellation, or paste-key delivery.
+focus validation, EIS device loss/disconnection/event backlog/flush failure,
+input interruption, cancellation, or paste-key delivery.
 When output may have started, inspect the target before continuing; WayExpand
 does not automatically replay uncertain output. `ibus` holds the newest typed field's
 `verdict` (an IBus field label such as `no-surrounding-text`), `keys` and

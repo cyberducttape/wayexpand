@@ -91,13 +91,21 @@ pub(crate) fn totals() -> PasteTotals {
         fallbacks: FALLBACKS.load(Ordering::Relaxed),
         unread: UNREAD.load(Ordering::Relaxed),
         last_failure: match LAST_FAILURE.load(Ordering::Relaxed) {
-            1 => "trigger_erase_failed",
-            2 => "focus_changed",
-            3 => "focus_unconfirmed",
-            4 => "input_interrupted",
-            5 => "output_cancelled",
-            6 => "safety_checkpoint_failed",
-            7 => "paste_key_failed",
+            1 => "trigger_erase_focus_changed",
+            2 => "trigger_erase_focus_unconfirmed",
+            3 => "trigger_erase_input_interrupted",
+            4 => "trigger_erase_output_cancelled",
+            5 => "trigger_erase_event_backlog",
+            6 => "trigger_erase_device_unavailable",
+            7 => "trigger_erase_disconnected",
+            8 => "trigger_erase_flush_failed",
+            9 => "trigger_erase_other",
+            10 => "focus_changed",
+            11 => "focus_unconfirmed",
+            12 => "input_interrupted",
+            13 => "output_cancelled",
+            14 => "safety_checkpoint_failed",
+            15 => "paste_key_failed",
             _ => "none",
         },
     }
@@ -156,9 +164,41 @@ impl PasteInjector {
         let inner = &mut self.inner;
         let outcome = paste_text(text, || {
             if let Err(error) = before_press(inner.as_mut()) {
-                LAST_FAILURE.store(1, Ordering::Relaxed);
+                let (failure, category) = match error.message.as_str() {
+                    wayexpand_core::InjectorError::REFUSAL_FOCUS_CHANGED => (1, "focus_changed"),
+                    wayexpand_core::InjectorError::REFUSAL_FOCUS_UNCONFIRMED => {
+                        (2, "focus_unconfirmed")
+                    }
+                    message
+                        if message
+                            == wayexpand_core::InjectorError::input_interrupted_message() =>
+                    {
+                        (3, "input_interrupted")
+                    }
+                    message if message.starts_with("output was cancelled") => {
+                        (4, "output_cancelled")
+                    }
+                    message
+                        if message
+                            .starts_with("the EIS server is still sending device updates") =>
+                    {
+                        (5, "event_backlog")
+                    }
+                    message if message.starts_with("the EIS keyboard device is unavailable") => {
+                        (6, "device_unavailable")
+                    }
+                    message if message.starts_with("libei server disconnected:") => {
+                        (7, "disconnected")
+                    }
+                    message if message.starts_with("libei connection flush failed:") => {
+                        (8, "flush_failed")
+                    }
+                    _ => (9, "other"),
+                };
+                LAST_FAILURE.store(failure, Ordering::Relaxed);
                 tracing::warn!(
                     stage = "trigger_erase",
+                    category,
                     "terminal paste stopped before paste key"
                 );
                 return Err(error);
@@ -169,15 +209,15 @@ impl PasteInjector {
                 let (failure, reason) = if message
                     == wayexpand_core::InjectorError::REFUSAL_FOCUS_CHANGED
                 {
-                    (2, "focus changed")
+                    (10, "focus changed")
                 } else if message == wayexpand_core::InjectorError::REFUSAL_FOCUS_UNCONFIRMED {
-                    (3, "focus could not be confirmed")
+                    (11, "focus could not be confirmed")
                 } else if message == wayexpand_core::InjectorError::input_interrupted_message() {
-                    (4, "new input interrupted output")
+                    (12, "new input interrupted output")
                 } else if message.starts_with("output was cancelled") {
-                    (5, "output was cancelled")
+                    (13, "output was cancelled")
                 } else {
-                    (6, "safety checkpoint failed")
+                    (14, "safety checkpoint failed")
                 };
                 LAST_FAILURE.store(failure, Ordering::Relaxed);
                 tracing::warn!(
@@ -192,7 +232,7 @@ impl PasteInjector {
                 });
             }
             if let Err(error) = inner.inject_key_with_modifiers(KEY_V, PASTE_MODIFIERS) {
-                LAST_FAILURE.store(7, Ordering::Relaxed);
+                LAST_FAILURE.store(15, Ordering::Relaxed);
                 tracing::warn!(stage = "paste_key", "terminal paste key was not accepted");
                 return Err(error);
             }

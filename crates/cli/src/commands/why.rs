@@ -566,7 +566,39 @@ fn verdict_text(
     let verdict = diagnosis.verdict(now);
     if matches!(verdict, Verdict::LastStopped(OutcomeKind::NotApplied)) {
         match terminal_paste_failure {
-            Some("trigger_erase_failed") => return (
+            Some("trigger_erase_focus_changed") => return (
+                "WayExpand matched the trigger, but focus changed while it was trying to erase it for terminal paste. The field may be unchanged or partly changed.".into(),
+                Some("Inspect the field before typing again; do not replay uncertain output. Restore focus to the intended terminal and run a harmless real-application test.".into()),
+            ),
+            Some("trigger_erase_focus_unconfirmed") => return (
+                "WayExpand matched the trigger, but could not confirm the target before erasing it for terminal paste. The field may be unchanged or partly changed.".into(),
+                Some("Inspect the field before typing again; do not replay uncertain output. Run `wayexpand doctor` to restore focus tracking, then use Quick Picker in copy-only mode meanwhile.".into()),
+            ),
+            Some("trigger_erase_input_interrupted") => return (
+                "WayExpand matched the trigger, but new input interrupted its deletion before terminal paste. The field may be unchanged or partly changed.".into(),
+                Some("Inspect the field before continuing; do not replay uncertain output. After input stops, run one harmless real-application test.".into()),
+            ),
+            Some("trigger_erase_output_cancelled") => return (
+                "WayExpand matched the trigger, but cancellation stopped its deletion before terminal paste. The field may be unchanged or partly changed.".into(),
+                Some("Inspect the field before continuing; do not replay uncertain output. Refresh diagnostics and retry only after the target state is clear.".into()),
+            ),
+            Some("trigger_erase_event_backlog") => return (
+                "WayExpand matched the trigger, but the EIS keyboard event queue did not settle before terminal paste. Trigger deletion may be incomplete.".into(),
+                Some("Inspect the field before continuing; do not replay uncertain output. Run `wayexpand doctor` and retest after the input route is stable.".into()),
+            ),
+            Some("trigger_erase_device_unavailable") => return (
+                "WayExpand matched the trigger, but the compositor's EIS keyboard device became unavailable during terminal paste. Trigger deletion may be incomplete.".into(),
+                Some("Inspect the field before continuing; do not replay uncertain output. Refresh `wayexpand doctor` and reconnect the desktop input route before testing again.".into()),
+            ),
+            Some("trigger_erase_disconnected") => return (
+                "WayExpand matched the trigger, but the EIS connection disconnected during terminal paste. Trigger deletion may be incomplete.".into(),
+                Some("Inspect the field before continuing; do not replay uncertain output. Reconnect the desktop input route with `wayexpand doctor`, then run one harmless real-application test.".into()),
+            ),
+            Some("trigger_erase_flush_failed") => return (
+                "WayExpand matched the trigger, but the compositor did not acknowledge all keyboard events needed to erase it. The field may be unchanged or partly changed.".into(),
+                Some("Inspect the field before continuing; do not replay uncertain output. Reconnect the output route and test once in a harmless field.".into()),
+            ),
+            Some("trigger_erase_other") => return (
                 "WayExpand matched the trigger, but could not confirm trigger deletion before the terminal paste. The field may be unchanged or partly changed.".into(),
                 Some("Inspect the field before typing again; do not replay uncertain output. Run `wayexpand doctor`, then use Quick Picker in copy-only mode for manual paste meanwhile.".into()),
             ),
