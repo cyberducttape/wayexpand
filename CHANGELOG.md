@@ -11,6 +11,10 @@ All notable changes to WayExpand are documented here.
   The GUI now refreshes while GNOME readiness is unknown, treats unknown IBus
   replacement consent as not authorized (matching first-run), and labels a
   matcher result as a snippet check rather than a desktop success.
+- KDE IBus readiness in the GUI now requires current diagnostics for the
+  running engine and confirmation that WayExpand is the selected input
+  method. A live but unselected engine points to guided setup; missing or
+  stale selection evidence points to refresh instead of appearing ready.
 - Quick Picker now supports validated form templates with editable fields and
   an exact rendered preview before copying. Organization policy, app scope,
   clipboard/secret variables, and field validators are enforced on the copy
