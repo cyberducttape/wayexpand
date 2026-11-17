@@ -904,7 +904,7 @@ mod guided_setup_tests {
         );
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::SafeFallback),
-            "Connected, not tested yet"
+            "Configured, insertion not verified"
         );
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::SetupIncomplete),

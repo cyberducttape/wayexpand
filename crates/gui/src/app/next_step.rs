@@ -385,6 +385,29 @@ impl GuiApp {
             runtime::status_field(&self.daemon_status, "matching_unavailable_reason")
                 .as_deref()
                 .and_then(wayexpand_core::MatchingBlock::from_reason);
+        // The chain-level `surrounding-text` check summarizes several recent
+        // IBus fields. It cannot tell us that the application the user just
+        // typed in lacks surrounding text. Use only the newest field that
+        // actually received keys, and only while its engine diagnostics still
+        // belong to the live process. Otherwise keep the conclusion unknown.
+        let field_cannot_replace = self.ibus_diagnostics_fresh() == Some(true)
+            && self
+                .ibus_route
+                .as_ref()
+                .and_then(|report| report.activity.as_ref())
+                .filter(|activity| activity.live)
+                .and_then(|activity| {
+                    activity
+                        .status
+                        .recent_fields
+                        .iter()
+                        .rev()
+                        .find(|field| field.keys > 0)
+                })
+                .is_some_and(|field| {
+                    wayexpand_backend_ibus::IbusFieldVerdict::of(field)
+                        == wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText
+                });
         Situation {
             daemon_reachable: self.daemon_reachable,
             ibus_active,
@@ -405,8 +428,7 @@ impl GuiApp {
             route_state: self.route_state,
             build: daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status)),
             replacement_allowed,
-            field_cannot_replace: ibus_route
-                && self.ibus_check_state("surrounding-text") == IbusCheckState::Fail,
+            field_cannot_replace: ibus_route && field_cannot_replace,
             application_delivery_verified: self.expansion_observed(),
             recent_outcome: self.recent_output_outcome(),
         }
