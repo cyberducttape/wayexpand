@@ -304,7 +304,7 @@ mod tests {
             Verdict::LastStopped(OutcomeKind::InterruptedByTyping)
         );
         let expanded = diagnose(
-            "matching_unavailable_reason=none\n\
+            "matching_unavailable_reason=none\ninput_events_total=1\n\
              recent_expansion_outcomes=[{\"at_unix\":3,\"completion\":\"applied\"}]\n",
         );
         assert_eq!(
