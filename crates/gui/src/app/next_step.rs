@@ -235,6 +235,12 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
         }
         Some(true) => {}
     }
+    // The daemon's explicit matching block is stronger evidence than a
+    // missing build identity. This also keeps a paused route from being
+    // mislabeled as an unverified or unknown service.
+    if s.paused {
+        return Some((Problem::Paused, Action::Resume));
+    }
     match s.build {
         Some(runtime::DaemonBuildState::RestartRequired) => {
             return Some((Problem::RestartNeeded, Action::Restart));
@@ -243,9 +249,6 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             return Some((Problem::BuildUnknown, Action::Restart));
         }
         _ => {}
-    }
-    if s.paused {
-        return Some((Problem::Paused, Action::Resume));
     }
     match s.route_state {
         None => Some((Problem::RouteStatusUnknown, Action::CheckAgain)),
@@ -339,6 +342,9 @@ impl GuiApp {
                         .is_some_and(|mode| mode != wayexpand_core::CompatibilityMode::Off)
             })
         };
+        let matching_block =
+            runtime::status_field(&self.daemon_status, "matching_unavailable_reason")
+                .and_then(wayexpand_core::MatchingBlock::from_reason);
         Situation {
             daemon_reachable: self.daemon_reachable,
             ibus_active,
@@ -354,7 +360,7 @@ impl GuiApp {
                 == IbusCheckState::Pass,
             source_active: self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass,
             diagnostics_fresh: self.ibus_diagnostics_fresh(),
-            paused: self.paused,
+            paused: self.paused || matching_block == Some(wayexpand_core::MatchingBlock::Paused),
             route_state: self.route_state,
             build: daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status)),
             replacement_allowed,
@@ -439,7 +445,7 @@ impl GuiApp {
             Action::TestInApplication => self.start_onboarding_desktop_test(),
             Action::InspectText => {
                 self.diagnostics_open = true;
-                self.refresh_diagnostics(false);
+                self.refresh_diagnostics(true);
             }
         }
     }
