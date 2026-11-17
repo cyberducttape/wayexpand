@@ -80,6 +80,10 @@ pub(crate) struct Situation {
     pub control_only: bool,
     /// GNOME, judged by its IBus input source.
     pub gnome_ibus: bool,
+    /// IBus is the selected or explicitly recommended desktop route, even if
+    /// its engine has not started yet. This prevents KDE IBus failures from
+    /// falling through to the unrelated generic daemon-off diagnosis.
+    pub ibus_route_expected: bool,
     pub source_registered: bool,
     pub source_active: bool,
     /// None means no diagnostics have arrived yet; false means the report is
@@ -163,7 +167,9 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
         };
     }
     // The IBus route without a typing daemon (KDE): the engine is the route.
-    if s.ibus_active && (s.daemon_reachable != Some(true) || s.control_only) {
+    if s.ibus_route_expected
+        || s.ibus_active && (s.daemon_reachable != Some(true) || s.control_only)
+    {
         if s.daemon_reachable == Some(true) && s.paused {
             return Some((Problem::Paused, Action::Resume));
         }
@@ -175,6 +181,9 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
                 return Some((Problem::InputStatusPending, Action::CheckAgain));
             }
             IbusCheckState::Pass => {}
+        }
+        if !s.ibus_active {
+            return Some((Problem::IbusEngineUnavailable, Action::RunSetup));
         }
         if !s.replacement_allowed {
             return Some((Problem::ReplacementNotAllowed, Action::ReviewConsent));
@@ -255,9 +264,9 @@ impl GuiApp {
         let active_daemon_source = daemon_running
             .then(|| runtime::status_field(&self.daemon_status, "source"))
             .flatten();
+        let compositor = wayexpand_backend_selection::Compositor::detect();
         let gnome_ibus = super::first_run::uses_gnome_ibus_route(
-            wayexpand_backend_selection::Compositor::detect()
-                == wayexpand_backend_selection::Compositor::Gnome,
+            compositor == wayexpand_backend_selection::Compositor::Gnome,
             self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass,
             self.ibus_check_state("gnome-source-registered") == IbusCheckState::Pass,
             self.recommended_route
@@ -265,10 +274,22 @@ impl GuiApp {
             self.daemon_reachable,
             active_daemon_source.as_deref(),
         );
+        let no_active_typing_daemon = self.daemon_reachable == Some(false)
+            || daemon_running && (active_daemon_source.as_deref() == Some("stdin") || control_only);
+        let kde_ibus_expected = compositor == wayexpand_backend_selection::Compositor::KdePlasma
+            && no_active_typing_daemon
+            && (self.ibus_active
+                || self.ibus_route.as_ref().is_some_and(|report| {
+                    report.desktop == wayexpand_backend_ibus::chain::IbusDesktop::KdeWayland
+                })
+                || self
+                    .recommended_route
+                    .is_some_and(|route| route.setup_backend() == "ibus"));
+        let ibus_route_expected = gnome_ibus || kde_ibus_expected;
         // Keep process health separate from source selection: GNOME can have
         // the source selected while its engine process has crashed.
         let ibus_active = self.ibus_active;
-        let ibus_route = gnome_ibus || ibus_active && (!daemon_running || control_only);
+        let ibus_route = ibus_route_expected || ibus_active && (!daemon_running || control_only);
         let replacement_allowed = if ibus_route {
             // IBus replacement is non-atomic. Unknown consent is not consent,
             // and must agree with the first-run gate which requires Pass.
@@ -292,6 +313,7 @@ impl GuiApp {
             },
             control_only,
             gnome_ibus,
+            ibus_route_expected,
             source_registered: self.ibus_check_state("gnome-source-registered")
                 == IbusCheckState::Pass,
             source_active: self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass,
