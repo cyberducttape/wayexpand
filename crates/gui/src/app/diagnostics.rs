@@ -226,6 +226,7 @@ impl GuiApp {
             _ => palette.warning,
         };
         theme::section_header(ui, "", self.strings.why_title());
+        let mut picker_requested = false;
         theme::card(ui, palette, |ui| {
             ui.label(
                 RichText::new(self.strings.why_intro())
@@ -236,8 +237,15 @@ impl GuiApp {
             if let Some(fix) = fix {
                 ui.add(egui::Label::new(RichText::new(fix).small()).wrap());
             }
+            ui.add_space(4.0);
+            if ui
+                .button(self.strings.action_label(super::NextAction::QuickPicker))
+                .clicked()
+            {
+                picker_requested = true;
+            }
         });
-        None
+        picker_requested.then_some(super::NextAction::QuickPicker)
     }
 
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {

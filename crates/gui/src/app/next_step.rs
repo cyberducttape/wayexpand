@@ -95,8 +95,12 @@ pub(crate) struct Situation {
     /// its engine has not started yet. This prevents KDE IBus failures from
     /// falling through to the unrelated generic daemon-off diagnosis.
     pub ibus_route_expected: bool,
-    pub source_registered: bool,
-    pub source_active: bool,
+    /// Preserve PASS/FAIL/UNKNOWN from the IBus chain. Missing evidence must
+    /// never be presented as a confirmed user configuration error.
+    pub source_registered: IbusCheckState,
+    pub source_active: IbusCheckState,
+    pub engine_state: IbusCheckState,
+    pub consent_state: IbusCheckState,
     /// None means no diagnostics have arrived yet; false means the report is
     /// old or belongs to a different IBus engine process.
     pub diagnostics_fresh: Option<bool>,
@@ -125,17 +129,44 @@ pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
         Some(false) => return GnomeIbusReadiness::DiagnosticsStale,
         Some(true) => {}
     }
-    if !s.source_registered {
-        return GnomeIbusReadiness::SourceNotSetUp;
+    match s.source_registered {
+        IbusCheckState::Fail | IbusCheckState::Warn => {
+            return GnomeIbusReadiness::SourceNotSetUp;
+        }
+        IbusCheckState::Unknown | IbusCheckState::Skip => {
+            return GnomeIbusReadiness::DiagnosticsPending;
+        }
+        IbusCheckState::Pass => {}
     }
-    if !s.source_active {
-        return GnomeIbusReadiness::SourceNotSelected;
+    match s.source_active {
+        IbusCheckState::Fail | IbusCheckState::Warn => {
+            return GnomeIbusReadiness::SourceNotSelected;
+        }
+        IbusCheckState::Unknown | IbusCheckState::Skip => {
+            return GnomeIbusReadiness::DiagnosticsPending;
+        }
+        IbusCheckState::Pass => {}
     }
-    if !s.ibus_active {
-        return GnomeIbusReadiness::EngineUnavailable;
+    match s.engine_state {
+        IbusCheckState::Fail | IbusCheckState::Warn => {
+            return GnomeIbusReadiness::EngineUnavailable;
+        }
+        IbusCheckState::Unknown | IbusCheckState::Skip => {
+            return GnomeIbusReadiness::DiagnosticsPending;
+        }
+        IbusCheckState::Pass if !s.ibus_active => {
+            return GnomeIbusReadiness::DiagnosticsPending;
+        }
+        IbusCheckState::Pass => {}
     }
-    if !s.replacement_allowed {
-        return GnomeIbusReadiness::ReplacementNotAllowed;
+    match s.consent_state {
+        IbusCheckState::Fail | IbusCheckState::Warn => {
+            return GnomeIbusReadiness::ReplacementNotAllowed;
+        }
+        IbusCheckState::Unknown | IbusCheckState::Skip => {
+            return GnomeIbusReadiness::DiagnosticsPending;
+        }
+        IbusCheckState::Pass => {}
     }
     GnomeIbusReadiness::Ready
 }
@@ -365,9 +396,10 @@ impl GuiApp {
             control_only,
             gnome_ibus,
             ibus_route_expected,
-            source_registered: self.ibus_check_state("gnome-source-registered")
-                == IbusCheckState::Pass,
-            source_active: self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass,
+            source_registered: self.ibus_check_state("gnome-source-registered"),
+            source_active: self.ibus_check_state("gnome-source-active"),
+            engine_state: self.ibus_check_state("engine"),
+            consent_state: self.ibus_check_state("consent"),
             diagnostics_fresh: self.ibus_diagnostics_fresh(),
             paused: self.paused || matching_block == Some(wayexpand_core::MatchingBlock::Paused),
             route_state: self.route_state,
@@ -649,6 +681,10 @@ mod tests {
         let gnome = Situation {
             gnome_ibus: true,
             ibus_active: true,
+            source_registered: IbusCheckState::Fail,
+            source_active: IbusCheckState::Fail,
+            engine_state: IbusCheckState::Pass,
+            consent_state: IbusCheckState::Pass,
             replacement_allowed: true,
             diagnostics_fresh: Some(true),
             application_delivery_verified: true,
@@ -659,7 +695,7 @@ mod tests {
             Some((Problem::InputSourceNotSetUp, Action::RunSetup))
         );
         let registered = Situation {
-            source_registered: true,
+            source_registered: IbusCheckState::Pass,
             ..gnome
         };
         assert_eq!(
@@ -667,7 +703,7 @@ mod tests {
             Some((Problem::InputSourceNotSelected, Action::SelectInputSource))
         );
         let selected = Situation {
-            source_active: true,
+            source_active: IbusCheckState::Pass,
             ..registered
         };
         assert_eq!(next_step(&selected), None);
@@ -685,8 +721,10 @@ mod tests {
         let crashed = Situation {
             gnome_ibus: true,
             ibus_active: false,
-            source_registered: true,
-            source_active: true,
+            source_registered: IbusCheckState::Pass,
+            source_active: IbusCheckState::Pass,
+            engine_state: IbusCheckState::Fail,
+            consent_state: IbusCheckState::Pass,
             diagnostics_fresh: Some(true),
             replacement_allowed: true,
             ..Situation::default()
@@ -706,19 +744,21 @@ mod tests {
         let unknown_consent = Situation {
             gnome_ibus: true,
             ibus_active: true,
-            source_registered: true,
-            source_active: true,
+            source_registered: IbusCheckState::Pass,
+            source_active: IbusCheckState::Pass,
+            engine_state: IbusCheckState::Pass,
+            consent_state: IbusCheckState::Unknown,
             diagnostics_fresh: Some(true),
             replacement_allowed: false,
             ..Situation::default()
         };
         assert_eq!(
             gnome_ibus_readiness(&unknown_consent),
-            GnomeIbusReadiness::ReplacementNotAllowed
+            GnomeIbusReadiness::DiagnosticsPending
         );
         assert_eq!(
             next_step(&unknown_consent),
-            Some((Problem::ReplacementNotAllowed, Action::ReviewConsent))
+            Some((Problem::InputStatusPending, Action::CheckAgain))
         );
     }
 
@@ -727,8 +767,10 @@ mod tests {
         let deselected = Situation {
             gnome_ibus: true,
             ibus_active: true,
-            source_registered: true,
-            source_active: false,
+            source_registered: IbusCheckState::Pass,
+            source_active: IbusCheckState::Warn,
+            engine_state: IbusCheckState::Pass,
+            consent_state: IbusCheckState::Pass,
             diagnostics_fresh: Some(true),
             replacement_allowed: true,
             ..Situation::default()
@@ -748,8 +790,10 @@ mod tests {
         let stale = Situation {
             gnome_ibus: true,
             ibus_active: true,
-            source_registered: true,
-            source_active: true,
+            source_registered: IbusCheckState::Pass,
+            source_active: IbusCheckState::Pass,
+            engine_state: IbusCheckState::Pass,
+            consent_state: IbusCheckState::Pass,
             diagnostics_fresh: Some(false),
             replacement_allowed: true,
             ..Situation::default()
@@ -768,8 +812,10 @@ mod tests {
     fn gnome_engine_restart_requires_fresh_diagnostics_before_ready() {
         let mut state = Situation {
             gnome_ibus: true,
-            source_registered: true,
-            source_active: true,
+            source_registered: IbusCheckState::Pass,
+            source_active: IbusCheckState::Pass,
+            engine_state: IbusCheckState::Fail,
+            consent_state: IbusCheckState::Pass,
             diagnostics_fresh: Some(true),
             replacement_allowed: true,
             ..Situation::default()
@@ -789,6 +835,7 @@ mod tests {
             Some((Problem::InputStatusStale, Action::CheckAgain))
         );
         state.diagnostics_fresh = Some(true);
+        state.engine_state = IbusCheckState::Pass;
         assert_eq!(gnome_ibus_readiness(&state), GnomeIbusReadiness::Ready);
         state.application_delivery_verified = true;
         assert_eq!(next_step(&state), None);

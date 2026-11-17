@@ -14,9 +14,9 @@ impl Strings {
 
     pub(crate) fn why_intro(&self) -> &'static str {
         match self.lang {
-            Language::English => "Current expansion diagnosis and next step. Typed text is never recorded.",
-            Language::German => "Aktuelle Diagnose und nächster Schritt. Getippter Text wird niemals gespeichert.",
-            Language::Indonesian => "Diagnosis ekspansi saat ini dan langkah berikutnya. Teks yang diketik tidak pernah dicatat.",
+            Language::English => "A matcher preview only checks whether a rule matches; it does not prove text reached an application. Only a real typing test can verify delivery. Typed text is never recorded.",
+            Language::German => "Die Matcher-Vorschau prüft nur, ob eine Regel passt; sie beweist nicht, dass Text eine Anwendung erreicht hat. Nur ein echter Tipptest kann die Ausgabe bestätigen. Getippter Text wird niemals gespeichert.",
+            Language::Indonesian => "Pratinjau matcher hanya memeriksa kecocokan aturan; itu tidak membuktikan teks sampai ke aplikasi. Hanya tes mengetik sungguhan yang dapat memverifikasi pengiriman. Teks yang diketik tidak pernah dicatat.",
         }
     }
 
