@@ -145,6 +145,42 @@ impl Strings {
             (Problem::ApplicationDeliveryUnverified, Id) => {
                 "Rute terhubung, tetapi WayExpand belum memverifikasi teks pengganti muncul di aplikasi."
             }
+            (Problem::OutputUnverified, En) => {
+                "WayExpand recognized the trigger and sent replacement output, but the application’s text was not verified."
+            }
+            (Problem::OutputUnverified, De) => {
+                "WayExpand hat den Trigger erkannt und Ersatztext gesendet, aber der Anwendungstext wurde nicht geprüft."
+            }
+            (Problem::OutputUnverified, Id) => {
+                "WayExpand mengenali pemicu dan mengirim teks pengganti, tetapi teks di aplikasi belum diverifikasi."
+            }
+            (Problem::PartialOutput, En) => {
+                "WayExpand reports that only part of the replacement may have been written."
+            }
+            (Problem::PartialOutput, De) => {
+                "WayExpand meldet, dass möglicherweise nur ein Teil der Ersetzung geschrieben wurde."
+            }
+            (Problem::PartialOutput, Id) => {
+                "WayExpand melaporkan bahwa hanya sebagian teks pengganti yang mungkin tertulis."
+            }
+            (Problem::StatusUnknown, En) => {
+                "WayExpand could not read the current service status, so it cannot tell whether typing is reaching it."
+            }
+            (Problem::StatusUnknown, De) => {
+                "WayExpand konnte den aktuellen Dienststatus nicht lesen und kann daher nicht feststellen, ob Eingaben ankommen."
+            }
+            (Problem::StatusUnknown, Id) => {
+                "WayExpand tidak dapat membaca status layanan saat ini, jadi belum dapat memastikan apakah ketikan diterima."
+            }
+            (Problem::RouteStatusUnknown, En) => {
+                "The service is running, but the active typing route could not be identified."
+            }
+            (Problem::RouteStatusUnknown, De) => {
+                "Der Dienst läuft, aber der aktive Eingabeweg konnte nicht ermittelt werden."
+            }
+            (Problem::RouteStatusUnknown, Id) => {
+                "Layanan berjalan, tetapi rute pengetikan aktif tidak dapat diketahui."
+            }
         }
     }
 
@@ -178,6 +214,9 @@ impl Strings {
             (Action::TestInApplication, En) => "Test in an app",
             (Action::TestInApplication, De) => "In einer App testen",
             (Action::TestInApplication, Id) => "Uji di aplikasi",
+            (Action::InspectText, En) => "Refresh output status",
+            (Action::InspectText, De) => "Ausgabestatus aktualisieren",
+            (Action::InspectText, Id) => "Perbarui status keluaran",
         }
     }
 
@@ -196,13 +235,13 @@ impl Strings {
         use Language::{English as En, German as De, Indonesian as Id};
         match (problem, self.lang) {
             (Problem::InputSourceNotSelected, En) if gnome_ibus => {
-                "Use Select WayExpand to activate it. If GNOME still has not selected it, choose it in Settings → Keyboard. Then run a live typing test. Quick Picker can copy a snippet for you to paste meanwhile."
+                "Text expansion is unavailable because GNOME has not selected WayExpand. Select it in Settings → Keyboard or the input-source menu, then run a live typing test. Quick Picker can copy a snippet for you to paste meanwhile."
             }
             (Problem::InputSourceNotSelected, De) if gnome_ibus => {
-                "Nutzen Sie „WayExpand auswählen“, um es zu aktivieren. Falls GNOME es weiterhin nicht auswählt, wählen Sie es unter Einstellungen → Tastatur aus. Führen Sie danach einen Live-Tipptest durch. Bis dahin können Sie ein Snippet mit dem Schnellwähler kopieren und einfügen."
+                "Texterweiterungen sind nicht verfügbar, weil GNOME WayExpand nicht ausgewählt hat. Wählen Sie es unter Einstellungen → Tastatur oder im Eingabequellen-Menü aus und führen Sie danach einen Live-Tipptest durch. Bis dahin können Sie ein Snippet mit dem Schnellwähler kopieren und einfügen."
             }
             (Problem::InputSourceNotSelected, Id) if gnome_ibus => {
-                "Gunakan Pilih WayExpand untuk mengaktifkannya. Jika GNOME masih belum memilihnya, pilih di Pengaturan → Keyboard. Lalu jalankan tes mengetik langsung. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel."
+                "Ekspansi teks tidak tersedia karena GNOME belum memilih WayExpand. Pilih di Pengaturan → Keyboard atau menu sumber input, lalu jalankan tes mengetik langsung. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel."
             }
             (Problem::InputSourceNotSelected, En) => {
                 "Select WayExpand in your desktop's input-method settings, then run a live typing test. Quick Picker can copy a snippet for you to paste meanwhile."
@@ -221,6 +260,33 @@ impl Strings {
             }
             (Problem::ApplicationDeliveryUnverified, Id) => {
                 "Jalankan tes mengetik sungguhan di aplikasi yang bermasalah. Pratinjau matcher hanya memeriksa kecocokan aturan, bukan apakah aplikasi menerima teks pengganti."
+            }
+            (Problem::OutputUnverified, En) => {
+                "Inspect the target field and cursor now. Output was submitted but may not have appeared; do not retry it automatically. Then run one harmless real-application test."
+            }
+            (Problem::OutputUnverified, De) => {
+                "Prüfen Sie jetzt das Zielfeld und den Cursor. Die Ausgabe wurde gesendet, ist aber möglicherweise nicht angekommen; nicht automatisch wiederholen. Führen Sie danach einen unkritischen Anwendungstest durch."
+            }
+            (Problem::OutputUnverified, Id) => {
+                "Periksa kolom tujuan dan posisi kursor sekarang. Keluaran telah dikirim tetapi mungkin belum muncul; jangan ulangi otomatis. Lalu jalankan satu tes aman di aplikasi nyata."
+            }
+            (Problem::PartialOutput, En) => {
+                "Inspect the target field before typing anything else. Correct partial text manually; WayExpand will not replay this insertion. Then run a harmless real-application test."
+            }
+            (Problem::PartialOutput, De) => {
+                "Prüfen Sie das Zielfeld, bevor Sie weitertippen. Korrigieren Sie unvollständigen Text von Hand; WayExpand wiederholt diese Eingabe nicht. Führen Sie danach einen unkritischen Anwendungstest durch."
+            }
+            (Problem::PartialOutput, Id) => {
+                "Periksa kolom tujuan sebelum mengetik lagi. Perbaiki teks yang tidak lengkap secara manual; WayExpand tidak akan mengulang penyisipan ini. Lalu jalankan tes aman di aplikasi nyata."
+            }
+            (Problem::StatusUnknown | Problem::RouteStatusUnknown, En) => {
+                "Refresh this diagnosis. If status remains unavailable, open Diagnostics → Services and use Quick Picker in copy-only mode meanwhile."
+            }
+            (Problem::StatusUnknown | Problem::RouteStatusUnknown, De) => {
+                "Aktualisieren Sie die Diagnose. Bleibt der Status unbekannt, öffnen Sie Diagnose → Dienste und verwenden Sie bis dahin den Schnellwähler im Kopiermodus."
+            }
+            (Problem::StatusUnknown | Problem::RouteStatusUnknown, Id) => {
+                "Perbarui diagnosis ini. Jika status tetap tidak tersedia, buka Diagnostik → Layanan dan gunakan Quick Picker dalam mode salin saja sementara itu."
             }
             (Problem::FieldCannotReplace, En) => {
                 "This field does not provide text WayExpand can safely replace. Open Quick Picker in copy-only mode and paste the snippet."

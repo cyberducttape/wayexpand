@@ -1004,6 +1004,14 @@ impl Strings {
         }
     }
 
+    pub fn try_live_delivery_notice(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Matcher preview checks the rule only. It does not test keyboard capture or prove that replacement text appeared in a real application.",
+            Language::Indonesian => "Pratinjau matcher hanya memeriksa aturan. Ini tidak menguji penangkapan keyboard atau membuktikan teks pengganti muncul di aplikasi nyata.",
+            Language::German => "Die Matcher-Vorschau prüft nur die Regel. Sie testet weder die Tastaturerfassung noch beweist sie, dass Ersatztext in einer echten Anwendung angekommen ist.",
+        }
+    }
+
     pub fn try_live_cumulative_notice(&self) -> &'static str {
         match self.lang {
             Language::English => {

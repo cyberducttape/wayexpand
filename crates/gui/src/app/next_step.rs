@@ -34,6 +34,10 @@ pub(crate) enum Problem {
     Unsupported,
     FieldCannotReplace,
     ApplicationDeliveryUnverified,
+    OutputUnverified,
+    PartialOutput,
+    StatusUnknown,
+    RouteStatusUnknown,
 }
 
 /// The one thing to do about it.
@@ -48,6 +52,7 @@ pub(crate) enum Action {
     CheckAgain,
     QuickPicker,
     TestInApplication,
+    InspectText,
 }
 
 /// One authoritative interpretation of GNOME IBus evidence. Both the
@@ -100,6 +105,9 @@ pub(crate) struct Situation {
     /// desktop session, build, and route. Matcher previews and backend
     /// acknowledgements do not satisfy this condition.
     pub application_delivery_verified: bool,
+    /// The latest content-free output outcome from the current daemon. This
+    /// is deliberately separate from route-level application verification.
+    pub recent_outcome: Option<wayexpand_core::OutcomeKind>,
 }
 
 pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
@@ -130,6 +138,7 @@ pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
 /// application insertion has been confirmed for the current route.
 pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     use runtime::RouteState as R;
+    use wayexpand_core::OutcomeKind as O;
     let field = || {
         if s.field_cannot_replace {
             Some((Problem::FieldCannotReplace, Action::QuickPicker))
@@ -142,6 +151,16 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             None
         }
     };
+    // A fresh transaction result answers the user's question more directly
+    // than general readiness. In particular, an old successful setup test
+    // must not hide a newer partial or uncertain write.
+    match s.recent_outcome {
+        Some(O::Partial) => return Some((Problem::PartialOutput, Action::InspectText)),
+        Some(O::Unknown | O::Expanded | O::ExpandedCursorMisplaced) => {
+            return Some((Problem::OutputUnverified, Action::InspectText));
+        }
+        _ => {}
+    }
     if s.gnome_ibus {
         return match gnome_ibus_readiness(s) {
             GnomeIbusReadiness::Ready => field(),
@@ -191,7 +210,7 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
         return field();
     }
     match s.daemon_reachable {
-        None => return None,
+        None => return Some((Problem::StatusUnknown, Action::CheckAgain)),
         Some(false) => return Some((Problem::ServiceOff, Action::TurnOn)),
         // The control-only service exists to sit beside IBus; reaching here
         // means the IBus engine is not live, so nothing reads typing.
@@ -212,19 +231,20 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     if s.paused {
         return Some((Problem::Paused, Action::Resume));
     }
-    match s.route_state? {
-        R::Connected | R::Degraded => {
+    match s.route_state {
+        None => Some((Problem::RouteStatusUnknown, Action::CheckAgain)),
+        Some(R::Connected | R::Degraded) => {
             if !s.replacement_allowed {
                 Some((Problem::ReplacementNotAllowed, Action::ReviewConsent))
             } else {
                 field()
             }
         }
-        R::PermissionRequired => Some((Problem::PermissionNeeded, Action::RunSetup)),
-        R::PortalRevoked => Some((Problem::PermissionRevoked, Action::RunSetup)),
-        R::Starting | R::Reconnecting => Some((Problem::Connecting, Action::CheckAgain)),
-        R::Failed | R::Stopped => Some((Problem::RouteFailed, Action::RunSetup)),
-        R::Unsupported => Some((Problem::Unsupported, Action::QuickPicker)),
+        Some(R::PermissionRequired) => Some((Problem::PermissionNeeded, Action::RunSetup)),
+        Some(R::PortalRevoked) => Some((Problem::PermissionRevoked, Action::RunSetup)),
+        Some(R::Starting | R::Reconnecting) => Some((Problem::Connecting, Action::CheckAgain)),
+        Some(R::Failed | R::Stopped) => Some((Problem::RouteFailed, Action::RunSetup)),
+        Some(R::Unsupported) => Some((Problem::Unsupported, Action::QuickPicker)),
     }
 }
 
@@ -325,7 +345,29 @@ impl GuiApp {
             field_cannot_replace: ibus_route
                 && self.ibus_check_state("surrounding-text") == IbusCheckState::Fail,
             application_delivery_verified: self.expansion_observed(),
+            recent_outcome: self.recent_output_outcome(),
         }
+    }
+
+    fn recent_output_outcome(&self) -> Option<wayexpand_core::OutcomeKind> {
+        if self.daemon_reachable != Some(true) {
+            return None;
+        }
+        let status = wayexpand_core::DaemonStatus::parse(&self.daemon_status);
+        if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) {
+            return None;
+        }
+        let diagnosis = wayexpand_core::ExpansionDiagnosis::from_status(&status);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        diagnosis
+            .recent
+            .first()
+            .filter(|outcome| {
+                now.saturating_sub(outcome.at_unix) <= wayexpand_core::RECENT_OUTCOME_SECS
+            })
+            .map(|outcome| outcome.kind)
     }
 
     /// Selection evidence is valid only for the current engine process and
@@ -379,6 +421,10 @@ impl GuiApp {
             Action::CheckAgain => self.refresh_diagnostics(true),
             Action::QuickPicker => self.open_copy_only_picker(),
             Action::TestInApplication => self.start_onboarding_desktop_test(),
+            Action::InspectText => {
+                self.diagnostics_open = true;
+                self.refresh_diagnostics(false);
+            }
         }
     }
 
@@ -434,6 +480,10 @@ impl GuiApp {
                     ui.label(
                         RichText::new(self.strings.problem_text(problem))
                             .color(ui.visuals().strong_text_color()),
+                    );
+                    ui.label(
+                        self.strings
+                            .next_step_instruction(problem, self.situation().gnome_ibus),
                     );
                     if ui
                         .add_enabled(!busy, egui::Button::new(self.strings.action_label(action)))

@@ -1169,6 +1169,11 @@ impl GuiApp {
                     .desired_rows(2)
                     .desired_width(f32::INFINITY)
                     .show(ui);
+                ui.label(
+                    RichText::new(self.strings.try_live_delivery_notice())
+                        .small()
+                        .color(palette.muted),
+                );
                 if self.playground.expansions > 0 {
                     ui.label(
                         RichText::new(self.strings.try_live_cumulative_notice())
