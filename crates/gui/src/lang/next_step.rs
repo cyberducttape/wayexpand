@@ -70,13 +70,13 @@ impl Strings {
                 "WayExpand belum disiapkan sebagai sumber masukan GNOME."
             }
             (Problem::IbusEngineNotRegistered, En) => {
-                "The desktop lists WayExpand as an input method, but IBus cannot find its engine."
+                "IBus cannot find WayExpand's engine, so it cannot start the input method."
             }
             (Problem::IbusEngineNotRegistered, De) => {
-                "Der Desktop listet WayExpand als Eingabemethode, aber IBus findet die Engine nicht."
+                "IBus findet die WayExpand-Engine nicht und kann die Eingabemethode daher nicht starten."
             }
             (Problem::IbusEngineNotRegistered, Id) => {
-                "Desktop mencantumkan WayExpand sebagai metode input, tetapi IBus tidak menemukan mesinnya."
+                "IBus tidak menemukan mesin WayExpand, jadi metode input tidak dapat dimulai."
             }
             (Problem::InputSourceNotSelected, En) => "WayExpand is not the selected input method.",
             (Problem::InputSourceNotSelected, De) => {
