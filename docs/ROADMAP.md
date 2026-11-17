@@ -5,7 +5,7 @@
 > [Git history](https://github.com/cyberducttape/wayexpand/blob/f0df8d9159837b868156542b9cba0f305d5fb9f0/docs/archive/2026-09/PROFESSIONAL_ROADMAP.md). Current behavior is
 > defined by the support and compatibility documents.
 
-As of v1.3.3, the core engine, configuration format, and CLI/JSON contracts
+As of v1.3.6, the core engine, configuration format, and CLI/JSON contracts
 are stable. Desktop backend support remains experimental until the
 certification evidence described in [CERTIFICATION.md](CERTIFICATION.md)
 and [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) is published.
@@ -267,16 +267,18 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
 
 ### Distribution and release evidence
 
-- [ ] Publish installable release assets. The Release workflow requires the
-      real compositor-certification workflow to pass before either release
-      architecture can build or publish. Currently no route in
-      `tests/certification/compositor-matrix.json` is production eligible, so
-      a tag cannot reach packaging until a route passes the production
-      certification contract. The aarch64 job builds and checks every release
-      binary, and the x86_64 publish job still needs an end-to-end run after
-      certification is unblocked. Launchpad source-package synchronization is
-      a separate workflow and does not publish GitHub release assets.
-
+- [x] Publish installable release assets. Since 1.3.6 every release carries
+      x86_64 and aarch64 archives, a `.deb`, an `.rpm`, source and vendored
+      source archives, checksums and build provenance. No route is
+      production-certified yet, so the Release workflow skips the
+      real-compositor certification job and the release notes say the build
+      is not compositor-certified; once a route in
+      `tests/certification/compositor-matrix.json` requires production
+      certification, that job gates the release again. Launchpad
+      source-package synchronization is a separate workflow and does not
+      publish GitHub release assets.
+- [ ] Copr: the spec and `scripts/copr-srpm.sh` build Fedora packages with a
+      distinct RPM release per build, but no Copr project exists yet.
 - [ ] Keep GitHub, Debian/Launchpad, RPM, Arch, and AppStream metadata
       synchronized for each release.
 - [ ] Publish only artifacts that pass the vendored offline-build checks.
@@ -286,8 +288,9 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
       build host's series; its glibc floor rules out 24.04 and Debian 13)
       and the `.rpm` on Fedora, checks shared-library resolution,
       versions, user units and example validation, reinstalls, and removes
-      the package. Upgrade from a previously published package remains open:
-      no release has published packages yet.
+      the package. It also upgrades from 1.3.2 packages rebuilt from that
+      tag. Open: upgrade from the packages actually published with 1.3.6,
+      rather than a rebuild.
 
 ## Product roadmap
 
@@ -300,11 +303,12 @@ Still open:
 
 - [ ] **Next after compositor certification:** cross-desktop application
       identity so app-filtered snippets,
-      Quick Picker direct insertion, and form return-to-origin work beyond
-      KWin: `wlr-foreign-toplevel-management` where available, compositor IPC
-      adapters (Sway, Hyprland) as fallbacks, and an optional GNOME Shell
-      extension exposing a small authenticated window-identity API. Missing
-      identity must keep failing closed.
+      Quick Picker direct insertion, and form return-to-origin work on every
+      desktop. Shipped: KWin scripting on KDE Plasma and the bundled GNOME
+      Shell extension on GNOME 45+ (`crates/backend-gnome-window`). Open:
+      `wlr-foreign-toplevel-management` where available, with compositor IPC
+      adapters (Sway, Hyprland) as fallbacks. Missing identity must keep
+      failing closed.
 - [x] Publish a canonical `route_id` in daemon status (schema 11); the GUI
       resolves route contracts from that ID instead of reconstructing routes
       from `source`/`backend`.
