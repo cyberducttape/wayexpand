@@ -175,7 +175,11 @@ impl GuiApp {
     /// shared route-readiness model used by the header and first-run guide;
     /// use recent content-free route telemetry when that model has no pending
     /// action to offer.
-    pub(crate) fn render_why_card(&self, ui: &mut egui::Ui, palette: &Palette) {
+    pub(crate) fn render_why_card(
+        &self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+    ) -> Option<super::NextAction> {
         // Use the same prioritized state model as the header and first-run
         // guide. This keeps the diagnosis and its recommended action from
         // disagreeing about the active route.
@@ -186,6 +190,7 @@ impl GuiApp {
                 .strings
                 .next_step_instruction(problem, situation.gnome_ibus);
             let action_label = self.strings.action_label(action);
+            let mut action_requested = false;
             theme::section_header(ui, "", self.strings.why_title());
             theme::card(ui, palette, |ui| {
                 ui.label(
@@ -195,17 +200,16 @@ impl GuiApp {
                 );
                 ui.add(egui::Label::new(RichText::new(answer).color(palette.warning)).wrap());
                 ui.add(egui::Label::new(instruction).wrap());
-                ui.colored_label(
-                    palette.accent,
-                    format!("{}: {action_label}", self.strings.next_step_details()),
-                );
+                if ui.button(action_label).clicked() {
+                    action_requested = true;
+                }
             });
-            return;
+            return action_requested.then_some(action);
         }
         if self.daemon_reachable != Some(true)
             || runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin")
         {
-            return;
+            return None;
         }
         let diagnosis = wayexpand_core::ExpansionDiagnosis::from_status(
             &wayexpand_core::DaemonStatus::parse(&self.daemon_status),
@@ -233,6 +237,7 @@ impl GuiApp {
                 ui.add(egui::Label::new(RichText::new(fix).small()).wrap());
             }
         });
+        None
     }
 
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
@@ -256,7 +261,7 @@ impl GuiApp {
         }
         // Put the direct answer before the detailed route and protocol
         // inventory so users do not have to interpret diagnostics first.
-        self.render_why_card(ui, palette);
+        let why_action = self.render_why_card(ui, palette);
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
             ui.label(
@@ -1193,6 +1198,9 @@ impl GuiApp {
             self.support_export_open = true;
             self.support_preview = None;
             self.support_preview_error = None;
+        }
+        if let Some(action) = why_action {
+            self.perform_next_step(action);
         }
     }
 
