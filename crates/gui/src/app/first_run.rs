@@ -859,8 +859,8 @@ impl GuiApp {
 #[cfg(test)]
 mod guided_setup_tests {
     use super::{
-        FirstRunOutcome, first_run_outcome, first_run_outcome_label, replacement_test_is_admitted,
-        uses_gnome_ibus_route,
+        first_run_outcome, first_run_outcome_label, replacement_test_is_admitted,
+        uses_gnome_ibus_route, FirstRunOutcome,
     };
     use crate::runtime::ReplacementAssurance;
     use wayexpand_core::CompatibilityMode;

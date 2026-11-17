@@ -453,8 +453,8 @@ impl GuiApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        Action, GnomeIbusReadiness, IbusCheckState, Problem, Situation, gnome_ibus_readiness,
-        next_step,
+        gnome_ibus_readiness, next_step, Action, GnomeIbusReadiness, IbusCheckState, Problem,
+        Situation,
     };
     use crate::runtime::{DaemonBuildState, RouteState};
 
