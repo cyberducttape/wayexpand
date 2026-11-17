@@ -3841,6 +3841,7 @@ fn gnome_route_readiness_follows_the_engine_not_the_companion_daemon() {
             check("gnome-source-registered"),
             check("registered"),
             check("gnome-source-active"),
+            check("engine"),
             check("selected"),
             check("consent"),
         ],
@@ -4653,7 +4654,7 @@ fn diagnostics_answer_why_a_trigger_did_not_expand() {
         semantics.contains("Why didn't my trigger expand?"),
         "{semantics}"
     );
-    assert!(semantics.contains("WayExpand is paused."), "{semantics}");
+    assert!(semantics.contains("Expansion is paused."), "{semantics}");
     assert!(
         semantics.contains("Select Resume in the menu at the top of the window"),
         "{semantics}"

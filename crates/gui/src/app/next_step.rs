@@ -385,8 +385,12 @@ impl GuiApp {
             .then(|| runtime::status_field(&self.daemon_status, "source"))
             .flatten();
         let compositor = wayexpand_backend_selection::Compositor::detect();
+        let gnome_session = compositor == wayexpand_backend_selection::Compositor::Gnome
+            || self.ibus_route.as_ref().is_some_and(|report| {
+                report.desktop == wayexpand_backend_ibus::chain::IbusDesktop::Gnome
+            });
         let gnome_ibus = super::first_run::uses_gnome_ibus_route(
-            compositor == wayexpand_backend_selection::Compositor::Gnome,
+            gnome_session,
             self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass,
             self.ibus_check_state("gnome-source-registered") == IbusCheckState::Pass,
             self.recommended_route

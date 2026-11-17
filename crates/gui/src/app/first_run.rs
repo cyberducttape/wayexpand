@@ -284,7 +284,10 @@ impl GuiApp {
         let daemon_build = daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status));
         let gnome_ibus = uses_gnome_ibus_route(
             wayexpand_backend_selection::Compositor::detect()
-                == wayexpand_backend_selection::Compositor::Gnome,
+                == wayexpand_backend_selection::Compositor::Gnome
+                || self.ibus_route.as_ref().is_some_and(|report| {
+                    report.desktop == wayexpand_backend_ibus::chain::IbusDesktop::Gnome
+                }),
             self.ibus_route
                 .as_ref()
                 .and_then(|report| report.check("gnome-source-active"))
