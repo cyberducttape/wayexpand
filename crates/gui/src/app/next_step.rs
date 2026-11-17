@@ -35,6 +35,7 @@ pub(crate) enum Problem {
     RouteFailed,
     Unsupported,
     FieldCannotReplace,
+    SensitiveField,
     ApplicationDeliveryUnverified,
     OutputUnverified,
     PartialOutput,
@@ -118,6 +119,9 @@ pub(crate) struct Situation {
     pub replacement_allowed: bool,
     /// The last normal field refused replacement (no surrounding text).
     pub field_cannot_replace: bool,
+    /// The most recently typed-in IBus field explicitly identified itself as
+    /// sensitive; matching is intentionally suppressed there.
+    pub field_sensitive: bool,
     /// A user-confirmed insertion in an application still covers this
     /// desktop session, build, and route. Matcher previews and backend
     /// acknowledgements do not satisfy this condition.
@@ -203,9 +207,9 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     use runtime::RouteState as R;
     use wayexpand_core::OutcomeKind as O;
     let field = || {
-        if s.field_cannot_replace {
-            Some((Problem::FieldCannotReplace, Action::QuickPicker))
-        } else if let Some(outcome) = s.recent_outcome {
+        // A transaction result is more specific than the most recent field's
+        // general capability state, and must not be hidden by it.
+        if let Some(outcome) = s.recent_outcome {
             match outcome {
                 O::Partial => Some((Problem::PartialOutput, Action::InspectText)),
                 O::Unknown | O::Expanded | O::ExpandedCursorMisplaced => {
@@ -219,6 +223,10 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
                 }
                 O::Other => Some((Problem::OutputStatusUnknown, Action::InspectText)),
             }
+        } else if s.field_sensitive {
+            Some((Problem::SensitiveField, Action::TestInApplication))
+        } else if s.field_cannot_replace {
+            Some((Problem::FieldCannotReplace, Action::QuickPicker))
         } else if !s.application_delivery_verified {
             Some((
                 Problem::ApplicationDeliveryUnverified,
@@ -421,24 +429,24 @@ impl GuiApp {
         // typed in lacks surrounding text. Use only the newest field that
         // actually received keys, and only while its engine diagnostics still
         // belong to the live process. Otherwise keep the conclusion unknown.
-        let field_cannot_replace = self.ibus_diagnostics_fresh() == Some(true)
-            && self
-                .ibus_route
-                .as_ref()
-                .and_then(|report| report.activity.as_ref())
-                .filter(|activity| activity.live)
-                .and_then(|activity| {
-                    activity
-                        .status
-                        .recent_fields
-                        .iter()
-                        .rev()
-                        .find(|field| field.keys > 0)
-                })
-                .is_some_and(|field| {
-                    wayexpand_backend_ibus::IbusFieldVerdict::of(field)
-                        == wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText
-                });
+        let latest_ibus_field_verdict = (self.ibus_diagnostics_fresh() == Some(true))
+            .then(|| self.ibus_route.as_ref())
+            .flatten()
+            .and_then(|report| report.activity.as_ref())
+            .filter(|activity| activity.live)
+            .and_then(|activity| {
+                activity
+                    .status
+                    .recent_fields
+                    .iter()
+                    .rev()
+                    .find(|field| field.keys > 0)
+            })
+            .map(wayexpand_backend_ibus::IbusFieldVerdict::of);
+        let field_cannot_replace = latest_ibus_field_verdict
+            == Some(wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText);
+        let field_sensitive =
+            latest_ibus_field_verdict == Some(wayexpand_backend_ibus::IbusFieldVerdict::Sensitive);
         Situation {
             daemon_reachable: self.daemon_reachable,
             ibus_active,
@@ -465,6 +473,7 @@ impl GuiApp {
             build: daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status)),
             replacement_allowed,
             field_cannot_replace: ibus_route && field_cannot_replace,
+            field_sensitive: ibus_route && field_sensitive,
             application_delivery_verified: self.expansion_observed(),
             recent_outcome: self.recent_output_outcome(),
         }

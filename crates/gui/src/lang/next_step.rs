@@ -154,6 +154,15 @@ impl Strings {
             (Problem::FieldCannotReplace, Id) => {
                 "Aplikasi tempat Anda terakhir mengetik tidak mengizinkan WayExpand mengganti teks di sana. Gunakan Quick Picker di aplikasi itu."
             }
+            (Problem::SensitiveField, En) => {
+                "The last field was marked sensitive, so WayExpand intentionally did not capture or expand its typing."
+            }
+            (Problem::SensitiveField, De) => {
+                "Das letzte Feld wurde als sensibel markiert. WayExpand hat dort absichtlich keine Eingaben erfasst oder erweitert."
+            }
+            (Problem::SensitiveField, Id) => {
+                "Kolom terakhir ditandai sensitif, jadi WayExpand sengaja tidak menangkap atau memperluas ketikan di sana."
+            }
             (Problem::ApplicationDeliveryUnverified, En) => {
                 "The route is connected, but WayExpand has not verified that replacement text appears in an application."
             }
@@ -374,6 +383,15 @@ impl Strings {
             }
             (Problem::FieldCannotReplace, Id) => {
                 "Kolom ini tidak menyediakan teks yang dapat diganti WayExpand dengan aman. Buka Quick Picker dalam mode salin saja, lalu tempel cuplikannya."
+            }
+            (Problem::SensitiveField, En) => {
+                "Test only in a normal, non-sensitive text field. Choose Desktop Integration Test and confirm only if the exact replacement appears."
+            }
+            (Problem::SensitiveField, De) => {
+                "Testen Sie nur in einem normalen, nicht sensiblen Textfeld. Wählen Sie den Desktop-Integrationstest und bestätigen Sie nur, wenn genau die Ersetzung erscheint."
+            }
+            (Problem::SensitiveField, Id) => {
+                "Uji hanya di kolom teks biasa yang tidak sensitif. Pilih Uji Integrasi Desktop dan konfirmasi hanya jika teks pengganti yang tepat muncul."
             }
             (Problem::Unsupported, En) => {
                 "This route cannot replace typed text here. Use Quick Picker in copy-only mode and paste the snippet."
