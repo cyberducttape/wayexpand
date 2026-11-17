@@ -36,6 +36,11 @@ pub(crate) enum Problem {
     ApplicationDeliveryUnverified,
     OutputUnverified,
     PartialOutput,
+    OutputNotApplied,
+    OutputBlockedByPolicy,
+    OutputInterrupted,
+    SnippetActionFailed,
+    OutputStatusUnknown,
     StatusUnknown,
     RouteStatusUnknown,
 }
@@ -53,6 +58,7 @@ pub(crate) enum Action {
     QuickPicker,
     TestInApplication,
     InspectText,
+    ReviewSnippet,
 }
 
 /// One authoritative interpretation of GNOME IBus evidence. Both the
@@ -152,18 +158,22 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     let field = || {
         if s.field_cannot_replace {
             Some((Problem::FieldCannotReplace, Action::QuickPicker))
-        } else if matches!(
-            s.recent_outcome,
-            Some(O::Partial | O::Unknown | O::Expanded | O::ExpandedCursorMisplaced)
-        ) {
-            Some((
-                if s.recent_outcome == Some(O::Partial) {
-                    Problem::PartialOutput
-                } else {
-                    Problem::OutputUnverified
-                },
-                Action::InspectText,
-            ))
+        } else if let Some(outcome) = s.recent_outcome {
+            match outcome {
+                O::Partial => Some((Problem::PartialOutput, Action::InspectText)),
+                O::Unknown | O::Expanded | O::ExpandedCursorMisplaced => {
+                    Some((Problem::OutputUnverified, Action::InspectText))
+                }
+                O::NotApplied => Some((Problem::OutputNotApplied, Action::InspectText)),
+                O::BlockedByPolicy => Some((Problem::OutputBlockedByPolicy, Action::InspectText)),
+                O::InterruptedByTyping => {
+                    Some((Problem::OutputInterrupted, Action::TestInApplication))
+                }
+                O::SnippetActionFailed => {
+                    Some((Problem::SnippetActionFailed, Action::ReviewSnippet))
+                }
+                O::Other => Some((Problem::OutputStatusUnknown, Action::InspectText)),
+            }
         } else if !s.application_delivery_verified {
             Some((
                 Problem::ApplicationDeliveryUnverified,
@@ -446,6 +456,9 @@ impl GuiApp {
             Action::InspectText => {
                 self.diagnostics_open = true;
                 self.refresh_diagnostics(true);
+            }
+            Action::ReviewSnippet => {
+                self.diagnostics_open = false;
             }
         }
     }

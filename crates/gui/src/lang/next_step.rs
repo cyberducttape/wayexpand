@@ -163,6 +163,21 @@ impl Strings {
             (Problem::PartialOutput, Id) => {
                 "WayExpand melaporkan bahwa hanya sebagian teks pengganti yang mungkin tertulis."
             }
+            (Problem::OutputNotApplied, En) => "WayExpand refused the most recent expansion before it changed the field.",
+            (Problem::OutputNotApplied, De) => "WayExpand hat die letzte Ersetzung abgelehnt, bevor das Feld geändert wurde.",
+            (Problem::OutputNotApplied, Id) => "WayExpand menolak ekspansi terakhir sebelum mengubah kolom.",
+            (Problem::OutputBlockedByPolicy, En) => "A policy stopped the most recent expansion before output was sent.",
+            (Problem::OutputBlockedByPolicy, De) => "Eine Richtlinie hat die letzte Ersetzung gestoppt, bevor Text gesendet wurde.",
+            (Problem::OutputBlockedByPolicy, Id) => "Kebijakan menghentikan ekspansi terakhir sebelum teks dikirim.",
+            (Problem::OutputInterrupted, En) => "WayExpand stopped the most recent expansion because more typing arrived.",
+            (Problem::OutputInterrupted, De) => "WayExpand hat die letzte Ersetzung abgebrochen, weil weitere Eingaben ankamen.",
+            (Problem::OutputInterrupted, Id) => "WayExpand menghentikan ekspansi terakhir karena ada ketikan tambahan.",
+            (Problem::SnippetActionFailed, En) => "The most recent snippet's form or command failed before output was delivered.",
+            (Problem::SnippetActionFailed, De) => "Das Formular oder der Befehl des letzten Snippets ist vor der Ausgabe fehlgeschlagen.",
+            (Problem::SnippetActionFailed, Id) => "Formulir atau perintah cuplikan terakhir gagal sebelum keluaran dikirim.",
+            (Problem::OutputStatusUnknown, En) => "WayExpand recorded a recent output result that this version cannot classify.",
+            (Problem::OutputStatusUnknown, De) => "WayExpand hat ein aktuelles Ausgabeergebnis aufgezeichnet, das diese Version nicht einordnen kann.",
+            (Problem::OutputStatusUnknown, Id) => "WayExpand mencatat hasil keluaran terbaru yang tidak dapat diklasifikasikan versi ini.",
             (Problem::StatusUnknown, En) => {
                 "WayExpand could not read the current service status, so it cannot tell whether typing is reaching it."
             }
@@ -217,6 +232,9 @@ impl Strings {
             (Action::InspectText, En) => "Refresh output status",
             (Action::InspectText, De) => "Ausgabestatus aktualisieren",
             (Action::InspectText, Id) => "Perbarui status keluaran",
+            (Action::ReviewSnippet, En) => "Review snippet",
+            (Action::ReviewSnippet, De) => "Snippet prüfen",
+            (Action::ReviewSnippet, Id) => "Tinjau cuplikan",
         }
     }
 
@@ -279,6 +297,21 @@ impl Strings {
             (Problem::PartialOutput, Id) => {
                 "Periksa kolom tujuan sebelum mengetik lagi. Perbaiki teks yang tidak lengkap secara manual; WayExpand tidak akan mengulang penyisipan ini. Lalu jalankan tes aman di aplikasi nyata."
             }
+            (Problem::OutputNotApplied, En) => "No replacement was sent; check whether the original trigger is still there. Refresh diagnostics and follow the specific output refusal.",
+            (Problem::OutputNotApplied, De) => "Es wurde kein Ersatz gesendet; prüfen Sie, ob der ursprüngliche Trigger noch vorhanden ist. Aktualisieren Sie die Diagnose und folgen Sie dem konkreten Ablehnungsgrund.",
+            (Problem::OutputNotApplied, Id) => "Teks pengganti tidak dikirim; periksa apakah pemicu asli masih ada. Perbarui diagnostik dan ikuti alasan penolakan keluaran yang ditampilkan.",
+            (Problem::OutputBlockedByPolicy, En) => "Open Diagnostics → Policy to identify the refusing rule. Ask your policy administrator to change it if appropriate; use Quick Picker only if policy permits copying.",
+            (Problem::OutputBlockedByPolicy, De) => "Öffnen Sie Diagnose → Richtlinie, um die ablehnende Regel zu finden. Bitten Sie gegebenenfalls die Richtlinienverwaltung um eine Änderung; nutzen Sie den Schnellwähler nur, wenn Kopieren erlaubt ist.",
+            (Problem::OutputBlockedByPolicy, Id) => "Buka Diagnostik → Kebijakan untuk melihat aturan yang menolak. Minta administrator mengubahnya jika sesuai; gunakan Quick Picker hanya jika kebijakan mengizinkan penyalinan.",
+            (Problem::OutputInterrupted, En) => "Inspect the target field before continuing. Pause briefly after the trigger, then run one harmless test in the affected app. If replacement text may have appeared, do not repeat it.",
+            (Problem::OutputInterrupted, De) => "Prüfen Sie das Zielfeld, bevor Sie fortfahren. Warten Sie nach dem Trigger kurz und testen Sie dann einmal mit harmlosem Text in der betroffenen App. Falls Ersatztext erschienen sein könnte, wiederholen Sie ihn nicht.",
+            (Problem::OutputInterrupted, Id) => "Periksa kolom tujuan sebelum melanjutkan. Berhenti sejenak setelah pemicu, lalu lakukan satu tes aman di aplikasi terkait. Jika teks pengganti mungkin sudah muncul, jangan ulangi.",
+            (Problem::SnippetActionFailed, En) => "Open the snippet in the library and review its form fields or command result. WayExpand does not rerun a failed command automatically.",
+            (Problem::SnippetActionFailed, De) => "Öffnen Sie das Snippet in der Bibliothek und prüfen Sie Formularfelder oder Befehlsausgabe. WayExpand führt einen fehlgeschlagenen Befehl nicht automatisch erneut aus.",
+            (Problem::SnippetActionFailed, Id) => "Buka cuplikan di pustaka dan periksa isian formulir atau hasil perintahnya. WayExpand tidak menjalankan ulang perintah yang gagal secara otomatis.",
+            (Problem::OutputStatusUnknown, En) => "Refresh diagnostics and inspect the latest outcome. Check the target field before retrying anything; use Quick Picker for copy and paste meanwhile.",
+            (Problem::OutputStatusUnknown, De) => "Aktualisieren Sie die Diagnose und prüfen Sie das letzte Ergebnis. Kontrollieren Sie das Zielfeld, bevor Sie etwas wiederholen; nutzen Sie bis dahin den Schnellwähler zum Kopieren und Einfügen.",
+            (Problem::OutputStatusUnknown, Id) => "Perbarui diagnostik dan periksa hasil terakhir. Periksa kolom tujuan sebelum mencoba lagi; sementara itu gunakan Quick Picker untuk salin dan tempel.",
             (Problem::StatusUnknown | Problem::RouteStatusUnknown, En) => {
                 "Refresh this diagnosis. If status remains unavailable, open Diagnostics → Services and use Quick Picker in copy-only mode meanwhile."
             }

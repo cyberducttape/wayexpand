@@ -783,7 +783,14 @@ impl GuiApp {
                 P::Unsupported => (S::CopyOnly, palette.muted),
                 P::NoTypingRoute => (S::NeedsSetup, palette.warning),
                 P::FieldCannotReplace => (S::Limited, palette.warning),
-                P::ApplicationDeliveryUnverified => (S::NeedsVerification, palette.accent),
+                P::ApplicationDeliveryUnverified
+                | P::OutputUnverified
+                | P::PartialOutput
+                | P::OutputNotApplied
+                | P::OutputBlockedByPolicy
+                | P::OutputInterrupted
+                | P::SnippetActionFailed
+                | P::OutputStatusUnknown => (S::NeedsVerification, palette.accent),
                 P::InputStatusPending => (S::Checking, palette.muted),
                 P::RestartNeeded
                 | P::BuildUnknown
