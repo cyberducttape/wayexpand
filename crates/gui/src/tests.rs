@@ -2612,12 +2612,22 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         .any(|state| guide_semantics.contains(*state)),
         "first-run must expose an operational state: {guide_semantics}"
     );
-    assert!(
-        guide_semantics.contains(
-            "WayExpand needs permission to remove a typed trigger and replace it with your snippet.",
-        ),
-        "non-atomic IBus insertion must require explicit consent: {guide_semantics}"
-    );
+    let non_atomic_consent =
+        "WayExpand needs permission to remove a typed trigger and replace it with your snippet.";
+    if runtime::daemon_build_state(&app.daemon_status) == runtime::DaemonBuildState::Current {
+        assert!(
+            guide_semantics.contains(non_atomic_consent),
+            "non-atomic IBus insertion must require explicit consent: {guide_semantics}"
+        );
+    } else {
+        assert!(
+            guide_semantics.contains(
+                "WayExpand cannot verify the running service's version or status format."
+            ),
+            "an unverified build must block the live test: {guide_semantics}"
+        );
+        assert!(!guide_semantics.contains("Test in a real application"));
+    }
     // The local matcher check above is reported, but never as a desktop
     // verification.
     assert!(guide_semantics.contains("Matcher preview: this rule matches locally."));
@@ -2689,16 +2699,7 @@ fn requesting_a_new_desktop_test_invalidates_the_previous_application_confirmati
 
 #[test]
 fn first_run_requires_a_verified_build_before_offering_live_test() {
-    for (case, expected_warning) in [
-        (
-            "stale",
-            "The running WayExpand service is from an older version.",
-        ),
-        (
-            "unknown",
-            "WayExpand cannot verify the running service's version or status format.",
-        ),
-    ] {
+    for case in ["stale", "unknown"] {
         let path = std::env::temp_dir().join(format!(
             "wayexpand-gui-first-run-{case}-daemon-{}.toml",
             std::process::id()
@@ -2718,6 +2719,14 @@ fn first_run_requires_a_verified_build_before_offering_live_test() {
             )
         } else {
             format!("status_schema={}\n", wayexpand_core::CONTROL_STATUS_SCHEMA)
+        };
+        let expected_warning = if case == "stale"
+            && runtime::daemon_build_state(&app.daemon_status)
+                == runtime::DaemonBuildState::RestartRequired
+        {
+            "The running WayExpand service is from an older version."
+        } else {
+            "WayExpand cannot verify the running service's version or status format."
         };
         app.language = Language::English;
         app.strings.set_language(Language::English);
@@ -4789,6 +4798,11 @@ fn diagnostics_answer_why_a_trigger_did_not_expand() {
         semantics.contains("Why didn't my trigger expand?"),
         "{semantics}"
     );
+    if runtime::daemon_build_state(&app.daemon_status) != runtime::DaemonBuildState::Current {
+        assert!(semantics.contains("WayExpand cannot verify the running service's version"));
+        assert!(!semantics.contains("Expansion is paused."));
+        return;
+    }
     assert!(semantics.contains("Expansion is paused."), "{semantics}");
     assert!(
         semantics.contains("Select Resume in the menu at the top of the window"),
