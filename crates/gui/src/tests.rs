@@ -2639,7 +2639,9 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     assert!(guide_semantics.contains("Troubleshooting details"));
     assert!(!guide_semantics.contains("Backend probes show"));
     assert!(!guide_semantics.contains("It expanded correctly"));
-    assert!(!guide_semantics.contains("Copy trigger"));
+    assert!(guide_semantics.contains("TEST TRIGGER"));
+    assert!(guide_semantics.contains("Copy trigger"));
+    assert!(guide_semantics.contains("Expected output: WayExpand is working!"));
 
     app.filter = "working".into();
     app.refresh_visible_indices_cache();
