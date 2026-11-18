@@ -645,7 +645,7 @@ jobs:
           # KWin applies its layout at start-up, so each layout gets its own
           # private session. ASCII must be typed exactly; text a keystroke
           # route cannot type exactly must be refused before erasing.
-          for layout in de fr us:altgr-intl ru us,de:,; do
+          for layout in de fr us:altgr-intl ru 'us,de:,'; do
             bash scripts/test-kwin-e2e.sh --keep --layout "$layout"
           done
       - name: Test terminal paste into Konsole
