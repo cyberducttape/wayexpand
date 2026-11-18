@@ -410,6 +410,19 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             }
             IbusCheckState::Pass => {}
         }
+        // Fix a shared manifest that points into a user's home before asking
+        // them to exercise the desktop route. A recent KWin helper crash is
+        // useful evidence, but a live test cannot validate an engine whose
+        // system-wide registration is currently unsafe or invalid.
+        match s.ibus_manifest_scope {
+            IbusCheckState::Fail => {
+                return Some((Problem::IbusManifestScopeInvalid, Action::RunSetup));
+            }
+            IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
+                return Some((Problem::InputStatusPending, Action::CheckAgain));
+            }
+            IbusCheckState::Pass => {}
+        }
         match s.ibus_desktop_problem_id {
             Some("WX-KWIN-IBUS-001") if s.ibus_desktop_state == IbusCheckState::Fail => {
                 return Some((Problem::IbusDesktopRouteUnavailable, Action::RunSetup));
@@ -424,15 +437,6 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
                 ));
             }
             _ => {}
-        }
-        match s.ibus_manifest_scope {
-            IbusCheckState::Fail => {
-                return Some((Problem::IbusManifestScopeInvalid, Action::RunSetup));
-            }
-            IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
-                return Some((Problem::InputStatusPending, Action::CheckAgain));
-            }
-            IbusCheckState::Pass => {}
         }
         match s.ibus_selection {
             IbusCheckState::Fail | IbusCheckState::Warn => {
