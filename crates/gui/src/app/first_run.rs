@@ -53,6 +53,15 @@ fn replacement_test_is_admitted(
                 .is_some_and(|mode| mode != wayexpand_core::CompatibilityMode::Off))
 }
 
+fn compatibility_replacement_is_active(
+    route_ready: bool,
+    replacement_admitted: bool,
+    atomic_replace: Option<bool>,
+    ibus_route: bool,
+) -> bool {
+    route_ready && replacement_admitted && (ibus_route || atomic_replace != Some(true))
+}
+
 /// Whether first-run should judge this desktop by its GNOME IBus route. A
 /// companion daemon runs beside the engine, so it never decides this.
 #[cfg(test)]
@@ -526,6 +535,14 @@ impl GuiApp {
             replacement_test_admitted,
             test_snippet.is_some(),
             self.expansion_observed(),
+        );
+        let compatibility_replacement_active = compatibility_replacement_is_active(
+            route_ready,
+            replacement_test_admitted,
+            self.daemon_capabilities
+                .as_ref()
+                .and_then(|capabilities| capabilities.inject_atomic_replace),
+            gnome_ibus || kde_ibus || ibus_only,
         );
 
         egui::ScrollArea::vertical()
@@ -1006,6 +1023,12 @@ impl GuiApp {
                         if let Some(assurance) = route_assurance {
                             ui.label(note(assurance));
                         }
+                        if compatibility_replacement_active {
+                            ui.colored_label(
+                                palette.warning,
+                                self.strings.compatibility_replacement_active(),
+                            );
+                        }
                         if let Some(route) = recommendation {
                             ui.label(note(&format!(
                                 "{recommended_route} · {recommended_route_detail}"
@@ -1059,8 +1082,8 @@ impl GuiApp {
 #[cfg(test)]
 mod guided_setup_tests {
     use super::{
-        first_run_outcome, first_run_outcome_label, replacement_test_is_admitted,
-        uses_gnome_ibus_route, FirstRunOutcome,
+        compatibility_replacement_is_active, first_run_outcome, first_run_outcome_label,
+        replacement_test_is_admitted, uses_gnome_ibus_route, FirstRunOutcome,
     };
     use crate::runtime::ReplacementAssurance;
     use wayexpand_core::CompatibilityMode;
@@ -1109,12 +1132,46 @@ mod guided_setup_tests {
         );
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::SafeFallback),
-            "Configured, insertion not verified"
+            "Automatic replacement unavailable · copy and paste"
         );
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::SetupIncomplete),
             "Setup incomplete"
         );
+    }
+
+    #[test]
+    fn compatibility_replacement_is_distinguished_from_atomic_and_copy_only_routes() {
+        assert!(compatibility_replacement_is_active(
+            true,
+            true,
+            Some(false),
+            false
+        ));
+        assert!(compatibility_replacement_is_active(true, true, None, true));
+        assert!(!compatibility_replacement_is_active(
+            true,
+            false,
+            Some(false),
+            false
+        ));
+        assert!(!compatibility_replacement_is_active(
+            false,
+            true,
+            Some(false),
+            false
+        ));
+        assert!(!compatibility_replacement_is_active(
+            true,
+            true,
+            Some(true),
+            false
+        ));
+
+        let strings = crate::lang::Strings::new(crate::lang::Language::English);
+        assert!(strings
+            .compatibility_replacement_active()
+            .contains("Compatibility replacement is enabled (non-atomic)"));
     }
 
     #[test]

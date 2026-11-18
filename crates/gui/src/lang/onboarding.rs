@@ -15,6 +15,10 @@ texts! {
         "Automatic replacement unavailable · copy and paste",
         "Automatische Ersetzung nicht verfügbar · kopieren und einfügen",
         "Penggantian otomatis tidak tersedia · salin dan tempel";
+    compatibility_replacement_active =>
+        "Compatibility replacement is enabled (non-atomic). A test covers only the named app in this session; focus changes or typing during insertion can leave partial text. Quick Picker copy-and-paste remains available.",
+        "Die Kompatibilitäts-Ersetzung ist aktiviert (nicht atomar). Ein Test gilt nur für die genannte Anwendung in dieser Sitzung; Fokuswechsel oder Tippen während des Einfügens können unvollständigen Text hinterlassen. Kopieren und Einfügen über den Schnellwähler bleibt verfügbar.",
+        "Penggantian kompatibilitas aktif (non-atomik). Pengujian hanya berlaku untuk aplikasi yang disebutkan dalam sesi ini; perubahan fokus atau mengetik saat penyisipan dapat meninggalkan teks sebagian. Salin-tempel melalui Quick Picker tetap tersedia.";
     outcome_setup_incomplete =>
         "Setup incomplete",
         "Einrichtung unvollständig",
