@@ -1490,18 +1490,22 @@ impl GuiApp {
                 ui.group(|ui| {
                     ui.label(RichText::new(self.strings.setup_review_stages()).strong());
                     for (symbol, problem_id, title, detail, fix) in &attention {
-                        let title = if problem_id == "WX-IBUS-MULTIUSER-001" {
+                        // Only a failed scope check is known to be unsafe; an
+                        // unknown result keeps the check's own explanation.
+                        let unsafe_shared_registration =
+                            *symbol == "✗" && problem_id == "WX-IBUS-MULTIUSER-001";
+                        let title = if unsafe_shared_registration {
                             self.strings.setup_system_registration_title()
                         } else {
                             title
                         };
-                        let id = if problem_id.is_empty() || problem_id == "WX-IBUS-MULTIUSER-001" {
+                        let id = if problem_id.is_empty() || unsafe_shared_registration {
                             String::new()
                         } else {
                             format!(" [{problem_id}]")
                         };
                         ui.label(format!("{symbol} {title}{id}"));
-                        if problem_id == "WX-IBUS-MULTIUSER-001" {
+                        if unsafe_shared_registration {
                             ui.label(
                                 RichText::new(self.strings.setup_system_registration_reason())
                                     .small()

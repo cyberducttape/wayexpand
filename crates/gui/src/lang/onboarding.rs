@@ -275,9 +275,9 @@ texts! {
         "Fahren Sie unten fort, um eine geschützte, systemeigene IBus-Engine zu installieren. WayExpand fragt, bevor eine Administratorfreigabe angefordert wird.",
         "Lanjutkan di bawah untuk memasang mesin IBus milik sistem yang terlindungi. WayExpand akan meminta persetujuan sebelum meminta akses administrator.";
     setup_system_registration_reason =>
-        "The shared keyboard integration currently points to a program in your personal folder. WayExpand needs to install a protected system copy so the integration works safely for all accounts.",
-        "Die gemeinsame Tastaturintegration verweist derzeit auf ein Programm in Ihrem persönlichen Ordner. WayExpand muss eine geschützte Systemkopie installieren, damit die Integration für alle Konten sicher funktioniert.",
-        "Integrasi papan ketik bersama saat ini mengarah ke program di folder pribadi Anda. WayExpand perlu memasang salinan sistem yang terlindungi agar integrasi berfungsi dengan aman untuk semua akun.";
+        "The shared keyboard integration is not protected: it points to a program in a personal folder, or other accounts could change its files. WayExpand needs to install a protected system copy so the integration is safe for all accounts.",
+        "Die gemeinsame Tastaturintegration ist nicht geschützt: Sie verweist auf ein Programm in einem persönlichen Ordner, oder andere Konten könnten ihre Dateien ändern. WayExpand muss eine geschützte Systemkopie installieren, damit die Integration für alle Konten sicher ist.",
+        "Integrasi papan ketik bersama tidak terlindungi: integrasi ini mengarah ke program di folder pribadi, atau akun lain dapat mengubah berkasnya. WayExpand perlu memasang salinan sistem yang terlindungi agar integrasi aman untuk semua akun.";
     setup_system_registration_title =>
         "Shared IBus registration needs a protected system copy",
         "Die gemeinsame IBus-Registrierung benötigt eine geschützte Systemkopie",

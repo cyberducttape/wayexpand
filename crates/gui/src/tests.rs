@@ -3784,7 +3784,7 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
         "the dialog must explain the repair and administrator approval step: {semantics}"
     );
     assert!(
-        semantics.contains("The shared keyboard integration currently points to a program in your personal folder."),
+        semantics.contains("The shared keyboard integration is not protected: it points to a program in a personal folder, or other accounts could change its files."),
         "the default view should explain the issue without exposing component paths: {semantics}"
     );
     assert!(
