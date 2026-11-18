@@ -553,9 +553,9 @@ impl Strings {
     pub fn action_label(&self, action: Action) -> &'static str {
         use Language::{English as En, German as De, Indonesian as Id};
         match (action, self.lang) {
-            (Action::CheckInstallation, En) => "Check installation",
-            (Action::CheckInstallation, De) => "Installation prüfen",
-            (Action::CheckInstallation, Id) => "Periksa instalasi",
+            (Action::RepairInstallation, En) => "Review safe repairs",
+            (Action::RepairInstallation, De) => "Installationsreparatur prüfen",
+            (Action::RepairInstallation, Id) => "Tinjau perbaikan instalasi",
             (Action::TurnOn, En) => "Turn on",
             (Action::TurnOn, De) => "Einschalten",
             (Action::TurnOn, Id) => "Aktifkan",

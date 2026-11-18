@@ -1413,11 +1413,11 @@ impl GuiApp {
                         if ui
                             .button(
                                 self.strings
-                                    .action_label(crate::app::NextAction::CheckInstallation),
+                                    .action_label(crate::app::NextAction::RepairInstallation),
                             )
                             .clicked()
                         {
-                            self.perform_next_step(crate::app::NextAction::CheckInstallation);
+                            self.perform_next_step(crate::app::NextAction::RepairInstallation);
                         }
                     }
                     None => {

@@ -614,3 +614,50 @@ texts! {
         "Tastenkürzel für den Schnellwähler gesetzt.",
         "Pintasan Quick Picker diatur.";
 }
+
+texts! {
+    repair_check_running =>
+        "Checking for safe installation repairs…",
+        "Prüfe auf sichere Installationsreparaturen …",
+        "Memeriksa perbaikan instalasi yang aman…";
+    repair_title =>
+        "Review safe repairs",
+        "Installationsreparatur prüfen",
+        "Tinjau perbaikan instalasi";
+    repair_explainer =>
+        "WayExpand can restore these missing user-service links. Review the paths before applying. This will not grant keyboard access or change your snippets.",
+        "WayExpand kann diese fehlenden Verknüpfungen der Benutzerdienste wiederherstellen. Prüfen Sie die Pfade vor dem Anwenden. Dadurch wird kein Tastaturzugriff erteilt und Ihre Snippets werden nicht geändert.",
+        "WayExpand dapat memulihkan tautan layanan pengguna yang hilang ini. Periksa jalurnya sebelum menerapkan. Tindakan ini tidak memberikan akses papan ketik atau mengubah cuplikan Anda.";
+    repair_apply_button =>
+        "Apply safe repairs",
+        "Sichere Reparaturen anwenden",
+        "Terapkan perbaikan aman";
+    repair_not_now =>
+        "Not now",
+        "Später",
+        "Nanti saja";
+    repair_running =>
+        "Applying installation repairs…",
+        "Installationsreparaturen werden angewendet …",
+        "Menerapkan perbaikan instalasi…";
+    repair_review_ready =>
+        "Safe installation repairs are available for review.",
+        "Sichere Installationsreparaturen können geprüft werden.",
+        "Perbaikan instalasi yang aman tersedia untuk ditinjau.";
+    no_safe_repairs_available =>
+        "No automatic repair is available. Checking versions and installation details…",
+        "Keine automatische Reparatur verfügbar. Versionen und Installationsdetails werden geprüft …",
+        "Tidak ada perbaikan otomatis. Memeriksa versi dan detail instalasi…";
+    repair_completed =>
+        "The missing service links were restored. WayExpand is checking whether the desktop route is ready; text insertion still needs a real-app test.",
+        "Die fehlenden Dienstverknüpfungen wurden wiederhergestellt. WayExpand prüft, ob die Desktop-Route bereit ist; das Einfügen von Text muss weiterhin in einer echten Anwendung getestet werden.",
+        "Tautan layanan yang hilang telah dipulihkan. WayExpand sedang memeriksa kesiapan rute desktop; penyisipan teks tetap perlu diuji di aplikasi nyata.";
+    repair_check_unreadable =>
+        "WayExpand could not verify the repair plan. Open Diagnostics and check the installation report.",
+        "WayExpand konnte den Reparaturplan nicht prüfen. Öffnen Sie die Diagnose und prüfen Sie den Installationsbericht.",
+        "WayExpand tidak dapat memverifikasi rencana perbaikan. Buka Diagnostik dan periksa laporan instalasi.";
+    repair_result_unreadable =>
+        "The repair result could not be verified. Open Diagnostics and inspect the installation report before retrying.",
+        "Das Reparaturergebnis konnte nicht verifiziert werden. Öffnen Sie die Diagnose und prüfen Sie den Installationsbericht, bevor Sie es erneut versuchen.",
+        "Hasil perbaikan tidak dapat diverifikasi. Buka Diagnostik dan periksa laporan instalasi sebelum mencoba lagi.";
+}

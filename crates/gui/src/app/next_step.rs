@@ -66,7 +66,7 @@ pub(crate) enum Problem {
 /// The one thing to do about it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
-    CheckInstallation,
+    RepairInstallation,
     TurnOn,
     Resume,
     RunSetup,
@@ -277,7 +277,7 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     use runtime::RouteState as R;
     use wayexpand_core::OutcomeKind as O;
     if s.installation_ready == Some(false) {
-        return Some((Problem::InstallationIncomplete, Action::CheckInstallation));
+        return Some((Problem::InstallationIncomplete, Action::RepairInstallation));
     }
     let field = || {
         // A transaction result is more specific than the most recent field's
@@ -812,7 +812,7 @@ impl GuiApp {
     /// Run the concrete repair or verification associated with the finding.
     pub(crate) fn perform_next_step(&mut self, action: Action) {
         match action {
-            Action::CheckInstallation => self.check_upgrade_runtime(),
+            Action::RepairInstallation => self.check_installation_repairs(),
             Action::TurnOn | Action::RunSetup => self.start_guided_setup(),
             Action::ReviewConsent => self.review_replacement_consent(),
             Action::Resume => self.toggle_pause(),
