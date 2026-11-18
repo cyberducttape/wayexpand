@@ -1397,12 +1397,17 @@ impl GuiApp {
                             );
                         }
                         if !self.installation_audit.failed_components.is_empty() {
+                            let components = self
+                                .installation_audit
+                                .failed_components
+                                .iter()
+                                .map(|component| self.strings.dg_installation_component(component))
+                                .collect::<Vec<_>>()
+                                .join(", ");
                             ui.label(
-                                RichText::new(self.strings.dg_installation_components(
-                                    &self.installation_audit.failed_components.join(", "),
-                                ))
-                                .small()
-                                .color(palette.muted),
+                                RichText::new(self.strings.dg_installation_components(&components))
+                                    .small()
+                                    .color(palette.muted),
                             );
                         }
                         if ui
