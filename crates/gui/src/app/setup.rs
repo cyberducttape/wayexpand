@@ -386,6 +386,15 @@ impl GuiApp {
             self.diagnostics_open = true;
             return Status::error(self.strings.upgrade_check_unreadable());
         };
+        if report
+            .get("installation_check")
+            .and_then(|check| check.get("ready"))
+            .and_then(serde_json::Value::as_bool)
+            == Some(false)
+        {
+            self.diagnostics_open = true;
+            return Status::warning(self.strings.upgrade_installation_incomplete());
+        }
         let active_cli = report
             .get("active_payload_cli")
             .and_then(serde_json::Value::as_str);
@@ -630,6 +639,8 @@ impl GuiApp {
                         || line.starts_with("Output activity [")
                         || line.starts_with("Correlation [")
                         || line.starts_with("Test scope:")
+                        || line.starts_with("Problem:")
+                        || line.starts_with("Next:")
                 })
                 .take(4)
                 .map(|line| line.trim())
@@ -701,6 +712,7 @@ impl GuiApp {
                 "DESKTOP TEST RESULT: INPUT NOT OBSERVED"
                     | "DESKTOP TEST RESULT: NO OUTPUT OUTCOME"
                     | "DESKTOP TEST RESULT: UNCERTAIN OUTPUT"
+                    | "DESKTOP TEST RESULT: CONTROLLED GTK TEST FAILED"
                     | "DESKTOP TEST RESULT: CANCELLED"
             )
         }) {
@@ -761,6 +773,70 @@ impl GuiApp {
         }
     }
 
+    fn finish_controlled_desktop_test(&mut self) -> Status {
+        let Some(mut review) = self.pending_desktop_test.take() else {
+            self.diagnostics_open = true;
+            return Status::warning(self.strings.setup_desktop_test_unverified());
+        };
+        review.application_class = "GTK 3 controlled test field".into();
+        let tested_scope = crate::setup_record::Scope {
+            route: review.route.as_deref(),
+            route_instance: review.route_instance.as_deref(),
+            config_revision: Some(&review.config_revision),
+            desktop: &review.desktop,
+            session: review.session.as_deref(),
+            build: &review.build,
+        };
+        let record =
+            crate::setup_record::SetupRecord::verified(&review.application_class, &tested_scope);
+        let route = self.current_route_label();
+        let route_instance = self.current_route_instance();
+        let desktop = crate::setup_record::current_desktop();
+        let session = crate::setup_record::current_session();
+        let build = crate::setup_record::current_build();
+        let config_revision = self.config_revision.fingerprint();
+        let current_scope = crate::setup_record::Scope {
+            route: route.as_deref(),
+            route_instance: route_instance.as_deref(),
+            config_revision: Some(&config_revision),
+            desktop: &desktop,
+            session: session.as_deref(),
+            build: &build,
+        };
+        if let Some(staleness) = record.staleness(&current_scope) {
+            self.desktop_test_verified = false;
+            self.desktop_test_verified_application = None;
+            return Status::warning(
+                self.strings
+                    .setup_changed_since_test(&self.strings.setup_change(&staleness)),
+            );
+        }
+
+        self.desktop_test_verified = true;
+        self.desktop_test_verified_application = Some(review.application_class.clone());
+        self.setup_record_saved = crate::setup_record::save(&record).is_ok();
+        self.setup_record = Some(record);
+        let message = crate::lang::fill(
+            self.strings.dg_user_confirmed_exact_insertion_in_this(),
+            &[&review.application_class],
+        );
+        if self.setup_record_saved && (self.desktop_test_dialog_required || self.onboarding_visible)
+        {
+            self.onboarding_visible = true;
+            self.finish_onboarding();
+        } else if !self.setup_record_saved && self.desktop_test_dialog_required {
+            self.onboarding_visible = true;
+        }
+        if self.setup_record_saved {
+            Status::success(message)
+        } else {
+            Status::warning(format!(
+                "{message} {}",
+                self.strings.verification_not_saved()
+            ))
+        }
+    }
+
     /// Show the matcher preview for the same saved snippet used by the
     /// onboarding desktop test. Preserve unsaved editor work rather than
     /// silently switching the selected snippet underneath the user.
@@ -810,6 +886,7 @@ impl GuiApp {
             application_class.clone(),
             "--focus-confirmed".into(),
             "--observe-only".into(),
+            "--controlled-client".into(),
         ];
         self.pending_desktop_test = Some(DesktopTestReview {
             trigger,
@@ -900,6 +977,14 @@ impl GuiApp {
                             }
                             if task_kind.as_deref() == Some("desktop-test") {
                                 if output.lines().any(|line| {
+                                    line.trim()
+                                        == "DESKTOP TEST RESULT: VERIFIED IN CONTROLLED GTK 3 FIELD"
+                                }) {
+                                    self.desktop_test_review = None;
+                                    self.desktop_test_review_open = false;
+                                    self.diagnostics_open = false;
+                                    self.finish_controlled_desktop_test()
+                                } else if output.lines().any(|line| {
                                     line.trim()
                                         == "DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW"
                                 }) {

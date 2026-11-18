@@ -1007,6 +1007,17 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
             })
         })
         .collect();
+    // Keep package/file integrity beside process health in the same read-only
+    // upgrade report. This catches a package upgrade that changed the daemon
+    // but left a required desktop component missing.
+    let installation_checks = if action == "--check" {
+        crate::commands::install::checks()
+    } else {
+        Vec::new()
+    };
+    let installation_ready = installation_checks
+        .iter()
+        .all(|check| check.status != "fail");
     let report = serde_json::json!({
         "schema":1, "action":action, "cli_commit":cli_commit, "cli_version":cli_version,
         "current_install":current_target.as_ref().map(|v|v.to_string_lossy().into_owned()).or_else(|| installed_cli.as_ref().map(|p|p.display().to_string())),
@@ -1020,7 +1031,8 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         "broker_restart_process":broker_restart_process.clone(),
         "runtime_action":runtime_action,
         "ibus_stale_engine_processes":stale_ibus_processes_json,
-        "ibus_engine_note":"IBus engine processes are owned by ibus-daemon; restarting a WayExpand systemd unit does not reload a stale engine."
+        "ibus_engine_note":"IBus engine processes are owned by ibus-daemon; restarting a WayExpand systemd unit does not reload a stale engine.",
+        "installation_check":{"schema":2,"level":"installed","ready":installation_ready,"checks":installation_checks}
     });
     if action == "--check" {
         if json {
@@ -1036,6 +1048,14 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                     "valid"
                 } else {
                     "invalid or missing"
+                }
+            );
+            println!(
+                "Installed components: {}",
+                if installation_ready {
+                    "self-check passed"
+                } else {
+                    "required component missing; run `wayexpand install-check`"
                 }
             );
             println!(
@@ -1138,6 +1158,13 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         } else {
             println!("No running daemon version mismatch; nothing to apply.");
         }
+        let failures = installation_check_failures();
+        if !failures.is_empty() {
+            bail!(
+                "post-upgrade installation self-check failed for {}. Run `wayexpand install-check --json` for details",
+                failures.join(", ")
+            )
+        }
         if !stale_ibus_processes.is_empty() {
             print_ibus_engine_restart_guidance(&stale_ibus_processes);
         }
@@ -1226,12 +1253,34 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
             bail!("action broker health check failed; no saved payload is available for automatic rollback")
         }
     }
+    let installation_failures = installation_check_failures();
+    if !installation_failures.is_empty() {
+        let restored = rollback_file.is_file()
+            && restore_previous_install(&library, &current, &rollback_file, Some(unit)).is_ok();
+        bail!(
+            "post-upgrade installation self-check failed for {}; automatic rollback {}. Run `wayexpand install-check --json` for details",
+            installation_failures.join(", "),
+            if restored {
+                "restored the previous payload"
+            } else {
+                "was unavailable or failed; inspect the installation before using it"
+            }
+        )
+    }
     println!("Restarted {unit}; daemon build {restarted_build} now matches this CLI.");
     let stale_ibus_processes = crate::setup_ibus::stale_engine_processes();
     if !stale_ibus_processes.is_empty() {
         print_ibus_engine_restart_guidance(&stale_ibus_processes);
     }
     Ok(())
+}
+
+fn installation_check_failures() -> Vec<&'static str> {
+    crate::commands::install::checks()
+        .into_iter()
+        .filter(|check| check.status == "fail")
+        .map(|check| check.component)
+        .collect()
 }
 
 fn upgrade_restart_process(unit: &str) -> serde_json::Value {

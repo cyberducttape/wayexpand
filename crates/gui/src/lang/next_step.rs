@@ -389,13 +389,13 @@ impl Strings {
                 "Desktop ini tidak mengizinkan WayExpand mengganti teks yang diketik. Anda tetap bisa menyisipkan cuplikan dengan Quick Picker."
             }
             (Problem::FieldCannotReplace, En) => {
-                "The app you typed in last does not let WayExpand replace text there. Use the Quick Picker in that app."
+                "In the most recently checked field, the application did not share enough nearby text for WayExpand to verify what a replacement would change. Automatic replacement is unavailable in that field. Use Quick Picker to copy a snippet, then paste it yourself."
             }
             (Problem::FieldCannotReplace, De) => {
-                "Die zuletzt benutzte App lässt WayExpand dort keinen Text ersetzen. Nutzen Sie in dieser App den Schnellwähler."
+                "Im zuletzt geprüften Feld hat die Anwendung WayExpand nicht genug Umgebungstext bereitgestellt, um die Änderung einer Ersetzung zu prüfen. Die automatische Ersetzung ist in diesem Feld nicht verfügbar. Kopieren Sie ein Snippet mit dem Schnellwähler und fügen Sie es selbst ein."
             }
             (Problem::FieldCannotReplace, Id) => {
-                "Aplikasi tempat Anda terakhir mengetik tidak mengizinkan WayExpand mengganti teks di sana. Gunakan Quick Picker di aplikasi itu."
+                "Pada kolom yang terakhir diperiksa, aplikasi tidak memberikan cukup teks sekitar agar WayExpand dapat memeriksa perubahan penggantian. Penggantian otomatis tidak tersedia di kolom itu. Salin cuplikan dengan Quick Picker, lalu tempel sendiri."
             }
             (Problem::FieldTextMismatch, En) => {
                 "WayExpand recognized a trigger, but the focused text or cursor did not match it, so replacement was refused."
@@ -856,13 +856,13 @@ impl Strings {
                 "Perbarui diagnosis ini. Jika status tetap tidak tersedia, buka Diagnostik → Layanan dan gunakan Quick Picker dalam mode salin saja sementara itu."
             }
             (Problem::FieldCannotReplace, En) => {
-                "This field does not provide text WayExpand can safely replace. Open Quick Picker in copy-only mode and paste the snippet."
+                "WayExpand received typing in the most recently checked field, but the application did not provide enough nearby text to verify replacement. No automatic replacement was submitted. Open Quick Picker in copy-only mode and paste the snippet there."
             }
             (Problem::FieldCannotReplace, De) => {
-                "Dieses Feld stellt keinen Text bereit, den WayExpand sicher ersetzen kann. Öffnen Sie den Schnellwähler im Kopiermodus und fügen Sie das Snippet ein."
+                "WayExpand hat Eingaben im zuletzt geprüften Feld erkannt, aber die Anwendung hat nicht genug Umgebungstext bereitgestellt, um die Ersetzung zu prüfen. Es wurde keine automatische Ersetzung gesendet. Öffnen Sie den Schnellwähler im Kopiermodus und fügen Sie das Snippet dort ein."
             }
             (Problem::FieldCannotReplace, Id) => {
-                "Kolom ini tidak menyediakan teks yang dapat diganti WayExpand dengan aman. Buka Quick Picker dalam mode salin saja, lalu tempel cuplikannya."
+                "WayExpand menerima pengetikan di kolom yang terakhir diperiksa, tetapi aplikasi tidak memberikan cukup teks sekitar untuk memeriksa penggantian. Tidak ada penggantian otomatis yang dikirim. Buka Quick Picker dalam mode salin saja dan tempel cuplikan di sana."
             }
             (Problem::SensitiveField, En) => {
                 "Test only in a normal, non-sensitive text field. Choose Desktop Integration Test and confirm only if the exact replacement appears."
@@ -1046,6 +1046,14 @@ impl Strings {
             Language::English => "The version check did not return a readable report. Open Diagnostics → Versions and run `wayexpand upgrade --check --json`.",
             Language::German => "Die Versionsprüfung lieferte keinen lesbaren Bericht. Öffnen Sie Diagnose → Versionen und führen Sie `wayexpand upgrade --check --json` aus.",
             Language::Indonesian => "Pemeriksaan versi tidak menghasilkan laporan yang dapat dibaca. Buka Diagnostik → Versi dan jalankan `wayexpand upgrade --check --json`.",
+        }
+    }
+
+    pub(crate) fn upgrade_installation_incomplete(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The upgrade check found missing installed components. Open Diagnostics and run `wayexpand install-check --json` to see what needs repair.",
+            Language::German => "Die Upgrade-Prüfung hat fehlende installierte Komponenten gefunden. Öffnen Sie Diagnose und führen Sie `wayexpand install-check --json` aus, um die nötige Reparatur zu sehen.",
+            Language::Indonesian => "Pemeriksaan upgrade menemukan komponen terpasang yang hilang. Buka Diagnostik dan jalankan `wayexpand install-check --json` untuk melihat perbaikannya.",
         }
     }
 

@@ -4,6 +4,7 @@ use anyhow::{bail, Result};
 use std::{
     collections::{HashSet, VecDeque},
     io::{self, Write},
+    process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -204,6 +205,7 @@ struct DesktopTestOptions {
     application_class: Option<String>,
     focus_confirmed: bool,
     observe_only: bool,
+    controlled_client: bool,
 }
 
 pub(crate) fn debug_command(args: Args) -> Result<()> {
@@ -216,6 +218,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
     let mut test_application_class: Option<String> = None;
     let mut test_focus_confirmed = false;
     let mut test_observe_only = false;
+    let mut test_controlled_client = false;
     let mut gnome_interactive = false;
     let mut gnome = false;
     let mut focused_app_id = false;
@@ -283,13 +286,17 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                 test_observe_only = true;
                 values.remove(index);
             }
+            "--controlled-client" => {
+                test_controlled_client = true;
+                values.remove(index);
+            }
             _ => {
                 index += 1;
             }
         }
     }
     if !values.is_empty() {
-        bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --focused-app-id [--json] | --test [TRIGGER] [--application-class CLASS --focus-confirmed [--observe-only]]");
+        bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --focused-app-id [--json] | --test [TRIGGER] [--controlled-client] [--application-class CLASS --focus-confirmed [--observe-only]]");
     }
     if focused_app_id {
         if live
@@ -298,6 +305,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             || test_application_class.is_some()
             || test_focus_confirmed
             || test_observe_only
+            || test_controlled_client
             || gnome
             || gnome_interactive
         {
@@ -471,6 +479,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             || test_application_class.is_some()
             || test_focus_confirmed
             || test_observe_only
+            || test_controlled_client
         {
             bail!("usage: wayexpand debug --gnome --interactive");
         }
@@ -484,6 +493,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
         test_application_class.as_deref(),
         test_focus_confirmed,
         test_observe_only,
+        test_controlled_client,
     )?;
     if desktop_test_requested {
         let trigger = match test_trigger {
@@ -505,6 +515,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                 application_class: test_application_class,
                 focus_confirmed: test_focus_confirmed,
                 observe_only: test_observe_only,
+                controlled_client: test_controlled_client,
             },
         )
         .map(|_| ());
@@ -546,9 +557,12 @@ fn validate_desktop_test_options(
     application_class: Option<&str>,
     focus_confirmed: bool,
     observe_only: bool,
+    controlled_client: bool,
 ) -> Result<()> {
-    if !test_requested && (application_class.is_some() || focus_confirmed || observe_only) {
-        bail!("--application-class, --focus-confirmed, and --observe-only apply only to --test");
+    if !test_requested
+        && (application_class.is_some() || focus_confirmed || observe_only || controlled_client)
+    {
+        bail!("desktop-test options apply only to --test");
     }
     if focus_confirmed != application_class.is_some() {
         bail!("--focus-confirmed and --application-class must be provided together");
@@ -571,6 +585,90 @@ fn validate_desktop_test_options(
 /// accepts a static, enabled snippet without command execution or form fields.
 pub(crate) fn desktop_test(trigger: &str) -> Result<DesktopTestResult> {
     desktop_test_for(trigger, false, DesktopTestOptions::default())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControlledClientResult {
+    Verified,
+    InputNotObserved,
+    TriggerNotReplaced,
+    FieldMismatch,
+    Closed,
+    Unavailable,
+}
+
+/// Open a real GTK field and let it verify its own final text. Only the
+/// harmless test contract crosses the private stdin pipe; neither trigger
+/// nor replacement is printed, logged, or placed in process arguments.
+fn run_controlled_gtk_client(trigger: &str, expected: &str) -> ControlledClientResult {
+    const CLIENT: &str =
+        include_str!("../../../../scripts/certification-clients/gtk_wayexpand_desktop_test.py");
+    let Ok(mut child) = Command::new("python3")
+        .arg("-c")
+        .arg(CLIENT)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return ControlledClientResult::Unavailable;
+    };
+    let payload = serde_json::json!({"trigger": trigger, "expected": expected});
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        return ControlledClientResult::Unavailable;
+    };
+    if serde_json::to_writer(&mut stdin, &payload).is_err() {
+        let _ = child.kill();
+        return ControlledClientResult::Unavailable;
+    }
+    drop(stdin);
+
+    let deadline = Instant::now() + Duration::from_secs(55);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return ControlledClientResult::InputNotObserved;
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return ControlledClientResult::Unavailable;
+            }
+        }
+    }
+    let Ok(output) = child.wait_with_output() else {
+        return ControlledClientResult::Unavailable;
+    };
+    controlled_client_result(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn controlled_client_result(output: &str) -> ControlledClientResult {
+    let result = output
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .and_then(|value| {
+            value
+                .get("state")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        });
+    match result.as_deref() {
+        Some("verified") => ControlledClientResult::Verified,
+        Some("input_not_observed") => ControlledClientResult::InputNotObserved,
+        Some("trigger_not_replaced") => ControlledClientResult::TriggerNotReplaced,
+        Some("field_mismatch") => ControlledClientResult::FieldMismatch,
+        Some("closed") => ControlledClientResult::Closed,
+        Some("unavailable") => ControlledClientResult::Unavailable,
+        _ => ControlledClientResult::Unavailable,
+    }
 }
 
 fn desktop_test_for(
@@ -600,6 +698,71 @@ fn desktop_test_for(
     println!("Capture [{test_id}]: pending — no input content will be recorded");
     println!("Output [{test_id}]: pending — no Enter key will be sent");
     println!("Replacement [{test_id}]: pending — you will verify the final text in the target app");
+    if options.controlled_client {
+        println!("\nOpening a small GTK test field. Type the trigger there once; the field will verify its final text without recording its contents.");
+        let baseline = snapshot();
+        match run_controlled_gtk_client(trigger, &expansion.replacement) {
+            ControlledClientResult::Verified => {
+                let after = snapshot();
+                let ibus_output_observed = after.4 > baseline.4;
+                let daemon_match_observed = status_counter(after.0.as_ref(), "matches_found_total")
+                    > status_counter(baseline.0.as_ref(), "matches_found_total");
+                let daemon_output_observed = status_counter_compat(
+                    after.0.as_ref(),
+                    "expansion_output_acknowledgements_total",
+                    "expansions_applied_total",
+                ) > status_counter_compat(
+                    baseline.0.as_ref(),
+                    "expansion_output_acknowledgements_total",
+                    "expansions_applied_total",
+                );
+                if !(ibus_output_observed || daemon_match_observed && daemon_output_observed) {
+                    println!("The controlled field observed the expected text, but WayExpand did not report a new matching output transaction during this test.");
+                    println!("Problem: WX-TEST-CORRELATION-001");
+                    println!("Next: refresh Diagnostics and repeat the test once. The text result was not recorded as a WayExpand verification.");
+                    println!("DESKTOP TEST RESULT: CONTROLLED GTK TEST FAILED");
+                    return Ok(DesktopTestResult::Failed);
+                }
+                println!("Capture: verified by key activity in the controlled GTK 3 field.");
+                println!("Replacement: exact configured test output observed in the controlled GTK 3 field; WayExpand output counters also advanced during this test window.");
+                println!("Correlation: the counters are aggregate and are not uniquely bound to this trigger. The test result is limited to this controlled field and session.");
+                println!("Scope: GTK 3 text field in this desktop session only; other applications remain untested.");
+                println!("DESKTOP TEST RESULT: VERIFIED IN CONTROLLED GTK 3 FIELD");
+                return Ok(DesktopTestResult::Verified);
+            }
+            ControlledClientResult::Unavailable => {
+                println!("Controlled GTK test client is unavailable (Python GTK 3 bindings or a graphical session are required). Continuing with the visual test in your selected application.");
+            }
+            result => {
+                let (summary, problem) = match result {
+                    ControlledClientResult::InputNotObserved => (
+                        "No key activity reached the controlled GTK field before the test expired.",
+                        "WX-TEST-INPUT-001",
+                    ),
+                    ControlledClientResult::TriggerNotReplaced => (
+                        "The trigger reached the controlled GTK field, but WayExpand did not replace it.",
+                        "WX-TEST-REPLACE-001",
+                    ),
+                    ControlledClientResult::FieldMismatch => (
+                        "The controlled GTK field did not contain the exact expected result. Its contents were not recorded.",
+                        "WX-TEST-OUTPUT-001",
+                    ),
+                    ControlledClientResult::Closed => (
+                        "The controlled GTK test field was closed before verification.",
+                        "WX-TEST-CANCELLED-001",
+                    ),
+                    ControlledClientResult::Verified | ControlledClientResult::Unavailable => {
+                        unreachable!("handled above")
+                    }
+                };
+                println!("{summary}");
+                println!("Problem: {problem}");
+                println!("Next: open WayExpand Diagnostics, review the input and insertion status, then retry once in a normal text field.");
+                println!("DESKTOP TEST RESULT: CONTROLLED GTK TEST FAILED");
+                return Ok(DesktopTestResult::Failed);
+            }
+        }
+    }
     let quoted_trigger = crate::commands::shell_single_quote(trigger);
     println!("\nReview the expected text with `wayexpand preview {quoted_trigger}` first.");
     println!("This test types the configured replacement into the focused application when you type {trigger:?}.");
@@ -863,18 +1026,24 @@ mod desktop_test_option_tests {
 
     #[test]
     fn observe_only_requires_a_test_class_and_explicit_focus_acknowledgment() {
-        assert!(validate_desktop_test_options(true, Some("GTK"), true, true).is_ok());
-        assert!(validate_desktop_test_options(true, None, true, true).is_err());
-        assert!(validate_desktop_test_options(true, Some("GTK"), false, true).is_err());
-        assert!(validate_desktop_test_options(false, Some("GTK"), true, true).is_err());
+        assert!(validate_desktop_test_options(true, Some("GTK"), true, true, false).is_ok());
+        assert!(validate_desktop_test_options(true, None, true, true, false).is_err());
+        assert!(validate_desktop_test_options(true, Some("GTK"), false, true, false).is_err());
+        assert!(validate_desktop_test_options(false, Some("GTK"), true, true, false).is_err());
+        assert!(validate_desktop_test_options(true, None, false, false, true).is_ok());
+        assert!(validate_desktop_test_options(false, None, false, false, true).is_err());
     }
 
     #[test]
     fn application_class_is_bounded_and_control_free() {
-        assert!(validate_desktop_test_options(true, Some("GTK"), true, true).is_ok());
-        assert!(validate_desktop_test_options(true, Some(""), true, true).is_err());
-        assert!(validate_desktop_test_options(true, Some("gtk\nterminal"), true, true).is_err());
-        assert!(validate_desktop_test_options(true, Some(&"a".repeat(65)), true, true).is_err());
+        assert!(validate_desktop_test_options(true, Some("GTK"), true, true, false).is_ok());
+        assert!(validate_desktop_test_options(true, Some(""), true, true, false).is_err());
+        assert!(
+            validate_desktop_test_options(true, Some("gtk\nterminal"), true, true, false).is_err()
+        );
+        assert!(
+            validate_desktop_test_options(true, Some(&"a".repeat(65)), true, true, false).is_err()
+        );
     }
 }
 

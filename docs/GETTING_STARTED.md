@@ -160,6 +160,16 @@ For the desktop check, focus a disposable, non-sensitive text field and run:
 wayexpand debug --test ';;hello'
 ```
 
+The GUI test opens a small controlled GTK field when Python GTK 3 bindings are
+available. It reads back whether that field contains the exact replacement and
+requires WayExpand output counters to advance during the same test window before
+recording a pass. Those counters are aggregate; they are not uniquely linked to
+the trigger. The exact field result is observed directly, and its contents are
+never logged. If the controlled field cannot start or the replacement is
+multiline, the test falls back to visual confirmation. You can request the
+controlled field from the CLI with `wayexpand debug --test ';;hello'
+--controlled-client`.
+
 If `;;hello` is not in your library, substitute any enabled static trigger
 listed by `wayexpand list`; command-backed and form-driven snippets are not
 used for this harmless insertion check.
