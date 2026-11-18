@@ -1950,17 +1950,21 @@ fn field_input_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
             Some("focus the target field, run `wayexpand ibus watch --seconds 30`, and type harmless text; only counters are recorded".into()),
         );
     };
+    // `focused` describes whether the context is focused now, not whether it
+    // was focused when its IBus key events arrived. The test client (and many
+    // real applications) destroys or blurs its input context before status is
+    // queried, so requiring current focus loses valid evidence of recent
+    // input. Key events are delivered to the owning IBus context; this remains
+    // aggregate activity evidence and does not identify the application.
     let normal_field_input = reading.status.recent_fields.iter().any(|field| {
-        field.focused
-            && field.keys > 0
-            && field.content_type == crate::telemetry::IbusContentTypeState::Normal
+        field.keys > 0 && field.content_type == crate::telemetry::IbusContentTypeState::Normal
     });
     if normal_field_input {
         check(
             "field-input",
             "Normal-field input observed",
             IbusCheckState::Pass,
-            "at least one recent normal IBus field delivered key events to the engine; contents and application identity are not recorded, so this does not identify a particular browser",
+            "at least one recent normal IBus field delivered key events to the engine; it may no longer be focused, and contents and application identity are not recorded, so this does not identify the current field or a particular browser",
             None,
         )
     } else {
@@ -2500,6 +2504,9 @@ mod tests {
         telemetry.content_type(Some(field), false);
         telemetry.surrounding_text(Some(field), true);
         telemetry.key(Some(field), true);
+        // The client can close or blur before diagnostics are collected. The
+        // recorded input remains valid historical evidence for this context.
+        telemetry.focus_out(Some(field));
         let reading = IbusStatusReading {
             status: telemetry.snapshot(),
             live: true,
@@ -2513,6 +2520,7 @@ mod tests {
             .detail
             .contains("application identity are not recorded"));
         assert!(observed.detail.contains("particular browser"));
+        assert!(observed.detail.contains("may no longer be focused"));
 
         let missing = field_input_check(None);
         assert_eq!(missing.state, IbusCheckState::Unknown);

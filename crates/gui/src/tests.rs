@@ -4284,6 +4284,14 @@ fn first_run_offers_a_picker_shortcut_until_one_is_set() {
         unset.contains("Open snippets from any app (optional)"),
         "{unset}"
     );
+    assert!(
+        unset.contains("insert directly only when the destination is verified"),
+        "the picker shortcut must explain its insertion preconditions: {unset}"
+    );
+    assert!(
+        unset.contains("copies the snippet so you can paste it yourself"),
+        "the picker shortcut must explain its copy fallback: {unset}"
+    );
     assert!(unset.contains("Use Ctrl+Alt+Space"), "{unset}");
 
     app.picker_shortcut_error = Some("Ctrl+Alt+Space is already used by “Terminal”.".into());

@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- IBus diagnostics now retain recent normal-field input evidence after the field loses focus or closes. This reports historical input delivery without identifying the application or claiming the current field is working.
+- The first-run Quick Picker shortcut instructions now distinguish direct insertion from copy-and-paste: direct insertion requires a verified destination and an atomic route; otherwise, copying is offered only when policy allows.
 - `wayexpand why` now retains content-free IBus evidence for the most recent
   field that received input for up to five minutes. It remains useful after
   switching to a terminal to request help, labels the evidence as historical

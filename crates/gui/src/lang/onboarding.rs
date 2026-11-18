@@ -560,9 +560,9 @@ texts! {
         "Snippets in jeder App öffnen (optional)",
         "Buka cuplikan dari aplikasi mana pun (opsional)";
     shortcut_help =>
-        "Give the Quick Picker a keyboard shortcut. Press it in any app to search your snippets and insert one, including in fields where typing a trigger cannot expand.",
-        "Geben Sie dem Schnellwähler ein Tastenkürzel. Damit durchsuchen Sie Ihre Snippets in jeder App und fügen eines ein, auch in Feldern, in denen ein getippter Auslöser nicht ersetzt werden kann.",
-        "Beri Quick Picker pintasan papan ketik. Tekan di aplikasi mana pun untuk mencari cuplikan dan menyisipkannya, termasuk di kolom yang tidak bisa mengganti pemicu yang diketik.";
+        "Give the Quick Picker a keyboard shortcut. It can insert directly only when the destination is verified and the route supports atomic insertion. Otherwise, when policy allows, it copies the snippet so you can paste it yourself.",
+        "Geben Sie dem Schnellwähler ein Tastenkürzel. Direktes Einfügen ist nur möglich, wenn das Ziel verifiziert ist und der Eingabeweg atomare Einfügung unterstützt. Andernfalls wird das Snippet – sofern die Richtlinie es erlaubt – kopiert, damit Sie es selbst einfügen.",
+        "Beri Quick Picker pintasan papan ketik. Penyisipan langsung hanya tersedia jika tujuan terverifikasi dan jalur mendukung penyisipan atomik. Jika tidak, dan kebijakan mengizinkan, cuplikan disalin agar Anda dapat menempelkannya sendiri.";
     shortcut_use_keys =>
         "Use {keys}",
         "{keys} verwenden",

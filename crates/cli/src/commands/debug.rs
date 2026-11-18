@@ -894,6 +894,7 @@ mod focused_app_scope_tests {
             FocusedAppScopeStatus {
                 scope_state: Some("outside_allowlist".into()),
                 terminal_apps_only: Some(true),
+                daemon_status_trusted: Some(false),
                 ..FocusedAppScopeStatus::default()
             }
         );
@@ -911,6 +912,7 @@ mod focused_app_scope_tests {
             )),
             FocusedAppScopeStatus {
                 terminal_apps_only: Some(true),
+                daemon_status_trusted: Some(false),
                 ..FocusedAppScopeStatus::default()
             }
         );
@@ -1023,10 +1025,9 @@ mod focused_app_scope_tests {
             focused_app_diagnostic("daemon_status_incompatible", &focus)
                 .expect("incompatible schema needs a specific remediation");
         assert_eq!(problem_id, "WX-VERSION-001");
-        assert!(suggested_action.contains("wayexpand upgrade-status"));
-        assert!(
-            suggested_action.contains("before using this result to change application allowlists")
-        );
+        assert!(suggested_action.contains("wayexpand upgrade --check"));
+        assert!(suggested_action
+            .contains("repeat this focus check before changing application allowlists"));
 
         let compatible = focused_app_scope_from_status(Some(&format!(
             "running\nstatus_schema={current}\nterminal_apps_only=true\ncapture_app_scope_state=allowed\n"
