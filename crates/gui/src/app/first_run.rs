@@ -124,28 +124,42 @@ fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     })
 }
 
-/// The snippet the CLI and GUI first-run tests choose in the same order:
-/// tutorial, the standard `;;hello` sample, then any testable snippet.
-/// Requiring the tutorial left users who wrote their own first snippet unable
-/// to finish setup, although the guide tells them a suitable static snippet
-/// works.
+/// Only the dedicated harmless tutorial is used for the automatic first-run
+/// check. User snippets may contain private or unexpectedly large text, so
+/// they are not repurposed as onboarding test output.
 pub(super) fn onboarding_test_snippet(config: &Config) -> Option<&ExpansionConfig> {
     onboarding_snippet(config)
-        .or_else(|| {
-            config
-                .expansion
-                .iter()
-                .find(|expansion| desktop_testable(expansion) && expansion.answers_to(";;hello"))
-        })
-        .or_else(|| {
-            config
-                .expansion
-                .iter()
-                .find(|expansion| desktop_testable(expansion))
-        })
 }
 
 impl GuiApp {
+    /// Add one harmless, globally applicable tutorial snippet the first time
+    /// onboarding needs a real insertion test. Existing testable snippets are
+    /// always reused, and the preference prevents an intentionally removed
+    /// tutorial from reappearing on every launch.
+    pub(crate) fn ensure_onboarding_test_snippet(&mut self) {
+        let config_identity = self.path.to_string_lossy().into_owned();
+        if !self.onboarding_visible
+            || self.onboarding_test_snippet_created_for.as_deref() == Some(config_identity.as_str())
+            || onboarding_test_snippet(&self.config).is_some()
+        {
+            return;
+        }
+        if !self.create_test_snippet() || self.failed_save.is_some() {
+            return;
+        }
+        self.onboarding_test_snippet_created_for = Some(config_identity);
+        if let Err(error) = save_gui_prefs(
+            self.language,
+            self.colorpack,
+            self.settings_font_scale,
+            self.dark_mode,
+            self.onboarding_completed,
+            self.onboarding_test_snippet_created_for.clone(),
+        ) {
+            self.status = Status::warning(self.strings.onboarding_test_state_save_failed(&error));
+        }
+    }
+
     /// Persist the pending-test state so a previously completed guide reopens
     /// if setup was changed and the user postpones verification.
     pub(crate) fn require_desktop_test(&mut self) -> Option<String> {
@@ -154,12 +168,14 @@ impl GuiApp {
         self.desktop_test_dialog_required = true;
         self.desktop_test_verified = false;
         self.desktop_test_verified_application = None;
+        self.ensure_onboarding_test_snippet();
         save_gui_prefs(
             self.language,
             self.colorpack,
             self.settings_font_scale,
             self.dark_mode,
             false,
+            self.onboarding_test_snippet_created_for.clone(),
         )
         .err()
         .map(|error| error.to_string())
@@ -279,6 +295,7 @@ impl GuiApp {
             self.settings_font_scale,
             self.dark_mode,
             self.onboarding_completed,
+            self.onboarding_test_snippet_created_for.clone(),
         ) {
             Ok(()) => self.status = Status::success(message),
             Err(error) => {
@@ -290,6 +307,7 @@ impl GuiApp {
     pub(crate) fn open_getting_started(&mut self) {
         self.onboarding_visible = true;
         self.onboarding_show_troubleshooting = false;
+        self.ensure_onboarding_test_snippet();
         self.refresh_diagnostics(false);
     }
 
@@ -1272,13 +1290,12 @@ mod tests {
     use wayexpand_core::{Config, ExpansionConfig};
 
     #[test]
-    fn first_run_prefers_the_global_tutorial_snippet_but_accepts_others() {
+    fn first_run_uses_only_the_global_harmless_tutorial_snippet() {
         let config = Config::parse(
             "[[expansion]]\ntrigger = ';custom-check'\nreplacement = 'Custom check passed'\n",
         )
         .unwrap();
-        let custom = onboarding_test_snippet(&config).expect("a static snippet is testable");
-        assert_eq!(custom.trigger, ";custom-check");
+        assert!(onboarding_test_snippet(&config).is_none());
 
         let mut config = Config::parse("").unwrap();
         let mut tutorial = ExpansionConfig {

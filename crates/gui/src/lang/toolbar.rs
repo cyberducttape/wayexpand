@@ -922,6 +922,14 @@ impl Strings {
         }
     }
 
+    pub fn onboarding_test_state_save_failed(&self, error: &str) -> String {
+        match self.lang {
+            Language::English => format!("The test snippet was added, but its onboarding state could not be saved: {error}"),
+            Language::Indonesian => format!("Cuplikan uji ditambahkan, tetapi status penyiapannya tidak dapat disimpan: {error}"),
+            Language::German => format!("Das Test-Snippet wurde hinzugefügt, aber der Einrichtungsstatus konnte nicht gespeichert werden: {error}"),
+        }
+    }
+
     pub fn onboarding_sample_description(&self) -> &'static str {
         match self.lang {
             Language::English => "A test expansion for your first-run check",

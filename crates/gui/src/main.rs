@@ -577,6 +577,7 @@ struct GuiApp {
     dark_mode: bool,
     onboarding_visible: bool,
     onboarding_completed: bool,
+    onboarding_test_snippet_created_for: Option<String>,
     /// The post-setup desktop test must be completed before onboarding can
     /// persist a successful first-run state.
     desktop_test_dialog_required: bool,
@@ -881,6 +882,7 @@ impl GuiApp {
         let settings_terminal_paste = config.settings.terminal_paste;
         let prefs = load_gui_prefs();
         let onboarding_completed = prefs.onboarding_completed;
+        let onboarding_test_snippet_created_for = prefs.onboarding_test_snippet_created_for;
         // Show the guide until setup is completed or explicitly skipped. It
         // used to depend on the library being empty, so a migrated library
         // (Espanso import, another machine) never saw it.
@@ -1025,6 +1027,7 @@ impl GuiApp {
             dark_mode: prefs.dark_mode.unwrap_or(true),
             onboarding_visible,
             onboarding_completed,
+            onboarding_test_snippet_created_for,
             desktop_test_dialog_required: false,
             gnome_setup_resume_pending,
             onboarding_show_troubleshooting: false,
@@ -1327,6 +1330,7 @@ fn main() -> Result<()> {
         Err(error) => return run_recovery(path, error.to_string()),
     };
     app.start_runtime()?;
+    app.ensure_onboarding_test_snippet();
     let saved_dark_mode = load_gui_prefs().dark_mode;
     let colorpack = app.colorpack;
     let icon = app_icon();

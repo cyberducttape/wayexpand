@@ -817,7 +817,7 @@ impl GuiApp {
         self.setup_record_saved = crate::setup_record::save(&record).is_ok();
         self.setup_record = Some(record);
         let message = crate::lang::fill(
-            self.strings.dg_user_confirmed_exact_insertion_in_this(),
+            self.strings.dg_test_field_observed_exact_output_in_this(),
             &[&review.application_class],
         );
         if self.setup_record_saved && (self.desktop_test_dialog_required || self.onboarding_visible)

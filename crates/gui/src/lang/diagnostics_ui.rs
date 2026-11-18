@@ -317,6 +317,10 @@ texts! {
         "User-confirmed exact insertion in {}. This does not certify other applications or sessions.",
         "Exaktes Einfügen in {} vom Benutzer bestätigt. Das zertifiziert keine anderen Anwendungen oder Sitzungen.",
         "Penyisipan tepat di {} dikonfirmasi pengguna. Ini tidak menyertifikasi aplikasi atau sesi lain.";
+    dg_test_field_observed_exact_output_in_this =>
+        "WayExpand observed the exact test output in {}. This confirms only this field and session.",
+        "WayExpand hat die exakte Testausgabe in {} erkannt. Dies bestätigt nur dieses Feld und diese Sitzung.",
+        "WayExpand mengamati hasil uji yang tepat di {}. Ini hanya mengonfirmasi kolom dan sesi ini.";
     dg_desktop_insertion_was_not_confirmed_inspect =>
         "Desktop insertion was not confirmed. Inspect the target field and Diagnostics; do not retry automatically.",
         "Das Einfügen auf dem Desktop wurde nicht bestätigt. Prüfen Sie das Zielfeld und die Diagnose; wiederholen Sie nicht automatisch.",

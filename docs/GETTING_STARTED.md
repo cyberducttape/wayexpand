@@ -154,33 +154,35 @@ This is a matcher-only check: it confirms the saved configuration can match
 the trigger and render the replacement. It does not send input to your desktop
 or prove that an application will receive a replacement.
 
-For the desktop check, focus a disposable, non-sensitive text field and run:
+For the desktop check, use the GUI's **Test Expansion** action. It opens a
+dedicated harmless test field when Python GTK 3 bindings are available. If
+your library has no dedicated onboarding snippet, the GUI adds one once for
+this check; it does not use arbitrary personal snippet text as test output.
+You can start the same controlled field from the CLI:
 
 ```sh
-wayexpand debug --test ';;hello'
+wayexpand debug --test ':wayexpand-test' --controlled-client
 ```
 
-The GUI test opens a small controlled GTK field when Python GTK 3 bindings are
-available. It reads back whether that field contains the exact replacement and
+The controlled field reads back whether it contains the exact replacement and
 requires WayExpand output counters to advance during the same test window before
 recording a pass. Those counters are aggregate; they are not uniquely linked to
-the trigger. The exact field result is observed directly, and its contents are
-never logged. If the controlled field cannot start or the replacement is
-multiline, the test falls back to visual confirmation. You can request the
-controlled field from the CLI with `wayexpand debug --test ';;hello'
---controlled-client`.
+the trigger. The field result is observed directly, and its contents are never
+logged. If the controlled field cannot start or the replacement is multiline,
+the test falls back to visual confirmation. You can request the controlled
+field from the CLI with that command. If the guide added a numbered trigger
+because the base trigger was already in use, replace it with the displayed one.
 
-If `;;hello` is not in your library, substitute any enabled static trigger
-listed by `wayexpand list`; command-backed and form-driven snippets are not
-used for this harmless insertion check.
+If the controlled test field cannot start, the existing visual confirmation
+flow can test an enabled static trigger in a normal, non-sensitive field.
 
-Follow its prompt, type the trigger once, inspect the resulting text, and
-confirm only if it exactly matches the expected replacement. WayExpand never
-presses Enter or retries uncertain output. The GUI offers this as **Desktop
-Integration Test** during setup. Until you confirm an exact result, report the
-state as **Configured, untested**; after confirmation, it reports **Working in
-the tested application**. That result applies only to the tested app and
-session. It does not certify other applications or the compositor. If the
+When the visual fallback is used, follow its prompt, type the trigger once,
+inspect the resulting text, and confirm only if it exactly matches the expected
+replacement. WayExpand never presses Enter or retries uncertain output. The GUI
+offers this as **Test Expansion** during setup. A passing controlled field is
+reported as **Working in the tested application**; a visual result requires your
+confirmation. Both apply only to the tested field and session, and do not
+certify other applications or the compositor. If the
 matcher check instead prints `no expansion matched`, inspect the trigger with
 `wayexpand list` and `wayexpand validate` before debugging the backend.
 
