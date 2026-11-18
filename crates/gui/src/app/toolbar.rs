@@ -637,16 +637,18 @@ impl GuiApp {
         let picker = self.picker_readiness();
         details.push(self.strings.picker_readiness_detail(picker));
         details.push(self.strings.header_status_details_hint().to_owned());
-        // The last confirmed test is history, shown apart from the live
+        // The last test result is history, shown apart from the live
         // state: when it no longer covers this session, say why.
         if let Some((record, staleness)) = self.verification_status() {
             if let (Some(application), Some(at)) =
                 (record.application.as_deref(), record.verified_at_unix)
             {
-                details.push(
-                    self.strings
-                        .last_confirmed(application, &crate::setup_record::date(at)),
-                );
+                details.push(self.strings.last_test_result(
+                    application,
+                    &crate::setup_record::date(at),
+                    record.verification_method
+                        == Some(crate::setup_record::VerificationMethod::MachineObserved),
+                ));
             }
             if let Some(change) = staleness {
                 details.insert(

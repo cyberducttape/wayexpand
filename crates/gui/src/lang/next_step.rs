@@ -926,14 +926,36 @@ impl Strings {
 }
 
 impl Strings {
-    pub fn last_confirmed(&self, application: &str, date: &str) -> String {
-        match self.lang {
-            Language::English => format!("Last confirmed working in {application} on {date}."),
-            Language::German => {
-                format!("Zuletzt am {date} in {application} als funktionierend bestätigt.")
+    pub fn last_test_result(
+        &self,
+        application: &str,
+        date: &str,
+        machine_observed: bool,
+    ) -> String {
+        match (self.lang, machine_observed) {
+            (Language::English, true) => {
+                format!("WayExpand last observed exact output in {application} on {date}.")
             }
-            Language::Indonesian => {
-                format!("Terakhir dipastikan berfungsi di {application} pada {date}.")
+            (Language::German, true) => {
+                format!("WayExpand hat zuletzt am {date} die exakte Ausgabe in {application} beobachtet.")
+            }
+            (Language::Indonesian, true) => {
+                format!(
+                    "WayExpand terakhir mengamati hasil yang tepat di {application} pada {date}."
+                )
+            }
+            (Language::English, false) => {
+                format!("You last confirmed the exact result in {application} on {date}.")
+            }
+            (Language::German, false) => {
+                format!(
+                    "Sie haben zuletzt am {date} das exakte Ergebnis in {application} bestätigt."
+                )
+            }
+            (Language::Indonesian, false) => {
+                format!(
+                    "Anda terakhir mengonfirmasi hasil yang tepat di {application} pada {date}."
+                )
             }
         }
     }
