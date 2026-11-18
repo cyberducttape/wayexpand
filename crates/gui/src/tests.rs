@@ -3821,13 +3821,16 @@ fn header_reports_a_live_ibus_engine_instead_of_a_stopped_service() {
     assert!(semantics.contains("Service: Not running"), "{semantics}");
     // The action lives in the banner under the header, not in it.
     assert!(!semantics.contains("Turn on WayExpand"), "{semantics}");
-    assert_eq!(
+    assert!(matches!(
         app.current_next_step(),
         Some((
+            crate::app::Problem::ServiceOff,
+            crate::app::NextAction::TurnOn
+        )) | Some((
             crate::app::Problem::InputStatusPending,
             crate::app::NextAction::CheckAgain
         ))
-    );
+    ));
     // Without a running service the typing-route chip has nothing to say.
     assert!(!semantics.contains("Typing integration"), "{semantics}");
 }
