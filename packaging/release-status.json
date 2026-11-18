@@ -1,5 +1,5 @@
 {
-  "audited_on": "2026-11-16",
+  "audited_on": "2026-11-18",
   "latest_github_release": {
     "version": "1.3.6",
     "published": true,
@@ -13,12 +13,12 @@
     ],
     "series": {
       "Ubuntu 26.04 (Resolute)": {
-        "version": "1.3.5",
-        "status": "stale"
+        "version": "1.3.6",
+        "status": "current"
       },
       "Ubuntu 26.10 (Stonking)": {
-        "version": "1.3.5",
-        "status": "stale"
+        "version": "1.3.6",
+        "status": "current"
       },
       "Ubuntu 24.04 (Noble)": {
         "version": "0.2.0",
@@ -38,5 +38,49 @@
     "Fedora 45"
   ],
   "physical_desktop_certification": false,
-  "upgrade_from_previous_package_tested": false
+  "upgrade_from_previous_package_tested": false,
+  "upgrade_test_matrix": [
+    {
+      "scenario": "previous-release-to-current",
+      "status": "ci-pending",
+      "scope": "package-manager",
+      "evidence": "scripts/test-package-smoke.sh",
+      "expected": "Candidate package installs over previous release; user configuration and snippets remain valid."
+    },
+    {
+      "scenario": "user-customization-preserved",
+      "status": "ci-pending",
+      "scope": "package-manager",
+      "evidence": "scripts/test-package-smoke.sh",
+      "expected": "User-owned configuration bytes remain unchanged across upgrade, rollback, reinstall, and uninstall/reinstall."
+    },
+    {
+      "scenario": "uninstall-reinstall",
+      "status": "ci-pending",
+      "scope": "package-manager",
+      "evidence": "scripts/test-package-smoke.sh",
+      "expected": "Package-owned executables are removed and reinstall restores package components without replacing user configuration."
+    },
+    {
+      "scenario": "running-daemon-activated",
+      "status": "not-tested",
+      "scope": "live-user-session",
+      "evidence": null,
+      "expected": "Affected process is restarted and reports the candidate build; no stale daemon remains."
+    },
+    {
+      "scenario": "gnome-ibus-upgrade",
+      "status": "not-tested",
+      "scope": "physical-gnome-session",
+      "evidence": null,
+      "expected": "IBus registration and GNOME source remain usable or setup presents a precise recovery step."
+    },
+    {
+      "scenario": "interrupted-package-upgrade",
+      "status": "not-tested",
+      "scope": "package-manager",
+      "evidence": null,
+      "expected": "Previous working package remains usable or package repair restores a coherent installation."
+    }
+  ]
 }

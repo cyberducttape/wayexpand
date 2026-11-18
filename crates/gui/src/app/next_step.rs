@@ -1063,6 +1063,98 @@ mod tests {
     }
 
     #[test]
+    fn gnome_onboarding_state_transitions_keep_actions_aligned_with_evidence() {
+        // Model the states a user can observe while setup progresses or the
+        // desktop changes underneath the GUI. Each refreshed snapshot must
+        // produce both the same readiness classification and the matching
+        // single next action.
+        let mut state = Situation {
+            gnome_ibus: true,
+            ibus_route_expected: true,
+            daemon_reachable: Some(true),
+            control_only: true,
+            diagnostics_fresh: None,
+            ..Situation::default()
+        };
+        assert_eq!(
+            gnome_ibus_readiness(&state),
+            GnomeIbusReadiness::DiagnosticsPending
+        );
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::InputStatusPending, Action::CheckAgain))
+        );
+
+        // IBus registered the engine after the GUI's first refresh, but the
+        // input source is not yet registered with GNOME.
+        state.diagnostics_fresh = Some(true);
+        state.source_registered = IbusCheckState::Fail;
+        assert_eq!(
+            gnome_ibus_readiness(&state),
+            GnomeIbusReadiness::SourceNotSetUp
+        );
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::InputSourceNotSetUp, Action::RunSetup))
+        );
+
+        // The next diagnostics refresh observes registration and selection,
+        // but the engine process has not started yet.
+        state.source_registered = IbusCheckState::Pass;
+        state.ibus_engine_registered = IbusCheckState::Pass;
+        state.ibus_manifest_scope = IbusCheckState::Pass;
+        state.source_active = IbusCheckState::Pass;
+        state.engine_state = IbusCheckState::Fail;
+        assert_eq!(
+            gnome_ibus_readiness(&state),
+            GnomeIbusReadiness::EngineUnavailable
+        );
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::IbusEngineUnavailable, Action::RunSetup))
+        );
+
+        // Once IBus starts and consent is present, configuration is ready,
+        // while actual application delivery still needs its own test.
+        state.engine_state = IbusCheckState::Pass;
+        state.ibus_active = true;
+        state.consent_state = IbusCheckState::Pass;
+        assert_eq!(gnome_ibus_readiness(&state), GnomeIbusReadiness::Ready);
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::IbusInputNotObserved, Action::TestInApplication))
+        );
+
+        // A service/engine restart invalidates the previous process-correlated
+        // report; old registration and insertion evidence cannot mask it.
+        state.diagnostics_fresh = Some(false);
+        state.ibus_active = false;
+        assert_eq!(
+            gnome_ibus_readiness(&state),
+            GnomeIbusReadiness::DiagnosticsStale
+        );
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::InputStatusStale, Action::CheckAgain))
+        );
+
+        // A fresh report after permission revocation returns to the explicit
+        // consent gate, even if the previous application test had succeeded.
+        state.diagnostics_fresh = Some(true);
+        state.ibus_active = true;
+        state.consent_state = IbusCheckState::Fail;
+        state.application_delivery_verified = true;
+        assert_eq!(
+            gnome_ibus_readiness(&state),
+            GnomeIbusReadiness::ReplacementNotAllowed
+        );
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::ReplacementNotAllowed, Action::ReviewConsent))
+        );
+    }
+
+    #[test]
     fn stale_terminal_scope_status_cannot_override_the_build_diagnosis() {
         let stale = Situation {
             daemon_reachable: Some(true),

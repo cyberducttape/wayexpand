@@ -68,7 +68,7 @@ local, offline, no account, no telemetry.
 | Anything else, or to build it yourself | [a source build](#build-from-source), about five minutes |
 
 <!-- generated-install-status:start -->
-**Package availability (audited 2026-11-16):** GitHub release 1.3.6 has prebuilt binaries with checksums (`.tar.gz`, `.deb`, `.rpm`). PPA packages for Ubuntu 26.04 (Resolute) (1.3.5, stale), Ubuntu 26.10 (Stonking) (1.3.5, stale), Ubuntu 24.04 (Noble) (0.2.0, stale), Ubuntu 22.04 (Jammy) (0.2.0, stale) lag behind; prefer the GitHub release there. Fedora Copr: not published yet. Package availability is separate from desktop certification.
+**Package availability (audited 2026-11-18):** GitHub release 1.3.6 has prebuilt binaries with checksums (`.tar.gz`, `.deb`, `.rpm`). PPA experimental daily builds for Ubuntu 26.04 (Resolute) (amd64), Ubuntu 26.10 (Stonking) (amd64). PPA packages for Ubuntu 24.04 (Noble) (0.2.0, stale), Ubuntu 22.04 (Jammy) (0.2.0, stale) lag behind; prefer the GitHub release there. Fedora Copr: not published yet. Package availability is separate from desktop certification.
 <!-- generated-install-status:end -->
 
 None of these channels is compositor-certified yet; see the

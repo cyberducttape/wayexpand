@@ -36,21 +36,15 @@ pub(crate) struct FormApp {
     outcome: Outcome,
     focused_once: bool,
     error: Option<String>,
-    date_months: Vec<(i32, u32)>,
+    date_months: Vec<Option<(i32, u32)>>,
     preview_template: Option<CompiledTemplate>,
 }
 
 impl FormApp {
     pub(crate) fn new(spec: FormSpec, palette: Palette, outcome: Outcome) -> anyhow::Result<Self> {
         let values = initial_values(&spec.fields, wayexpand_core::today_local_date)?;
-        let date_months = values
-            .iter()
-            .map(|value| {
-                parse_date(value)
-                    .map(|(year, month, _)| (year, month))
-                    .unwrap_or((2026, 1))
-            })
-            .collect();
+        let date_months =
+            initial_date_months(&spec.fields, &values, wayexpand_core::today_local_date)?;
         let preview_template = spec
             .preview_template
             .as_deref()
@@ -113,6 +107,44 @@ fn initial_values(
                 .unwrap_or_default(),
             FormFieldKind::Date { default } if default == "today" => today.clone().unwrap(),
             FormFieldKind::Date { default } => default.clone(),
+        })
+        .collect())
+}
+
+fn initial_date_months(
+    fields: &[FormField],
+    values: &[String],
+    resolve_today: impl FnOnce() -> Result<String, wayexpand_core::DateError>,
+) -> Result<Vec<Option<(i32, u32)>>, wayexpand_core::DateError> {
+    if !fields
+        .iter()
+        .any(|field| matches!(&field.kind, FormFieldKind::Date { .. }))
+    {
+        return Ok(vec![None; fields.len()]);
+    }
+
+    let needs_fallback = fields.iter().zip(values).any(|(field, value)| {
+        matches!(&field.kind, FormFieldKind::Date { .. }) && parse_date(value).is_none()
+    });
+    let fallback_month = if needs_fallback {
+        let today = resolve_today()?;
+        Some(
+            parse_date(&today)
+                .map(|(year, month, _)| (year, month))
+                .ok_or(wayexpand_core::DateError::Unrepresentable)?,
+        )
+    } else {
+        None
+    };
+    Ok(fields
+        .iter()
+        .zip(values)
+        .map(|(field, value)| match &field.kind {
+            FormFieldKind::Date { .. } => Some(parse_date(value).map_or_else(
+                || fallback_month.expect("invalid date initialized current-month fallback"),
+                |(year, month, _)| (year, month),
+            )),
+            _ => None,
         })
         .collect())
 }
@@ -188,7 +220,9 @@ impl FormApp {
                                         });
                                 }
                                 FormFieldKind::Date { .. } => {
-                                    date_picker(ui, value, &mut self.date_months[index], index);
+                                    if let Some(month) = self.date_months[index].as_mut() {
+                                        date_picker(ui, value, month, index);
+                                    }
                                 }
                             }
                             ui.end_row();
@@ -425,6 +459,46 @@ mod tests {
         assert_eq!(
             initial_values(&fields, || Err(wayexpand_core::DateError::Unrepresentable)),
             Err(wayexpand_core::DateError::Unrepresentable)
+        );
+    }
+
+    #[test]
+    fn calendar_month_uses_local_current_month_only_for_date_fields() {
+        let fields =
+            wayexpand_core::form_fields("{{field:service=example}} {{datefield:incident_date}}")
+                .expect("mixed form fields should parse");
+        let values = vec!["example".to_owned(), "not-a-date".to_owned()];
+        assert_eq!(
+            initial_date_months(&fields, &values, || Ok("2031-07-18".into())).unwrap(),
+            vec![None, Some((2031, 7))]
+        );
+    }
+
+    #[test]
+    fn valid_date_does_not_depend_on_current_date_resolution() {
+        let fields = wayexpand_core::form_fields("{{datefield:incident_date=2031-07-18}}")
+            .expect("date form field should parse");
+        let values = vec!["2031-07-18".to_owned()];
+        assert_eq!(
+            initial_date_months(&fields, &values, || {
+                panic!("valid supplied date should not need a fallback")
+            })
+            .unwrap(),
+            vec![Some((2031, 7))]
+        );
+    }
+
+    #[test]
+    fn forms_without_date_fields_do_not_resolve_calendar_state() {
+        let fields = wayexpand_core::form_fields("{{field:service=example}}")
+            .expect("text form field should parse");
+        let values = vec!["example".to_owned()];
+        assert_eq!(
+            initial_date_months(&fields, &values, || {
+                panic!("date resolver should not be called for a text-only form")
+            })
+            .unwrap(),
+            vec![None]
         );
     }
 }
