@@ -666,43 +666,50 @@ impl Strings {
             ("portal_revoked", Language::English) => "desktop permission was revoked",
             ("portal_revoked", Language::Indonesian) => "izin desktop dicabut",
             ("portal_revoked", Language::German) => "Desktop-Berechtigung wurde widerrufen",
-            ("unsupported", Language::English) => "no supported route is active",
-            ("unsupported", Language::Indonesian) => "tidak ada jalur yang didukung aktif",
-            ("unsupported", Language::German) => "kein unterstützter Weg ist aktiv",
-            ("failed", Language::English) => "route failed to start",
-            ("failed", Language::Indonesian) => "jalur gagal dimulai",
-            ("failed", Language::German) => "Weg konnte nicht starten",
-            ("reconnecting", Language::English) => "route is reconnecting",
-            ("reconnecting", Language::Indonesian) => "jalur sedang menyambung ulang",
-            ("reconnecting", Language::German) => "Weg verbindet neu",
-            ("starting", Language::English) => "route is starting",
-            ("starting", Language::Indonesian) => "jalur sedang dimulai",
-            ("starting", Language::German) => "Weg startet",
-            ("degraded", Language::English) => "route is degraded",
-            ("degraded", Language::Indonesian) => "jalur terganggu",
-            ("degraded", Language::German) => "Weg ist beeinträchtigt",
-            ("stopped", Language::English) => "route is stopped",
-            ("stopped", Language::Indonesian) => "jalur berhenti",
-            ("stopped", Language::German) => "Weg ist gestoppt",
+            ("unsupported", Language::English) => "no supported desktop typing option is available",
+            ("unsupported", Language::Indonesian) => {
+                "opsi pengetikan desktop yang didukung tidak tersedia"
+            }
+            ("unsupported", Language::German) => {
+                "keine unterstützte Texteingabe am Desktop verfügbar"
+            }
+            ("failed", Language::English) => "WayExpand could not start desktop typing",
+            ("failed", Language::Indonesian) => "WayExpand tidak dapat memulai pengetikan desktop",
+            ("failed", Language::German) => {
+                "WayExpand konnte die Texteingabe am Desktop nicht starten"
+            }
+            ("reconnecting", Language::English) => "reconnecting to desktop typing",
+            ("reconnecting", Language::Indonesian) => "menyambungkan kembali pengetikan desktop",
+            ("reconnecting", Language::German) => "Texteingabe am Desktop wird neu verbunden",
+            ("starting", Language::English) => "starting desktop typing",
+            ("starting", Language::Indonesian) => "memulai pengetikan desktop",
+            ("starting", Language::German) => "Texteingabe am Desktop wird gestartet",
+            ("degraded", Language::English) => "desktop typing is not working correctly",
+            ("degraded", Language::Indonesian) => "pengetikan desktop tidak berfungsi dengan benar",
+            ("degraded", Language::German) => "Texteingabe am Desktop funktioniert nicht richtig",
+            ("stopped", Language::English) => "desktop typing is stopped",
+            ("stopped", Language::Indonesian) => "pengetikan desktop dihentikan",
+            ("stopped", Language::German) => "Texteingabe am Desktop ist gestoppt",
             ("paused", Language::English) => "WayExpand is paused",
             ("paused", Language::Indonesian) => "WayExpand dijeda",
             ("paused", Language::German) => "WayExpand ist pausiert",
-            ("service_not_running", Language::English) => "the background service is not running",
-            ("service_not_running", Language::Indonesian) => {
-                "layanan latar belakang tidak berjalan"
+            ("service_not_running", Language::English) => "WayExpand is not running yet",
+            ("service_not_running", Language::Indonesian) => "WayExpand belum berjalan",
+            ("service_not_running", Language::German) => "WayExpand läuft noch nicht",
+            ("waiting", Language::English) => "checking desktop typing",
+            ("waiting", Language::Indonesian) => "memeriksa pengetikan desktop",
+            ("waiting", Language::German) => "Texteingabe am Desktop wird geprüft",
+            ("typing_ready", Language::English) => "integration is configured",
+            ("typing_ready", Language::Indonesian) => "integrasi telah dikonfigurasi",
+            ("typing_ready", Language::German) => "Integration ist eingerichtet",
+            ("terminal_only_ready", Language::English) => {
+                "configured for the selected terminal apps only"
             }
-            ("service_not_running", Language::German) => "der Hintergrunddienst läuft nicht",
-            ("waiting", Language::English) => "waiting for live route status",
-            ("waiting", Language::Indonesian) => "menunggu status jalur langsung",
-            ("waiting", Language::German) => "warte auf den Live-Status",
-            ("ibus", Language::English) => {
-                "the WayExpand IBus engine is active (no background service needed)"
+            ("terminal_only_ready", Language::Indonesian) => {
+                "hanya untuk aplikasi terminal yang dipilih"
             }
-            ("ibus", Language::Indonesian) => {
-                "mesin IBus WayExpand aktif (tidak perlu layanan latar belakang)"
-            }
-            ("ibus", Language::German) => {
-                "die WayExpand-IBus-Engine ist aktiv (kein Hintergrunddienst nötig)"
+            ("terminal_only_ready", Language::German) => {
+                "nur für die ausgewählten Terminal-Apps eingerichtet"
             }
             _ => "",
         }
@@ -897,14 +904,22 @@ impl Strings {
     pub fn onboarding_app_caveat(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Application filters depend on desktop integration and may be unavailable."
+                "Application filters depend on desktop integration and may be unavailable. IBus can replace text only when a field provides verifiable surrounding text; use Quick Picker to copy and paste in fields that do not."
             }
             Language::Indonesian => {
-                "Filter aplikasi bergantung pada integrasi desktop dan mungkin tidak tersedia."
+                "Filter aplikasi bergantung pada integrasi desktop dan mungkin tidak tersedia. IBus hanya dapat mengganti teks jika kolom menyediakan teks sekitar yang dapat diverifikasi; gunakan Quick Picker untuk menyalin dan menempel di kolom lain."
             }
             Language::German => {
-                "App-Filter benötigen Desktop-Integration und sind möglicherweise nicht verfügbar."
+                "App-Filter benötigen Desktop-Integration und sind möglicherweise nicht verfügbar. IBus kann Text nur ersetzen, wenn ein Feld verifizierbaren Umgebungstext bereitstellt; in anderen Feldern können Sie mit dem Schnellwähler kopieren und einfügen."
             }
+        }
+    }
+
+    pub fn onboarding_ibus_field_limitation(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The recommended desktop integration can support more text fields than the current setup. Some browser and terminal fields still do not provide enough information for safe replacement; use Quick Picker to copy and paste there. Setup explains the replacement tradeoff before asking for consent.",
+            Language::Indonesian => "Integrasi desktop yang disarankan dapat mendukung lebih banyak kolom daripada penyiapan saat ini. Beberapa kolom browser dan terminal tetap tidak memberikan cukup informasi untuk penggantian yang aman; gunakan Quick Picker untuk menyalin dan menempel di sana. Penyiapan menjelaskan risikonya sebelum meminta persetujuan.",
+            Language::German => "Die empfohlene Desktop-Integration kann mehr Textfelder unterstützen als die aktuelle Einrichtung. Manche Browser- und Terminalfelder liefern trotzdem nicht genug Informationen für einen sicheren Austausch. Verwenden Sie dort den Schnellwähler zum Kopieren und Einfügen. Vor einer Zustimmung erklärt die Einrichtung den Kompromiss.",
         }
     }
 
@@ -913,6 +928,14 @@ impl Strings {
             Language::English => "Create test snippet",
             Language::Indonesian => "Buat cuplikan uji",
             Language::German => "Testsnippet erstellen",
+        }
+    }
+
+    pub fn onboarding_test_state_save_failed(&self, error: &str) -> String {
+        match self.lang {
+            Language::English => format!("The test snippet was added, but its onboarding state could not be saved: {error}"),
+            Language::Indonesian => format!("Cuplikan uji ditambahkan, tetapi status penyiapannya tidak dapat disimpan: {error}"),
+            Language::German => format!("Das Test-Snippet wurde hinzugefügt, aber der Einrichtungsstatus konnte nicht gespeichert werden: {error}"),
         }
     }
 
@@ -1060,13 +1083,23 @@ impl Strings {
                 if capture { "Capture" } else { "Insertion" },
                 match state {
                     S::Available => "available",
-                    S::RequiresPermission => "action needed",
+                    S::RequiresPermission => "permission required",
+                    S::ActionRequired => "action needed",
                     S::Implemented => "not yet checked",
                     S::Unavailable => "unsupported in this session",
                     S::NotImplemented => "not implemented",
                 },
                 match (capture, state) {
                     (_, S::Available) => "test this stage in a normal text field",
+                    (true, S::ActionRequired) if backend == "ibus" => {
+                        "review the IBus registration, shared-component security, or desktop-routing finding in Diagnostics → IBus, then refresh"
+                    }
+                    (true, S::ActionRequired) => "finish guided route setup and refresh this check",
+                    (false, S::ActionRequired) => match backend {
+                        "ibus" => "complete guided IBus setup and explicitly review non-atomic replacement consent",
+                        "input-method-v2" => "complete the compositor's input-method setup, then recheck insertion support",
+                        _ => "complete the required setup step and refresh this check",
+                    },
                     (true, S::RequiresPermission) => {
                         match backend {
                             "ibus" => "complete guided IBus registration and source selection; this is not raw-device access",
@@ -1082,9 +1115,12 @@ impl Strings {
                             _ => "complete the required output authorization, then recheck insertion",
                         }
                     }
+                    (_, S::Implemented) if !capture && backend == "libei" => {
+                        "run `wayexpand backend test --injection` to check EIS support; it asks before inserting a harmless marker"
+                    }
                     (_, S::Implemented) => "refresh diagnostics to check support",
                     (_, S::Unavailable) => match backend {
-                        "ibus" => "install and register the IBus component in guided Setup, then retry",
+                        "ibus" => "this IBus route is unsupported in this session; open Diagnostics → IBus to see which capability is missing, then choose an available route",
                         "input-method-v2" => "this compositor lacks input-method-v2; choose another integration in Setup",
                         "libei" => "no usable EIS injection route was detected; choose another output route",
                         "wlroots-virtual-keyboard" => "this compositor lacks wlroots virtual-keyboard; choose another output route",
@@ -1097,13 +1133,23 @@ impl Strings {
                 if capture { "Tangkapan" } else { "Penyisipan" },
                 match state {
                     S::Available => "tersedia",
-                    S::RequiresPermission => "perlu tindakan",
+                    S::RequiresPermission => "perlu izin",
+                    S::ActionRequired => "perlu tindakan",
                     S::Implemented => "belum diperiksa",
                     S::Unavailable => "tidak didukung di sesi ini",
                     S::NotImplemented => "belum diimplementasikan",
                 },
                 match (capture, state) {
                     (_, S::Available) => "uji tahap ini di kolom teks biasa",
+                    (true, S::ActionRequired) if backend == "ibus" => {
+                        "tinjau temuan pendaftaran IBus, keamanan komponen bersama, atau perutean desktop di Diagnostik → IBus, lalu segarkan"
+                    }
+                    (true, S::ActionRequired) => "selesaikan penyiapan rute terpandu lalu segarkan pemeriksaan ini",
+                    (false, S::ActionRequired) => match backend {
+                        "ibus" => "selesaikan penyiapan IBus terpandu dan tinjau persetujuan penggantian non-atomik secara eksplisit",
+                        "input-method-v2" => "selesaikan penyiapan input-method compositor, lalu periksa dukungan penyisipan kembali",
+                        _ => "selesaikan langkah penyiapan yang diperlukan lalu segarkan pemeriksaan ini",
+                    },
                     (true, S::RequiresPermission) => {
                         match backend {
                             "ibus" => "selesaikan pendaftaran IBus dan pemilihan sumber terpandu; ini bukan akses perangkat mentah",
@@ -1119,9 +1165,12 @@ impl Strings {
                             _ => "selesaikan otorisasi keluaran yang diperlukan, lalu periksa penyisipan kembali",
                         }
                     }
+                    (_, S::Implemented) if !capture && backend == "libei" => {
+                        "jalankan `wayexpand backend test --injection` untuk memeriksa dukungan EIS; perintah meminta persetujuan sebelum menyisipkan penanda aman"
+                    }
                     (_, S::Implemented) => "segarkan diagnostik untuk memeriksa dukungan",
                     (_, S::Unavailable) => match backend {
-                        "ibus" => "pasang dan daftarkan komponen IBus melalui Penyiapan, lalu coba lagi",
+                        "ibus" => "rute IBus ini tidak didukung di sesi ini; buka Diagnostik → IBus untuk melihat kemampuan yang tidak tersedia, lalu pilih rute lain",
                         "input-method-v2" => "compositor ini tidak menyediakan input-method-v2; pilih integrasi lain",
                         "libei" => "rute injeksi EIS yang dapat digunakan tidak terdeteksi; pilih keluaran lain",
                         "wlroots-virtual-keyboard" => "compositor ini tidak menyediakan wlroots virtual-keyboard; pilih keluaran lain",
@@ -1134,13 +1183,23 @@ impl Strings {
                 if capture { "Erfassung" } else { "Einfügen" },
                 match state {
                     S::Available => "verfügbar",
-                    S::RequiresPermission => "Aktion erforderlich",
+                    S::RequiresPermission => "Berechtigung nötig",
+                    S::ActionRequired => "Aktion erforderlich",
                     S::Implemented => "noch nicht geprüft",
                     S::Unavailable => "in dieser Sitzung nicht unterstützt",
                     S::NotImplemented => "nicht implementiert",
                 },
                 match (capture, state) {
                     (_, S::Available) => "diesen Schritt in einem normalen Textfeld testen",
+                    (true, S::ActionRequired) if backend == "ibus" => {
+                        "den Hinweis zu IBus-Registrierung, Sicherheit der gemeinsamen Komponente oder Desktop-Route unter Diagnose → IBus prüfen und danach erneut aktualisieren"
+                    }
+                    (true, S::ActionRequired) => "die geführte Routeneinrichtung abschließen und diese Prüfung aktualisieren",
+                    (false, S::ActionRequired) => match backend {
+                        "ibus" => "die geführte IBus-Einrichtung abschließen und die Zustimmung zur nicht-atomaren Ersetzung ausdrücklich prüfen",
+                        "input-method-v2" => "die Eingabemethode des Compositors einrichten und die Einfügeunterstützung erneut prüfen",
+                        _ => "den erforderlichen Einrichtungsschritt abschließen und diese Prüfung aktualisieren",
+                    },
                     (true, S::RequiresPermission) => {
                         match backend {
                             "ibus" => "die geführte IBus-Registrierung und Quellenauswahl abschließen; dies ist kein Rohgerätezugriff",
@@ -1156,9 +1215,12 @@ impl Strings {
                             _ => "die erforderliche Ausgabeautorisierung abschließen und das Einfügen erneut prüfen",
                         }
                     }
+                    (_, S::Implemented) if !capture && backend == "libei" => {
+                        "`wayexpand backend test --injection` ausführen, um EIS zu prüfen; vor dem Einfügen einer harmlosen Markierung wird gefragt"
+                    }
                     (_, S::Implemented) => "Diagnose aktualisieren, um die Unterstützung zu prüfen",
                     (_, S::Unavailable) => match backend {
-                        "ibus" => "IBus-Komponente über die geführte Einrichtung installieren und registrieren, dann erneut versuchen",
+                        "ibus" => "Dieser IBus-Weg wird in dieser Sitzung nicht unterstützt. Öffnen Sie Diagnose → IBus, um die fehlende Funktion zu sehen, und wählen Sie anschließend einen verfügbaren Weg.",
                         "input-method-v2" => "dieser Compositor bietet input-method-v2 nicht an; eine andere Integration wählen",
                         "libei" => "kein nutzbarer EIS-Ausgabeweg erkannt; einen anderen Ausgabeweg wählen",
                         "wlroots-virtual-keyboard" => "dieser Compositor bietet wlroots virtual-keyboard nicht an; einen anderen Ausgabeweg wählen",
@@ -1243,7 +1305,10 @@ mod route_trust_tests {
             crate::BackendState::Implemented,
         );
         assert!(unknown.contains("not yet checked"), "{unknown}");
-        assert!(unknown.contains("refresh diagnostics"), "{unknown}");
+        assert!(
+            unknown.contains("wayexpand backend test --injection"),
+            "unknown injection support should point to the capability test: {unknown}"
+        );
         assert!(!unknown.contains("permission"), "{unknown}");
 
         let authorization = strings.onboarding_route_component_detail(
@@ -1263,10 +1328,10 @@ mod route_trust_tests {
         let ibus_consent = strings.onboarding_route_component_detail(
             false,
             "ibus",
-            crate::BackendState::RequiresPermission,
+            crate::BackendState::ActionRequired,
         );
         assert!(
-            ibus_consent.contains("compatibility replacement"),
+            ibus_consent.contains("explicitly review non-atomic replacement consent"),
             "{ibus_consent}"
         );
         assert!(!ibus_consent.contains("portal"), "{ibus_consent}");
@@ -1276,10 +1341,8 @@ mod route_trust_tests {
             "ibus",
             crate::BackendState::Unavailable,
         );
-        assert!(
-            unavailable_ibus.contains("install and register"),
-            "{unavailable_ibus}"
-        );
+        assert!(unavailable_ibus.contains("unsupported in this session"));
+        assert!(unavailable_ibus.contains("Diagnostics → IBus"));
         assert!(
             !unavailable_ibus.contains("permission"),
             "{unavailable_ibus}"

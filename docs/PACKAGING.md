@@ -14,31 +14,41 @@ packagers and source-build users need a compatible toolchain.
 ## Quick Reference
 
 <!-- generated-install-status:start -->
-**Publication status from the shared manifest (audited 2026-11-16):** GitHub 1.3.6 binary assets published: True. Launchpad PPA: experimental daily builds for ['amd64'].
+**Publication status from the shared manifest (audited 2026-11-18):** GitHub 1.3.6 binary assets published: True. Launchpad PPA: experimental daily builds for ['amd64'].
 
 | Distribution | PPA package status |
 |---|---|
-| Ubuntu 26.04 (Resolute) | 1.3.5 — stale |
-| Ubuntu 26.10 (Stonking) | 1.3.5 — stale |
+| Ubuntu 26.04 (Resolute) | 1.3.6 — current |
+| Ubuntu 26.10 (Stonking) | 1.3.6 — current |
 | Ubuntu 24.04 (Noble) | 0.2.0 — stale |
 | Ubuntu 22.04 (Jammy) | 0.2.0 — stale |
 
 Fedora Copr published: False; Arch AUR submitted: False. Package CI targets: Ubuntu 24.04, Ubuntu 26.04, Fedora 45. Physical desktop certification: False. Previous-package upgrade CI passed: False.
+
+| Upgrade scenario | Scope | Status | Expected behavior |
+|---|---|---|---|
+| previous-release-to-current | package-manager | ci-pending | Candidate package installs over previous release; user configuration and snippets remain valid. |
+| user-customization-preserved | package-manager | ci-pending | User-owned snippets and custom fields survive schema migration; after migration, configuration bytes remain unchanged across rollback, re-upgrade, reinstall, and uninstall/reinstall. |
+| uninstall-reinstall | package-manager | ci-pending | Package-owned executables are removed and reinstall restores package components without replacing user configuration. |
+| running-daemon-activated | live-user-session | not-tested | Affected process is restarted and reports the candidate build; no stale daemon remains. |
+| gnome-ibus-upgrade | physical-gnome-session | not-tested | IBus registration and GNOME source remain usable or setup presents a precise recovery step. |
+| interrupted-package-upgrade | package-manager | not-tested | Previous working package remains usable or package repair restores a coherent installation. |
 <!-- generated-install-status:end -->
 
-The release payload is built on Ubuntu 24.04. Package lifecycle CI is
-configured to install a 1.3.2 package fixture, upgrade to the candidate, roll
-back to 1.3.2, re-upgrade, reinstall, and remove it on the listed package
-targets. The previous package is deliberately older than the current 1.3.3
-candidate. This checks package-manager migration and files, not GNOME session
-behavior; the configured test remains unverified until a complete CI run passes.
-A GNOME session after package upgrade still requires the separate desktop
-acceptance gate; package CI does not establish desktop input certification or a
-stable distro repository. GitHub release artifacts receive
-build-provenance attestations and checksums; repositories must use their
-distribution signing infrastructure before they are advertised as official
-channels. CI does not yet compare independently rebuilt `.deb`/`.rpm` files,
-so package reproducibility is also unverified.
+The release payload is built on Ubuntu 24.04. The package lifecycle job uses a
+1.3.2 package fixture to exercise upgrade, rollback, re-upgrade, reinstall, and
+removal on Ubuntu 24.04, Ubuntu 26.04, and Fedora 45. It now preserves and
+validates a user-customized configuration through those package operations.
+The exact current scenario status is shown in the generated matrix below. This
+container test accepts the supported stable-ID migration when validating the
+older fixture, checks that its built-in and user-owned snippets survive, then
+requires byte-for-byte preservation through later package operations. It
+cannot establish behavior with a running desktop daemon or an active GNOME
+IBus source; those remain separate desktop-session checks. GitHub
+release artifacts receive build-provenance attestations and checksums;
+repositories must use their distribution signing infrastructure before they
+are advertised as official channels. CI does not yet compare independently
+rebuilt `.deb`/`.rpm` files, so package reproducibility is also unverified.
 
 For ordinary desktop installations, prefer the distribution package whenever
 one is available. Debian, RPM, and Arch package recipes install the shared

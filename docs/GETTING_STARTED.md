@@ -28,31 +28,43 @@ explains permissions before applying changes; it does not enable raw keyboard
 capture automatically. The GUI status distinguishes **Installed**,
 **Configured**, and **Verified working**.
 
-In the editor, select **Add snippet**, enter a trigger such as `;;hello` and a
-replacement such as `Hello, world!`, then save. You can use any enabled,
-harmless static snippet for verification; setup does not require the example
-trigger to exist.
+In the snippet list, select **+ New**, enter a trigger such as `;;hello` and a
+replacement such as `Hello, world!`, then save. You can also choose
+**Create test snippet** for a harmless example. Verification accepts any
+enabled, harmless static snippet; setup does not require a particular sample
+trigger.
 
 ### 3. Verify in a real application
 
-Choose **Desktop Integration Test** and follow the prompt in a disposable,
-non-sensitive text field. Inspect the result and confirm only if it exactly
+Choose **Test in a real application** and follow the prompt in a disposable,
+non-sensitive text field. Where the controlled test field is available and
+the output transaction can be correlated, WayExpand reads back the exact
+result without retaining its contents. In other applications or when the
+route cannot correlate the result, inspect it and confirm only if it exactly
 matches the expected replacement. WayExpand never presses Enter or retries an
-insertion whose outcome is uncertain. Until you confirm an exact result, the
-GUI reports **Configured, untested**; afterward it reports **Working in the
-tested application**. That result applies only to the tested app and session.
+insertion whose outcome is uncertain. The guide distinguishes **Configured,
+awaiting test**, **Verified in the controlled test field**, and **Confirmed by
+you in the tested application**. Each result applies only to the tested field
+and session.
 
 If no automatic route is available, Quick Picker remains available in
 copy-only mode: choose a snippet, switch to the target application, and paste
 it yourself. It does not enable raw capture or attempt insertion.
 
-Some clients, including browser text fields that do not report surrounding
-text to IBus, cannot safely support automatic trigger replacement. In that
-case WayExpand passes typing through unchanged and reports that input arrived
-but replacement was unavailable; it does not guess, delete the trigger, or
-fall back to synthetic typing. Open **Quick Picker (copy and paste)** from
-Diagnostics to use snippets in that field. Browser and embedded-editor support
-must be verified per client; success in one GTK field does not establish it.
+IBus alone cannot safely replace a trigger in fields that do not report
+verifiable surrounding text; it passes typing through unchanged rather than
+guessing what to delete. An explicitly enabled, app-scoped evdev fallback can
+cover configured browser applications, including fields without IBus
+surrounding text. This is a separate privacy tradeoff: evdev observes raw
+keyboard events globally while capture is active, cannot detect password
+fields, and the app list limits matching rather than observation. Its output
+is still non-atomic and not certified for every browser field. Configure it
+only after reviewing [the sensitive-field limits](BACKENDS_SENSITIVE_FIELDS.md):
+`wayexpand setup --backend ibus --evdev-apps` previews the browser allowlist
+and ownership handoff before applying it. If you do not accept raw capture,
+open **Quick Picker (copy and paste)** from Diagnostics. Browser and
+embedded-editor support must be verified per client; success in one GTK field
+does not establish it.
 
 ## Advanced CLI setup and route diagnostics
 
@@ -146,23 +158,35 @@ This is a matcher-only check: it confirms the saved configuration can match
 the trigger and render the replacement. It does not send input to your desktop
 or prove that an application will receive a replacement.
 
-For the desktop check, focus a disposable, non-sensitive text field and run:
+For the desktop check, use the GUI's **Test Expansion** action. It opens a
+dedicated harmless test field when Python GTK 3 bindings are available. If
+your library has no dedicated onboarding snippet, the GUI adds one once for
+this check; it does not use arbitrary personal snippet text as test output.
+You can start the same controlled field from the CLI:
 
 ```sh
-wayexpand debug --test ';;hello'
+wayexpand debug --test ':wayexpand-test' --controlled-client
 ```
 
-If `;;hello` is not in your library, substitute any enabled static trigger
-listed by `wayexpand list`; command-backed and form-driven snippets are not
-used for this harmless insertion check.
+The controlled field observes the expected input sequence and reads back whether
+it contains the exact replacement; its contents are never logged. Automatic
+verification also requires a new output transaction ID during the test window.
+That ID is not bound directly to the trigger. If the route exposes only
+aggregate counters, the GUI asks you to confirm the exact result before marking
+the test complete. If the controlled field cannot start or the replacement is
+multiline, the test falls back to visual confirmation. You can request the
+controlled field from the CLI with that command. If the guide added a numbered
+trigger because the base trigger was already in use, replace it with the
+displayed one.
 
-Follow its prompt, type the trigger once, inspect the resulting text, and
-confirm only if it exactly matches the expected replacement. WayExpand never
-presses Enter or retries uncertain output. The GUI offers this as **Desktop
-Integration Test** during setup. Until you confirm an exact result, report the
-state as **Configured, untested**; after confirmation, it reports **Working in
-the tested application**. That result applies only to the tested app and
-session. It does not certify other applications or the compositor. If the
+When the visual fallback is used, follow its prompt, type the trigger once,
+inspect the resulting text, and confirm only if it exactly matches the expected
+replacement. WayExpand never presses Enter or retries uncertain output. The GUI
+offers this as **Test Expansion** during setup. A passing controlled field is
+reported as **Verified in the controlled test field**. A visual result is
+reported as **Confirmed by you in the tested application**. Both apply only to
+the tested field and session, and do not
+certify other applications or the compositor. If the
 matcher check instead prints `no expansion matched`, inspect the trigger with
 `wayexpand list` and `wayexpand validate` before debugging the backend.
 

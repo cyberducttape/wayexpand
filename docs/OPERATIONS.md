@@ -78,15 +78,33 @@ working in an application. Use `readiness_levels.integrated` and
 `readiness_levels.operational` for those stages. The read-only preflight always
 reports `readiness_levels.target_insertion.verified: false`; an operator must
 run and confirm a real-application test before treating insertion as verified.
+The top-level `route_available` means only that a policy-allowed route
+candidate exists. The older `route_ready` field is a compatibility alias with
+the same meaning; it is not operational readiness. A configured route can be
+available while setup is blocked by missing integration or runtime evidence.
+The top-level `next_action.command` is the first repair supported by current
+evidence. `activation.command` names the backend setup will preserve, while
+`activation.required` and `activation.active` are derived from live input
+source/engine or daemon-route state. `activation.consent_required` and
+`activation.consent_granted` distinguish a missing explicit replacement
+consent from an atomic route that does not need it; unavailable evidence is
+reported as `null`. These fields do not imply that application insertion was
+verified. `first_run_test.command` (also exposed as `manual_command`) and
+`preview_command` are populated with an actual eligible trigger when
+available; they remain `null` when none exists. The text report prints these
+commands too, or explains when a suitable snippet must first be created.
 Use `wayexpand health --json` for live operational health and
-`wayexpand debug --test TRIGGER` for the interactive insertion test.
+`wayexpand debug --test` for the interactive insertion test; it chooses only a
+known harmless tutorial snippet. If none is configured, create one in the GUI
+or review a snippet and pass its trigger explicitly.
 
 For the first-run path, use `wayexpand setup --check` to inspect the detected
 desktop, installation identity, PATH resolution, and setup recommendation.
 Then run `wayexpand setup --apply`. Interactive setup offers a real-app test
-using an enabled static snippet (`;;hello` is preferred when it is testable,
-but is not required) and asks you to confirm the exact replacement in a focused
-text field. Command-backed and templated snippets are excluded. A connected
+using an enabled static snippet. The harmless tutorial snippet is preferred,
+then `;;hello`, then another eligible static snippet; the sample is not
+required. Setup asks you to confirm the exact replacement in a focused text
+field. Command-backed and templated snippets are excluded. A connected
 backend or active service is reported separately and is not a successful
 insertion test. Automated `--yes` setup does
 not claim an insertion was verified; it prints the command for a later
@@ -508,8 +526,10 @@ is unknown.
 status, validates the control-socket parent and existing path permissions, and
 performs non-invasive availability checks where possible, including a
 writable-open check for `/dev/uinput`. A backend marked `RequiresPermission`
-needs permissions, while `NotImplemented` means that environment access alone
-does not make the backend selectable or usable. `doctor` exits nonzero when
+needs an operating-system or portal grant. `ActionRequired` means a setup step
+remains but no permission grant is implied; `NotImplemented` means that
+environment access alone does not make the backend selectable or usable.
+`doctor` exits nonzero when
 configuration, policy, output health, or required capture readiness fails. It
 also fails when the currently selected IBus route has an actionable, stable
 blocker such as KWin's IBus Wayland bridge being unavailable or legacy

@@ -14,6 +14,7 @@ use wayexpand_backend_ibus::chain::IbusCheckState;
 /// What is wrong, in the user's terms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Problem {
+    InstallationIncomplete,
     ServiceOff,
     /// Only the control service runs (Quick Picker, hotkeys): nothing
     /// captures typing, because the IBus engine it pairs with is not live.
@@ -24,10 +25,15 @@ pub(crate) enum Problem {
     RestartNeeded,
     BuildUnknown,
     InputSourceNotSetUp,
+    GnomeSourceStatusUnavailable,
+    IbusManifestScopeInvalid,
+    IbusDesktopRouteUnavailable,
+    IbusDesktopRouteRecentlyCrashed,
     IbusEngineNotRegistered,
     InputSourceNotSelected,
     InputStatusPending,
     IbusEngineUnavailable,
+    IbusInputNotObserved,
     InputStatusStale,
     ReplacementNotAllowed,
     ReplacementConsentUnknown,
@@ -35,7 +41,13 @@ pub(crate) enum Problem {
     RouteFailed,
     Unsupported,
     FieldCannotReplace,
+    FieldTextMismatch,
+    FieldPolicyRefusal,
     SensitiveField,
+    IbusFieldTypeUnknown,
+    TriggerNotMatched,
+    TriggerMatchUnknown,
+    NoEnabledExpansions,
     ApplicationDeliveryUnverified,
     TerminalRouteNoInput,
     OutputUnverified,
@@ -45,6 +57,8 @@ pub(crate) enum Problem {
     OutputInterrupted,
     SnippetActionFailed,
     OutputStatusUnknown,
+    TerminalFocusUnknown,
+    TerminalCompositorIdentity,
     StatusUnknown,
     RouteStatusUnknown,
 }
@@ -52,14 +66,16 @@ pub(crate) enum Problem {
 /// The one thing to do about it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
+    CheckInstallation,
     TurnOn,
     Resume,
     RunSetup,
-    Restart,
+    CheckUpgrade,
     SelectInputSource,
     ReviewConsent,
     CheckAgain,
     QuickPicker,
+    OpenMatcherPreview,
     TestInApplication,
     InspectText,
     ReviewSnippet,
@@ -75,6 +91,8 @@ pub(crate) enum GnomeIbusReadiness {
     DiagnosticsPending,
     DiagnosticsStale,
     SourceNotSetUp,
+    SourceStatusUnavailable,
+    ManifestScopeInvalid,
     EngineNotRegistered,
     SourceNotSelected,
     EngineUnavailable,
@@ -86,6 +104,9 @@ pub(crate) enum GnomeIbusReadiness {
 /// and diagnostics.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Situation {
+    /// Installed-component readiness from the versioned startup audit. Missing
+    /// report data stays unknown rather than appearing healthy.
+    pub installation_ready: Option<bool>,
     pub daemon_reachable: Option<bool>,
     /// The WayExpand IBus engine is live.
     pub ibus_active: bool,
@@ -107,6 +128,13 @@ pub(crate) struct Situation {
     /// The IBus component registry can be healthy independently of GNOME's
     /// selectable input-source list.
     pub ibus_engine_registered: IbusCheckState,
+    /// The shared component does not execute a user-owned home-directory
+    /// binary. This is separate from whether the engine happens to run now.
+    pub ibus_manifest_scope: IbusCheckState,
+    /// KWin's IBus Wayland helper has a distinct route-health check; a recent
+    /// helper crash can explain missing input even when the engine is live.
+    pub ibus_desktop_state: IbusCheckState,
+    pub ibus_desktop_problem_id: Option<&'static str>,
     pub source_active: IbusCheckState,
     pub engine_state: IbusCheckState,
     pub consent_state: IbusCheckState,
@@ -118,23 +146,33 @@ pub(crate) struct Situation {
     pub build: Option<runtime::DaemonBuildState>,
     /// Replacement is admitted: atomic and verified, or explicitly allowed.
     pub replacement_allowed: bool,
-    /// The last normal field refused replacement (no surrounding text).
-    pub field_cannot_replace: bool,
-    /// The most recently typed-in IBus field explicitly identified itself as
-    /// sensitive; matching is intentionally suppressed there.
-    pub field_sensitive: bool,
+    /// Fresh, content-free verdict for the currently focused IBus field that
+    /// received input. The text, trigger, and replacement are never retained.
+    pub ibus_field_verdict: Option<wayexpand_backend_ibus::IbusFieldVerdict>,
     /// A user-confirmed insertion in an application still covers this
     /// desktop session, build, and route. Matcher previews and backend
     /// acknowledgements do not satisfy this condition.
     pub application_delivery_verified: bool,
     /// The raw-capture route is limited to configured terminal applications.
     pub terminal_apps_only: bool,
+    /// The daemon reports application_scope_unknown: the restricted route is
+    /// failing closed because it has no focused application identity.
+    pub terminal_focus_unknown: bool,
+    /// KWin returned its own process ID instead of the focused client ID.
+    pub terminal_compositor_identity: bool,
     /// Events accepted by this daemon since startup, when the status schema
     /// exposes the counter. Zero is useful evidence only for that interval.
     pub input_events_total: Option<u64>,
+    /// Count reported by the current daemon build. Unknown or stale reports
+    /// must not be used to blame the user's snippet library.
+    pub enabled_expansions: Option<usize>,
     /// The latest content-free output outcome from the current daemon. This
     /// is deliberately separate from route-level application verification.
     pub recent_outcome: Option<wayexpand_core::OutcomeKind>,
+    /// Latest focused-field matcher state for the desktop-managed IBus route.
+    /// This is absent unless diagnostics are fresh and the field received
+    /// typing in the current engine process.
+    pub ibus_latest_match: Option<wayexpand_backend_ibus::telemetry::IbusLatestMatch>,
 }
 
 pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
@@ -164,21 +202,22 @@ pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
         }
         IbusCheckState::Pass => {}
     }
-    match s.source_active {
-        IbusCheckState::Fail | IbusCheckState::Warn => {
-            return GnomeIbusReadiness::SourceNotSelected;
-        }
-        IbusCheckState::Unknown | IbusCheckState::Skip => {
+    match s.ibus_manifest_scope {
+        IbusCheckState::Fail => return GnomeIbusReadiness::ManifestScopeInvalid,
+        IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
             return GnomeIbusReadiness::DiagnosticsPending;
         }
         IbusCheckState::Pass => {}
     }
-    match s.consent_state {
-        IbusCheckState::Fail => {
-            return GnomeIbusReadiness::ReplacementNotAllowed;
+    match s.source_active {
+        IbusCheckState::Fail | IbusCheckState::Warn => {
+            return GnomeIbusReadiness::SourceNotSelected;
         }
-        IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
-            return GnomeIbusReadiness::ReplacementConsentUnknown;
+        IbusCheckState::Unknown => {
+            return GnomeIbusReadiness::SourceStatusUnavailable;
+        }
+        IbusCheckState::Skip => {
+            return GnomeIbusReadiness::DiagnosticsPending;
         }
         IbusCheckState::Pass => {}
     }
@@ -191,6 +230,18 @@ pub(crate) fn gnome_ibus_readiness(s: &Situation) -> GnomeIbusReadiness {
         }
         IbusCheckState::Pass if !s.ibus_active => {
             return GnomeIbusReadiness::DiagnosticsPending;
+        }
+        IbusCheckState::Pass => {}
+    }
+    // The engine must be alive before replacement consent can matter. Keep
+    // this ordering aligned with `wayexpand why` so simultaneous failures
+    // point to the first actionable stage in the input path.
+    match s.consent_state {
+        IbusCheckState::Fail => {
+            return GnomeIbusReadiness::ReplacementNotAllowed;
+        }
+        IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
+            return GnomeIbusReadiness::ReplacementConsentUnknown;
         }
         IbusCheckState::Pass => {}
     }
@@ -207,11 +258,27 @@ pub(crate) fn gnome_ibus_route_configured(s: &Situation) -> bool {
     )
 }
 
+/// Whether the configured evdev route is limited to terminal applications.
+/// Keep this classification shared between the route adviser and onboarding.
+pub(super) fn terminal_route_is_scoped(daemon_status: &str) -> bool {
+    let terminal_only =
+        runtime::status_field(daemon_status, "terminal_apps_only").as_deref() == Some("true");
+    let raw_fallback_enabled = runtime::status_field(daemon_status, "raw_capture_fallback_enabled")
+        .as_deref()
+        == Some("true");
+    let raw_capture_app_count = runtime::status_field(daemon_status, "raw_capture_app_count")
+        .and_then(|value| value.parse::<usize>().ok());
+    terminal_only && !(raw_fallback_enabled && raw_capture_app_count.is_none_or(|count| count > 0))
+}
+
 /// The most important problem and its action, or `None` only when a real
 /// application insertion has been confirmed for the current route.
 pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     use runtime::RouteState as R;
     use wayexpand_core::OutcomeKind as O;
+    if s.installation_ready == Some(false) {
+        return Some((Problem::InstallationIncomplete, Action::CheckInstallation));
+    }
     let field = || {
         // A transaction result is more specific than the most recent field's
         // general capability state, and must not be hidden by it.
@@ -229,10 +296,50 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
                 }
                 O::Other => Some((Problem::OutputStatusUnknown, Action::InspectText)),
             }
-        } else if s.field_sensitive {
-            Some((Problem::SensitiveField, Action::TestInApplication))
-        } else if s.field_cannot_replace {
-            Some((Problem::FieldCannotReplace, Action::QuickPicker))
+        } else if s.enabled_expansions == Some(0)
+            && (s.input_events_total.is_some_and(|count| count > 0)
+                || s.ibus_field_verdict.is_some()
+                || s.ibus_latest_match.is_some())
+        {
+            Some((Problem::NoEnabledExpansions, Action::ReviewSnippet))
+        } else if let Some(verdict) = s.ibus_field_verdict {
+            use wayexpand_backend_ibus::IbusFieldVerdict as V;
+            match verdict {
+                V::Sensitive => Some((Problem::SensitiveField, Action::TestInApplication)),
+                V::NoSurroundingText => Some((Problem::FieldCannotReplace, Action::QuickPicker)),
+                V::Mismatch => Some((Problem::FieldTextMismatch, Action::OpenMatcherPreview)),
+                V::Policy => Some((Problem::FieldPolicyRefusal, Action::InspectText)),
+                V::NoContentType => {
+                    Some((Problem::IbusFieldTypeUnknown, Action::TestInApplication))
+                }
+                V::OutputEmittedUnverified => {
+                    Some((Problem::OutputUnverified, Action::InspectText))
+                }
+                V::Idle => Some((Problem::IbusInputNotObserved, Action::TestInApplication)),
+                V::ReplacementContextObserved
+                    if s.ibus_latest_match
+                        == Some(wayexpand_backend_ibus::telemetry::IbusLatestMatch::NoMatch) =>
+                {
+                    Some((Problem::TriggerNotMatched, Action::OpenMatcherPreview))
+                }
+                V::ReplacementContextObserved if s.application_delivery_verified => {
+                    Some((Problem::TriggerMatchUnknown, Action::OpenMatcherPreview))
+                }
+                V::ReplacementContextObserved => Some((
+                    Problem::ApplicationDeliveryUnverified,
+                    Action::TestInApplication,
+                )),
+            }
+        } else if !s.application_delivery_verified
+            && (s.gnome_ibus || s.ibus_route_expected)
+            && s.ibus_latest_match.is_none()
+        {
+            Some((Problem::IbusInputNotObserved, Action::TestInApplication))
+        } else if !s.application_delivery_verified
+            && s.ibus_latest_match
+                == Some(wayexpand_backend_ibus::telemetry::IbusLatestMatch::NoMatch)
+        {
+            Some((Problem::TriggerNotMatched, Action::OpenMatcherPreview))
         } else if !s.application_delivery_verified {
             Some((
                 Problem::ApplicationDeliveryUnverified,
@@ -259,8 +366,14 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             GnomeIbusReadiness::SourceNotSetUp => {
                 Some((Problem::InputSourceNotSetUp, Action::RunSetup))
             }
+            GnomeIbusReadiness::SourceStatusUnavailable => {
+                Some((Problem::GnomeSourceStatusUnavailable, Action::InspectText))
+            }
             GnomeIbusReadiness::EngineNotRegistered => {
                 Some((Problem::IbusEngineNotRegistered, Action::RunSetup))
+            }
+            GnomeIbusReadiness::ManifestScopeInvalid => {
+                Some((Problem::IbusManifestScopeInvalid, Action::RunSetup))
             }
             GnomeIbusReadiness::SourceNotSelected => {
                 Some((Problem::InputSourceNotSelected, Action::SelectInputSource))
@@ -283,9 +396,38 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
         if s.daemon_reachable == Some(true) && s.paused {
             return Some((Problem::Paused, Action::Resume));
         }
+        match s.diagnostics_fresh {
+            Some(false) => return Some((Problem::InputStatusStale, Action::CheckAgain)),
+            None => return Some((Problem::InputStatusPending, Action::CheckAgain)),
+            Some(true) => {}
+        }
         match s.ibus_engine_registered {
             IbusCheckState::Fail => {
                 return Some((Problem::IbusEngineNotRegistered, Action::RunSetup));
+            }
+            IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
+                return Some((Problem::InputStatusPending, Action::CheckAgain));
+            }
+            IbusCheckState::Pass => {}
+        }
+        match s.ibus_desktop_problem_id {
+            Some("WX-KWIN-IBUS-001") if s.ibus_desktop_state == IbusCheckState::Fail => {
+                return Some((Problem::IbusDesktopRouteUnavailable, Action::RunSetup));
+            }
+            Some("WX-KWIN-IBUS-002")
+                if s.ibus_desktop_state == IbusCheckState::Warn
+                    && s.ibus_field_verdict.is_none() =>
+            {
+                return Some((
+                    Problem::IbusDesktopRouteRecentlyCrashed,
+                    Action::TestInApplication,
+                ));
+            }
+            _ => {}
+        }
+        match s.ibus_manifest_scope {
+            IbusCheckState::Fail => {
+                return Some((Problem::IbusManifestScopeInvalid, Action::RunSetup));
             }
             IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
                 return Some((Problem::InputStatusPending, Action::CheckAgain));
@@ -301,8 +443,17 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             }
             IbusCheckState::Pass => {}
         }
-        if !s.ibus_active {
-            return Some((Problem::IbusEngineUnavailable, Action::RunSetup));
+        match s.engine_state {
+            IbusCheckState::Fail | IbusCheckState::Warn => {
+                return Some((Problem::IbusEngineUnavailable, Action::RunSetup));
+            }
+            IbusCheckState::Unknown | IbusCheckState::Skip => {
+                return Some((Problem::InputStatusPending, Action::CheckAgain));
+            }
+            IbusCheckState::Pass if !s.ibus_active => {
+                return Some((Problem::InputStatusPending, Action::CheckAgain));
+            }
+            IbusCheckState::Pass => {}
         }
         if !s.replacement_allowed {
             return Some((Problem::ReplacementNotAllowed, Action::ReviewConsent));
@@ -312,12 +463,26 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     match s.daemon_reachable {
         None => return Some((Problem::StatusUnknown, Action::CheckAgain)),
         Some(false) => return Some((Problem::ServiceOff, Action::TurnOn)),
-        // The control-only service exists to sit beside IBus; reaching here
-        // means the IBus engine is not live, so nothing reads typing.
-        Some(true) if s.control_only => {
-            return Some((Problem::NoTypingRoute, Action::RunSetup));
-        }
         Some(true) => {}
+    }
+    // Version identity must be established before trusting daemon-provided
+    // focus, match, pause, or output history. The IBus branches above use
+    // their own process-correlated readiness evidence and remain independent
+    // of the companion control daemon's build.
+    match s.build {
+        Some(runtime::DaemonBuildState::RestartRequired) => {
+            return Some((Problem::RestartNeeded, Action::CheckUpgrade));
+        }
+        Some(runtime::DaemonBuildState::Unverified) => {
+            return Some((Problem::BuildUnknown, Action::CheckUpgrade));
+        }
+        _ => {}
+    }
+    // The control-only service exists to sit beside IBus; once its status is
+    // trusted, reaching here means the IBus engine is not live, so nothing
+    // reads typing.
+    if s.control_only {
+        return Some((Problem::NoTypingRoute, Action::RunSetup));
     }
     // A known pause is actionable regardless of whether this build has a
     // route-state record. Do not let missing route telemetry hide the Resume
@@ -325,17 +490,17 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     if s.paused {
         return Some((Problem::Paused, Action::Resume));
     }
-    // The daemon's explicit matching block is stronger evidence than a
-    // missing build identity and keeps a blocked route from being mislabeled
-    // as an unverified or unknown service.
-    match s.build {
-        Some(runtime::DaemonBuildState::RestartRequired) => {
-            return Some((Problem::RestartNeeded, Action::Restart));
-        }
-        Some(runtime::DaemonBuildState::Unverified) => {
-            return Some((Problem::BuildUnknown, Action::Restart));
-        }
-        _ => {}
+    // This route limitation is now read only after the daemon build has been
+    // trusted above. It is actionable even when there are no input counters.
+    if s.terminal_apps_only && s.terminal_focus_unknown && s.recent_outcome.is_none() {
+        return Some((
+            if s.terminal_compositor_identity {
+                Problem::TerminalCompositorIdentity
+            } else {
+                Problem::TerminalFocusUnknown
+            },
+            Action::QuickPicker,
+        ));
     }
     match s.route_state {
         None if terminal_route_has_no_input(s) => {
@@ -364,7 +529,36 @@ fn terminal_route_has_no_input(s: &Situation) -> bool {
 }
 
 impl GuiApp {
-    fn ibus_check_state(&self, id: &str) -> IbusCheckState {
+    /// The daemon may keep a terminal-scoped evdev companion running while
+    /// IBus owns typing in other applications. Report and test the effective
+    /// capture route, not merely the presence of that companion.
+    pub(crate) fn active_route_is_terminal_scoped(&self) -> bool {
+        terminal_route_is_scoped(&self.daemon_status) && !self.ibus_route_active()
+    }
+
+    /// Offer an explicit alternative when terminal-scoped evdev cannot
+    /// establish the focused client identity and setup recommends IBus. The
+    /// guided setup begins with a read-only preflight; switching still
+    /// requires the existing consent review.
+    pub(crate) fn can_offer_recommended_ibus_setup(&self, problem: Problem) -> bool {
+        if !matches!(
+            problem,
+            Problem::TerminalFocusUnknown | Problem::TerminalCompositorIdentity
+        ) {
+            return false;
+        }
+        let recommends_ibus = self
+            .recommended_route
+            .is_some_and(|route| route.setup_backend() == "ibus");
+        let configured_backend = super::setup::current_guided_setup_backend(
+            self.daemon_reachable,
+            &self.daemon_status,
+            self.route_plan.as_ref(),
+        );
+        recommends_ibus && configured_backend.is_some_and(|backend| backend != "ibus")
+    }
+
+    pub(super) fn ibus_check_state(&self, id: &str) -> IbusCheckState {
         self.ibus_route
             .as_ref()
             .and_then(|report| report.check(id))
@@ -377,23 +571,17 @@ impl GuiApp {
         self.ibus_active
             && self.ibus_diagnostics_fresh() == Some(true)
             && self.ibus_check_state("selected") == IbusCheckState::Pass
+            && self.ibus_check_state("engine") == IbusCheckState::Pass
             && (wayexpand_backend_selection::Compositor::detect()
                 != wayexpand_backend_selection::Compositor::Gnome
                 || self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass)
     }
 
-    /// The service unit to restart for the running route, when known.
-    pub(crate) fn active_service_unit(&self) -> Option<&'static str> {
-        match runtime::status_field(&self.daemon_status, "source").as_deref() {
-            Some("evdev") => Some("wayexpand-evdev.service"),
-            Some("input-method" | "input-method-v2") => Some("wayexpand-input-method.service"),
-            Some("stdin") => Some("wayexpand-control.service"),
-            _ => None,
-        }
-    }
-
     pub(crate) fn situation(&self) -> Situation {
         let daemon_running = self.daemon_reachable == Some(true);
+        let daemon_status_trusted = daemon_running
+            && runtime::daemon_build_state(&self.daemon_status)
+                == runtime::DaemonBuildState::Current;
         let control_only =
             runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin");
         let active_daemon_source = daemon_running
@@ -404,7 +592,8 @@ impl GuiApp {
             || self.ibus_route.as_ref().is_some_and(|report| {
                 report.desktop == wayexpand_backend_ibus::chain::IbusDesktop::Gnome
             });
-        let gnome_ibus = super::first_run::uses_gnome_ibus_route(
+        let terminal_only_daemon = daemon_running && terminal_route_is_scoped(&self.daemon_status);
+        let gnome_ibus = super::first_run::uses_gnome_ibus_route_with_scope(
             gnome_session,
             self.ibus_check_state("gnome-source-active") == IbusCheckState::Pass,
             self.ibus_check_state("gnome-source-registered") == IbusCheckState::Pass,
@@ -412,11 +601,16 @@ impl GuiApp {
                 .is_some_and(|route| route.setup_backend() == "ibus"),
             self.daemon_reachable,
             active_daemon_source.as_deref(),
+            terminal_only_daemon,
         );
         let no_active_typing_daemon = self.daemon_reachable == Some(false)
             || daemon_running && (active_daemon_source.as_deref() == Some("stdin") || control_only);
         let kde_ibus_expected = compositor == wayexpand_backend_selection::Compositor::KdePlasma
-            && no_active_typing_daemon
+            // A terminal-restricted daemon does not cover browser/editor
+            // fields. Keep the KDE IBus route in the readiness model beside
+            // it instead of letting the running terminal daemon mask an
+            // IBus registration or selection failure.
+            && (no_active_typing_daemon || terminal_only_daemon)
             && (self.ibus_active
                 || self.ibus_route.as_ref().is_some_and(|report| {
                     report.desktop == wayexpand_backend_ibus::chain::IbusDesktop::KdeWayland
@@ -447,10 +641,11 @@ impl GuiApp {
                 .as_deref()
                 .and_then(wayexpand_core::MatchingBlock::from_reason);
         // The chain-level `surrounding-text` check summarizes several recent
-        // IBus fields. It cannot tell us that the application the user just
-        // typed in lacks surrounding text. Use only the newest field that
-        // actually received keys, and only while its engine diagnostics still
-        // belong to the live process. Otherwise keep the conclusion unknown.
+        // IBus fields. It cannot tell us that the currently focused application
+        // lacks surrounding text. Use only the focused field that received
+        // keys, and only while its engine diagnostics still belong to the live
+        // process. A formerly focused field is historical evidence, not the
+        // current field's diagnosis.
         let latest_ibus_field_verdict = (self.ibus_diagnostics_fresh() == Some(true))
             .then_some(self.ibus_route.as_ref())
             .flatten()
@@ -462,14 +657,33 @@ impl GuiApp {
                     .recent_fields
                     .iter()
                     .rev()
-                    .find(|field| field.keys > 0)
+                    .find(|field| field.focused && field.keys > 0)
             })
             .map(wayexpand_backend_ibus::IbusFieldVerdict::of);
-        let field_cannot_replace = latest_ibus_field_verdict
-            == Some(wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText);
-        let field_sensitive =
-            latest_ibus_field_verdict == Some(wayexpand_backend_ibus::IbusFieldVerdict::Sensitive);
+        let ibus_latest_match = (ibus_route && self.ibus_diagnostics_fresh() == Some(true))
+            .then_some(self.ibus_route.as_ref())
+            .flatten()
+            .and_then(|report| report.activity.as_ref())
+            .filter(|activity| activity.live)
+            .and_then(|activity| {
+                activity
+                    .status
+                    .recent_fields
+                    .iter()
+                    .rev()
+                    .find(|field| field.focused && field.keys > 0)
+            })
+            .map(|field| field.latest_match);
+        // The control daemon may retain a recent terminal expansion while
+        // IBus is the route being diagnosed for a browser/editor field. That
+        // transaction cannot explain the IBus field, so don't let it outrank
+        // current field evidence in `next_step`.
+        let daemon_outcome_applies = !(ibus_route && (control_only || terminal_only_daemon));
+        let recent_outcome = daemon_outcome_applies
+            .then(|| self.recent_output_outcome())
+            .flatten();
         Situation {
+            installation_ready: self.installation_audit.ready,
             daemon_reachable: self.daemon_reachable,
             ibus_active,
             ibus_selection: if self.ibus_diagnostics_fresh() == Some(true) {
@@ -486,35 +700,57 @@ impl GuiApp {
             } else {
                 IbusCheckState::Unknown
             },
+            ibus_manifest_scope: if self.ibus_diagnostics_fresh() == Some(true) {
+                self.ibus_check_state("manifest-scope")
+            } else {
+                IbusCheckState::Unknown
+            },
+            ibus_desktop_state: if self.ibus_diagnostics_fresh() == Some(true) {
+                self.ibus_check_state("desktop")
+            } else {
+                IbusCheckState::Unknown
+            },
+            ibus_desktop_problem_id: if self.ibus_diagnostics_fresh() == Some(true) {
+                self.ibus_route
+                    .as_ref()
+                    .and_then(|report| report.check("desktop"))
+                    .and_then(|check| check.problem_id)
+            } else {
+                None
+            },
             source_active: self.ibus_check_state("gnome-source-active"),
             engine_state: self.ibus_check_state("engine"),
             consent_state: self.ibus_check_state("consent"),
             diagnostics_fresh: self.ibus_diagnostics_fresh(),
             paused: self.paused || matching_block == Some(wayexpand_core::MatchingBlock::Paused),
             route_state: self.route_state,
+            // The helper returns Unverified for an incompatible or ambiguous
+            // status schema, even if its build strings happen to match.
             build: daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status)),
             replacement_allowed,
-            field_cannot_replace: ibus_route && field_cannot_replace,
-            field_sensitive: ibus_route && field_sensitive,
+            ibus_field_verdict: ibus_route.then_some(latest_ibus_field_verdict).flatten(),
             application_delivery_verified: self.expansion_observed(),
-            terminal_apps_only: {
-                let terminal_only =
-                    runtime::status_field(&self.daemon_status, "terminal_apps_only").as_deref()
-                        == Some("true");
-                let raw_fallback_enabled =
-                    runtime::status_field(&self.daemon_status, "raw_capture_fallback_enabled")
-                        .as_deref()
-                        == Some("true");
-                let raw_capture_app_count =
-                    runtime::status_field(&self.daemon_status, "raw_capture_app_count")
-                        .and_then(|value| value.parse::<usize>().ok());
-                terminal_only
-                    && !(raw_fallback_enabled
-                        && raw_capture_app_count.is_none_or(|count| count > 0))
-            },
+            terminal_apps_only: terminal_route_is_scoped(&self.daemon_status),
+            terminal_focus_unknown: runtime::status_field(
+                &self.daemon_status,
+                "matching_unavailable_reason",
+            )
+            .as_deref()
+                == Some("application_scope_unknown"),
+            terminal_compositor_identity: runtime::status_field(
+                &self.daemon_status,
+                "window_process_identity_state",
+            )
+            .as_deref()
+                == Some("compositor-process-id"),
             input_events_total: runtime::status_field(&self.daemon_status, "input_events_total")
                 .and_then(|value| value.parse::<u64>().ok()),
-            recent_outcome: self.recent_output_outcome(),
+            enabled_expansions: daemon_status_trusted
+                .then(|| runtime::status_field(&self.daemon_status, "config_enabled_expansions"))
+                .flatten()
+                .and_then(|value| value.parse::<usize>().ok()),
+            recent_outcome,
+            ibus_latest_match,
         }
     }
 
@@ -576,20 +812,23 @@ impl GuiApp {
     /// Run the concrete repair or verification associated with the finding.
     pub(crate) fn perform_next_step(&mut self, action: Action) {
         match action {
+            Action::CheckInstallation => self.check_upgrade_runtime(),
             Action::TurnOn | Action::RunSetup => self.start_guided_setup(),
             Action::ReviewConsent => self.review_replacement_consent(),
             Action::Resume => self.toggle_pause(),
-            Action::Restart => match self.active_service_unit() {
-                Some(unit) => {
-                    self.service_restart_unit = Some(unit.to_owned());
-                    self.service_restart_confirm_open = true;
-                }
-                None => self.start_guided_setup(),
-            },
+            Action::CheckUpgrade => self.check_upgrade_runtime(),
             Action::SelectInputSource => self.retry_gnome_source_activation(),
             Action::CheckAgain => self.refresh_diagnostics(true),
             Action::QuickPicker => self.open_copy_only_picker(),
-            Action::TestInApplication => self.start_onboarding_desktop_test(),
+            Action::OpenMatcherPreview => {
+                if self.onboarding_visible {
+                    self.open_onboarding_matcher_preview();
+                } else {
+                    self.diagnostics_open = false;
+                    self.try_live_open = true;
+                }
+            }
+            Action::TestInApplication => self.start_desktop_integration_test(),
             Action::InspectText => {
                 self.diagnostics_open = true;
                 self.refresh_diagnostics(true);
@@ -611,13 +850,15 @@ impl GuiApp {
             &self.daemon_status,
             self.route_plan.as_ref(),
         );
-        let ibus_route = configured_backend.is_none()
-            && (situation.gnome_ibus
-                || situation.ibus_active
-                    && (situation.daemon_reachable != Some(true) || situation.control_only)
-                || self
-                    .recommended_route
-                    .is_some_and(|route| route.setup_backend() == "ibus"));
+        let ibus_route = situation.gnome_ibus
+            || situation.ibus_route_expected
+            || configured_backend.is_none()
+                && (situation.gnome_ibus
+                    || situation.ibus_active
+                        && (situation.daemon_reachable != Some(true) || situation.control_only)
+                    || self
+                        .recommended_route
+                        .is_some_and(|route| route.setup_backend() == "ibus"));
         let policy_blocked =
             runtime::status_field(&self.daemon_status, "matching_unavailable_reason").as_deref()
                 == Some("organization_policy_route_incompatible");
@@ -662,6 +903,55 @@ impl GuiApp {
                         .clicked()
                     {
                         self.perform_next_step(action);
+                    }
+                    // Keep the diagnosed repair as the primary action, but
+                    // make the safe fallback available without sending the
+                    // user to a separate diagnostics screen. The picker uses
+                    // copy-only delivery here; it does not claim that the
+                    // target application received or applied the text.
+                    if action != Action::QuickPicker
+                        && (problem != Problem::NoEnabledExpansions
+                            || self.config.expansion.iter().any(|entry| entry.enabled))
+                        && ui
+                            .add_enabled(
+                                !busy,
+                                egui::Button::new(self.strings.action_label(Action::QuickPicker)),
+                            )
+                            .clicked()
+                    {
+                        self.perform_next_step(Action::QuickPicker);
+                    }
+                    // A matcher diagnosis can identify a rule problem, but
+                    // it cannot establish that this application's field
+                    // receives or applies output. Keep the real-app check
+                    // available beside matcher review so users can verify
+                    // the separate delivery stage without treating preview
+                    // as proof.
+                    if matches!(
+                        problem,
+                        Problem::TriggerNotMatched
+                            | Problem::TriggerMatchUnknown
+                            | Problem::FieldTextMismatch
+                    ) && ui
+                        .add_enabled(
+                            !busy,
+                            egui::Button::new(self.strings.action_label(Action::TestInApplication)),
+                        )
+                        .clicked()
+                    {
+                        self.perform_next_step(Action::TestInApplication);
+                    }
+                    if self.can_offer_recommended_ibus_setup(problem)
+                        && ui
+                            .add_enabled(
+                                !busy,
+                                egui::Button::new(
+                                    self.strings.onboarding_set_up_recommended_ibus(),
+                                ),
+                            )
+                            .clicked()
+                    {
+                        self.start_guided_setup();
                     }
                     if ui.link(self.strings.next_step_details()).clicked() {
                         self.diagnostics_open = true;
@@ -737,7 +1027,10 @@ mod tests {
                     control_only: true,
                     ibus_active: true,
                     ibus_engine_registered: IbusCheckState::Pass,
+                    ibus_manifest_scope: IbusCheckState::Pass,
                     ibus_selection: IbusCheckState::Pass,
+                    engine_state: IbusCheckState::Pass,
+                    diagnostics_fresh: Some(true),
                     replacement_allowed: true,
                     ..running(RouteState::Connected)
                 },
@@ -755,7 +1048,7 @@ mod tests {
                     build: Some(DaemonBuildState::RestartRequired),
                     ..running(RouteState::Connected)
                 },
-                Some((Problem::RestartNeeded, Action::Restart)),
+                Some((Problem::RestartNeeded, Action::CheckUpgrade)),
             ),
             (
                 Situation {
@@ -787,12 +1080,147 @@ mod tests {
     }
 
     #[test]
+    fn gnome_onboarding_state_transitions_keep_actions_aligned_with_evidence() {
+        // Model the states a user can observe while setup progresses or the
+        // desktop changes underneath the GUI. Each refreshed snapshot must
+        // produce both the same readiness classification and the matching
+        // single next action.
+        let mut state = Situation {
+            gnome_ibus: true,
+            ibus_route_expected: true,
+            daemon_reachable: Some(true),
+            control_only: true,
+            diagnostics_fresh: None,
+            ..Situation::default()
+        };
+        assert_eq!(
+            gnome_ibus_readiness(&state),
+            GnomeIbusReadiness::DiagnosticsPending
+        );
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::InputStatusPending, Action::CheckAgain))
+        );
+
+        // IBus registered the engine after the GUI's first refresh, but the
+        // input source is not yet registered with GNOME.
+        state.diagnostics_fresh = Some(true);
+        state.source_registered = IbusCheckState::Fail;
+        assert_eq!(
+            gnome_ibus_readiness(&state),
+            GnomeIbusReadiness::SourceNotSetUp
+        );
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::InputSourceNotSetUp, Action::RunSetup))
+        );
+
+        // The next diagnostics refresh observes registration and selection,
+        // but the engine process has not started yet.
+        state.source_registered = IbusCheckState::Pass;
+        state.ibus_engine_registered = IbusCheckState::Pass;
+        state.ibus_manifest_scope = IbusCheckState::Pass;
+        state.source_active = IbusCheckState::Pass;
+        state.engine_state = IbusCheckState::Fail;
+        assert_eq!(
+            gnome_ibus_readiness(&state),
+            GnomeIbusReadiness::EngineUnavailable
+        );
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::IbusEngineUnavailable, Action::RunSetup))
+        );
+
+        // Once IBus starts and consent is present, configuration is ready,
+        // while actual application delivery still needs its own test.
+        state.engine_state = IbusCheckState::Pass;
+        state.ibus_active = true;
+        state.consent_state = IbusCheckState::Pass;
+        assert_eq!(gnome_ibus_readiness(&state), GnomeIbusReadiness::Ready);
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::IbusInputNotObserved, Action::TestInApplication))
+        );
+
+        // A service/engine restart invalidates the previous process-correlated
+        // report; old registration and insertion evidence cannot mask it.
+        state.diagnostics_fresh = Some(false);
+        state.ibus_active = false;
+        assert_eq!(
+            gnome_ibus_readiness(&state),
+            GnomeIbusReadiness::DiagnosticsStale
+        );
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::InputStatusStale, Action::CheckAgain))
+        );
+
+        // A fresh report after permission revocation returns to the explicit
+        // consent gate, even if the previous application test had succeeded.
+        state.diagnostics_fresh = Some(true);
+        state.ibus_active = true;
+        state.consent_state = IbusCheckState::Fail;
+        state.application_delivery_verified = true;
+        assert_eq!(
+            gnome_ibus_readiness(&state),
+            GnomeIbusReadiness::ReplacementNotAllowed
+        );
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::ReplacementNotAllowed, Action::ReviewConsent))
+        );
+    }
+
+    #[test]
+    fn stale_terminal_scope_status_cannot_override_the_build_diagnosis() {
+        let stale = Situation {
+            daemon_reachable: Some(true),
+            terminal_apps_only: true,
+            terminal_focus_unknown: true,
+            build: Some(DaemonBuildState::RestartRequired),
+            ..Situation::default()
+        };
+        assert_eq!(
+            next_step(&stale),
+            Some((Problem::RestartNeeded, Action::CheckUpgrade))
+        );
+
+        let stale_control = Situation {
+            control_only: true,
+            ..stale
+        };
+        assert_eq!(
+            next_step(&stale_control),
+            Some((Problem::RestartNeeded, Action::CheckUpgrade))
+        );
+
+        let unknown = Situation {
+            build: Some(DaemonBuildState::Unverified),
+            ..stale
+        };
+        assert_eq!(
+            next_step(&unknown),
+            Some((Problem::BuildUnknown, Action::CheckUpgrade))
+        );
+
+        let current = Situation {
+            build: Some(DaemonBuildState::Current),
+            ..stale
+        };
+        assert_eq!(
+            next_step(&current),
+            Some((Problem::TerminalFocusUnknown, Action::QuickPicker))
+        );
+    }
+
+    #[test]
     fn gnome_walks_through_its_input_source_in_order() {
         let gnome = Situation {
             gnome_ibus: true,
             ibus_active: true,
             source_registered: IbusCheckState::Fail,
             ibus_engine_registered: IbusCheckState::Pass,
+            ibus_manifest_scope: IbusCheckState::Pass,
             source_active: IbusCheckState::Fail,
             engine_state: IbusCheckState::Pass,
             consent_state: IbusCheckState::Pass,
@@ -820,7 +1248,9 @@ mod tests {
         assert_eq!(next_step(&selected), None);
         assert_eq!(
             next_step(&Situation {
-                field_cannot_replace: true,
+                ibus_field_verdict: Some(
+                    wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText
+                ),
                 ..selected
             }),
             Some((Problem::FieldCannotReplace, Action::QuickPicker))
@@ -834,6 +1264,7 @@ mod tests {
             ibus_active: false,
             source_registered: IbusCheckState::Pass,
             ibus_engine_registered: IbusCheckState::Pass,
+            ibus_manifest_scope: IbusCheckState::Pass,
             source_active: IbusCheckState::Pass,
             engine_state: IbusCheckState::Fail,
             consent_state: IbusCheckState::Pass,
@@ -858,6 +1289,7 @@ mod tests {
             ibus_active: true,
             source_registered: IbusCheckState::Pass,
             ibus_engine_registered: IbusCheckState::Pass,
+            ibus_manifest_scope: IbusCheckState::Pass,
             source_active: IbusCheckState::Pass,
             engine_state: IbusCheckState::Pass,
             consent_state: IbusCheckState::Unknown,
@@ -882,6 +1314,7 @@ mod tests {
             ibus_active: true,
             source_registered: IbusCheckState::Pass,
             ibus_engine_registered: IbusCheckState::Pass,
+            ibus_manifest_scope: IbusCheckState::Pass,
             source_active: IbusCheckState::Warn,
             engine_state: IbusCheckState::Pass,
             consent_state: IbusCheckState::Pass,
@@ -906,6 +1339,7 @@ mod tests {
             ibus_active: true,
             source_registered: IbusCheckState::Pass,
             ibus_engine_registered: IbusCheckState::Pass,
+            ibus_manifest_scope: IbusCheckState::Pass,
             source_active: IbusCheckState::Pass,
             engine_state: IbusCheckState::Pass,
             consent_state: IbusCheckState::Pass,
@@ -929,6 +1363,7 @@ mod tests {
             gnome_ibus: true,
             source_registered: IbusCheckState::Pass,
             ibus_engine_registered: IbusCheckState::Pass,
+            ibus_manifest_scope: IbusCheckState::Pass,
             source_active: IbusCheckState::Pass,
             engine_state: IbusCheckState::Fail,
             consent_state: IbusCheckState::Pass,
@@ -962,10 +1397,13 @@ mod tests {
         let kde_ibus = Situation {
             ibus_active: true,
             ibus_engine_registered: IbusCheckState::Pass,
+            ibus_manifest_scope: IbusCheckState::Pass,
             ibus_selection: IbusCheckState::Pass,
+            engine_state: IbusCheckState::Pass,
             daemon_reachable: Some(false),
             replacement_allowed: true,
-            field_cannot_replace: true,
+            diagnostics_fresh: Some(true),
+            ibus_field_verdict: Some(wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText),
             application_delivery_verified: true,
             ..Situation::default()
         };
@@ -976,7 +1414,9 @@ mod tests {
         // The route itself failing outranks one app's field.
         assert_eq!(
             next_step(&Situation {
-                field_cannot_replace: true,
+                ibus_field_verdict: Some(
+                    wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText
+                ),
                 ..running(RouteState::Failed)
             }),
             Some((Problem::RouteFailed, Action::RunSetup))
@@ -988,9 +1428,12 @@ mod tests {
         let deselected = Situation {
             ibus_active: true,
             ibus_engine_registered: IbusCheckState::Pass,
+            ibus_manifest_scope: IbusCheckState::Pass,
             ibus_selection: IbusCheckState::Fail,
+            engine_state: IbusCheckState::Pass,
             daemon_reachable: Some(false),
             replacement_allowed: true,
+            diagnostics_fresh: Some(true),
             application_delivery_verified: true,
             ..Situation::default()
         };

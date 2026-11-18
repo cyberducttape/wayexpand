@@ -39,6 +39,29 @@ def validate_status():
     ):
         if not isinstance(STATUS.get(field), bool):
             raise SystemExit(f"release-status manifest must define {field} as a boolean")
+    matrix = STATUS.get("upgrade_test_matrix")
+    if not isinstance(matrix, list) or not matrix:
+        raise SystemExit("release-status manifest must define the package upgrade test matrix")
+    required = {
+        "previous-release-to-current",
+        "user-customization-preserved",
+        "uninstall-reinstall",
+        "running-daemon-activated",
+        "gnome-ibus-upgrade",
+        "interrupted-package-upgrade",
+    }
+    seen = set()
+    for scenario in matrix:
+        scenario_id = scenario.get("scenario")
+        if scenario_id not in required or scenario_id in seen:
+            raise SystemExit(f"invalid or duplicate package upgrade scenario: {scenario_id!r}")
+        seen.add(scenario_id)
+        if scenario.get("status") not in {"ci-pending", "passed", "not-tested"}:
+            raise SystemExit(f"invalid upgrade test status for {scenario_id}: {scenario.get('status')!r}")
+        if not scenario.get("scope") or not scenario.get("expected"):
+            raise SystemExit(f"upgrade scenario {scenario_id} needs scope and expected behavior")
+    if seen != required:
+        raise SystemExit(f"upgrade test matrix is missing scenarios: {sorted(required - seen)}")
 
 
 def render_readme():
@@ -107,7 +130,15 @@ def render_packaging():
         f"Package CI targets: {', '.join(STATUS['package_ci_targets'])}. "
         f"Physical desktop certification: {STATUS['physical_desktop_certification']}. "
         f"Previous-package upgrade CI passed: {STATUS['upgrade_from_previous_package_tested']}.",
+        "",
+        "| Upgrade scenario | Scope | Status | Expected behavior |",
+        "|---|---|---|---|",
     ])
+    for scenario in STATUS["upgrade_test_matrix"]:
+        lines.append(
+            f"| {scenario['scenario']} | {scenario['scope']} | {scenario['status']} | "
+            f"{scenario['expected']} |"
+        )
     return "\n".join(lines)
 
 

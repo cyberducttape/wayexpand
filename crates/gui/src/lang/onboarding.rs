@@ -4,13 +4,25 @@ use super::{Language, Strings};
 
 texts! {
     outcome_working =>
-        "Working in tested application",
-        "Funktioniert in der getesteten Anwendung",
-        "Berfungsi di aplikasi yang diuji";
+        "Verified in the controlled test field",
+        "Im kontrollierten Testfeld verifiziert",
+        "Terverifikasi di kolom uji terkontrol";
+    outcome_user_confirmed =>
+        "Confirmed by you in the tested application",
+        "Von Ihnen in der getesteten Anwendung bestätigt",
+        "Anda mengonfirmasi di aplikasi yang diuji";
+    outcome_configured_awaiting_test =>
+        "Configured, awaiting test",
+        "Konfiguriert, Test ausstehend",
+        "Dikonfigurasi, menunggu pengujian";
     outcome_safe_fallback =>
-        "Configured, insertion not verified",
-        "Konfiguriert, Einfügen nicht verifiziert",
-        "Dikonfigurasi, penyisipan belum diverifikasi";
+        "Automatic replacement unavailable · copy and paste",
+        "Automatische Ersetzung nicht verfügbar · kopieren und einfügen",
+        "Penggantian otomatis tidak tersedia · salin dan tempel";
+    compatibility_replacement_active =>
+        "Compatibility replacement is enabled (non-atomic). A test covers only the named app in this session; focus changes or typing during insertion can leave partial text. Quick Picker copy-and-paste remains available.",
+        "Die Kompatibilitäts-Ersetzung ist aktiviert (nicht atomar). Ein Test gilt nur für die genannte Anwendung in dieser Sitzung; Fokuswechsel oder Tippen während des Einfügens können unvollständigen Text hinterlassen. Kopieren und Einfügen über den Schnellwähler bleibt verfügbar.",
+        "Penggantian kompatibilitas aktif (non-atomik). Pengujian hanya berlaku untuk aplikasi yang disebutkan dalam sesi ini; perubahan fokus atau mengetik saat penyisipan dapat meninggalkan teks sebagian. Salin-tempel melalui Quick Picker tetap tersedia.";
     outcome_setup_incomplete =>
         "Setup incomplete",
         "Einrichtung unvollständig",
@@ -43,30 +55,50 @@ texts! {
         "Resume GNOME setup",
         "GNOME-Einrichtung fortsetzen",
         "Lanjutkan penyiapan GNOME";
+    gnome_resume_cancel_button =>
+        "Cancel continuation",
+        "Fortsetzung abbrechen",
+        "Batalkan kelanjutan";
+    gnome_resume_cancelled =>
+        "GNOME setup continuation cancelled. No snippets or integration settings were removed.",
+        "Die GNOME-Einrichtungsfortsetzung wurde abgebrochen. Snippets und Integrationseinstellungen wurden nicht entfernt.",
+        "Kelanjutan penyiapan GNOME dibatalkan. Cuplikan dan pengaturan integrasi tidak dihapus.";
+    gnome_resume_stale_title =>
+        "A GNOME setup continuation is not active in this session",
+        "Eine GNOME-Einrichtungsfortsetzung ist in dieser Sitzung nicht aktiv",
+        "Kelanjutan penyiapan GNOME tidak aktif dalam sesi ini";
+    gnome_resume_stale_body =>
+        "This saved continuation is expired or belongs to another desktop session, so WayExpand will not resume it automatically. Cancel it to remove the stale marker; this does not change your snippets or integration settings.",
+        "Diese gespeicherte Fortsetzung ist abgelaufen oder gehört zu einer anderen Desktop-Sitzung. WayExpand setzt sie daher nicht automatisch fort. Brechen Sie sie ab, um den veralteten Marker zu entfernen; Snippets und Integrationseinstellungen bleiben unverändert.",
+        "Kelanjutan tersimpan ini kedaluwarsa atau milik sesi desktop lain, jadi WayExpand tidak akan melanjutkannya otomatis. Batalkan untuk menghapus penanda lama; cuplikan dan pengaturan integrasi tidak berubah.";
     test_in_real_application =>
-        "Test in a real application",
-        "In einer echten Anwendung testen",
-        "Uji di aplikasi nyata";
+        "Test expansion",
+        "Textersetzung testen",
+        "Uji ekspansi teks";
     review_setup_and_consent =>
-        "Review setup and replacement consent",
-        "Einrichtung und Zustimmung zur Ersetzung prüfen",
-        "Tinjau penyiapan dan persetujuan penggantian";
+        "Allow text replacement…",
+        "Textersetzung erlauben…",
+        "Izinkan penggantian teks…";
+    onboarding_set_up_recommended_ibus =>
+        "Set up recommended desktop integration…",
+        "Empfohlene Desktop-Integration einrichten…",
+        "Siapkan integrasi desktop yang disarankan…";
     open_quick_picker_copy =>
         "Open Quick Picker (copy and paste)",
         "Schnellwähler öffnen (kopieren und einfügen)",
         "Buka Quick Picker (salin dan tempel)";
     gnome_register_help =>
-        "Continue guided setup to check dependencies, register the engine, and explain any required administrator authorization.",
-        "Setzen Sie die geführte Einrichtung fort, um Abhängigkeiten zu prüfen, die Engine zu registrieren und eine nötige Administrator-Freigabe zu erklären.",
-        "Lanjutkan penyiapan terpandu untuk memeriksa dependensi, mendaftarkan engine, dan menjelaskan otorisasi administrator yang diperlukan.";
+        "Continue guided setup to check what is missing and explain any administrator approval it needs.",
+        "Setzen Sie die geführte Einrichtung fort, um fehlende Voraussetzungen zu prüfen und nötige Administratorfreigaben zu erklären.",
+        "Lanjutkan penyiapan terpandu untuk memeriksa kebutuhan yang belum terpenuhi dan menjelaskan persetujuan administrator yang diperlukan.";
     gnome_select_help =>
         "Choose WayExpand from GNOME’s keyboard/input-source menu. Your existing keyboard layouts remain available.",
         "Wählen Sie WayExpand im Tastatur- bzw. Eingabequellen-Menü von GNOME. Ihre bisherigen Tastaturbelegungen bleiben verfügbar.",
         "Pilih WayExpand dari menu papan ketik/sumber input GNOME. Tata letak papan ketik Anda tetap tersedia.";
     authorize_or_use_picker =>
-        "Before testing, review and allow compatibility replacement for this desktop, or keep using Quick Picker to paste snippets yourself.",
-        "Prüfen und erlauben Sie vor dem Test die Kompatibilitäts-Ersetzung für diesen Desktop, oder fügen Sie Snippets weiter selbst mit dem Schnellwähler ein.",
-        "Sebelum menguji, tinjau dan izinkan penggantian kompatibilitas untuk desktop ini, atau tetap tempel cuplikan sendiri dengan Quick Picker.";
+        "WayExpand needs permission to remove a typed trigger and replace it with your snippet. If typing or focus changes during that operation, the text can be left incomplete. Allow replacement for this desktop, or keep using Quick Picker to copy and paste.",
+        "WayExpand benötigt die Erlaubnis, ein getipptes Kürzel zu entfernen und durch Ihr Snippet zu ersetzen. Wenn währenddessen getippt wird oder sich der Fokus ändert, kann unvollständiger Text zurückbleiben. Erlauben Sie die Ersetzung für diesen Desktop oder verwenden Sie weiterhin den Schnellwähler zum Kopieren und Einfügen.",
+        "WayExpand memerlukan izin untuk menghapus pemicu yang diketik lalu menggantinya dengan cuplikan Anda. Jika ada pengetikan atau perubahan fokus selama proses, teks bisa tertinggal sebagian. Izinkan penggantian untuk desktop ini, atau tetap gunakan Quick Picker untuk menyalin dan menempel.";
     the_tested_application =>
         "the tested application",
         "der getesteten Anwendung",
@@ -83,9 +115,9 @@ texts! {
         "WayExpand einrichten",
         "Siapkan WayExpand";
     setup_checks =>
-        "Setup checks",
-        "Einrichtungsprüfungen",
-        "Pemeriksaan penyiapan";
+        "Show technical checks",
+        "Technische Prüfungen anzeigen",
+        "Tampilkan pemeriksaan teknis";
     setup_check_tools =>
         "Required tools and desktop dependencies",
         "Benötigte Werkzeuge und Desktop-Abhängigkeiten",
@@ -94,14 +126,38 @@ texts! {
         "IBus engine component installed",
         "IBus-Engine-Komponente installiert",
         "Komponen engine IBus terpasang";
+    setup_check_manifest =>
+        "IBus manifest points to the WayExpand engine",
+        "Das IBus-Manifest verweist auf die WayExpand-Engine",
+        "Manifest IBus mengarah ke mesin WayExpand";
     setup_check_registered =>
         "IBus engine registered",
         "IBus-Engine registriert",
         "Engine IBus terdaftar";
+    setup_check_desktop =>
+        "Desktop routes input to IBus",
+        "Der Desktop leitet Eingaben an IBus weiter",
+        "Desktop mengarahkan input ke IBus";
+    setup_check_selected =>
+        "WayExpand is the selected IBus engine",
+        "WayExpand ist die ausgewählte IBus-Engine",
+        "WayExpand adalah mesin IBus yang dipilih";
+    setup_check_engine =>
+        "WayExpand engine is running",
+        "Die WayExpand-Engine läuft",
+        "Mesin WayExpand sedang berjalan";
+    setup_check_gnome_bridge =>
+        "GNOME Shell integration is available",
+        "Die GNOME-Shell-Integration ist verfügbar",
+        "Integrasi GNOME Shell tersedia";
     setup_check_manifest_scope =>
         "Shared IBus engine uses a protected system executable",
         "Die gemeinsame IBus-Engine nutzt eine geschützte Systemdatei",
         "Engine IBus bersama memakai executable sistem yang terlindungi";
+    setup_check_action =>
+        "Next:",
+        "Nächster Schritt:",
+        "Berikutnya:";
     setup_check_gnome_registered =>
         "GNOME input source registered",
         "GNOME-Eingabequelle registriert",
@@ -143,89 +199,105 @@ texts! {
         "Die installierten Dateien verwenden und bei Bedarf Ihre Konfiguration anlegen.",
         "Gunakan berkas yang terpasang dan buat konfigurasi Anda bila perlu.";
     setup_step_activate =>
-        "Activate and check the input engine",
-        "Eingabe-Engine aktivieren und prüfen",
-        "Aktifkan dan periksa engine input";
+        "Activate WayExpand and check keyboard input",
+        "WayExpand aktivieren und Tastatureingabe prüfen",
+        "Aktifkan WayExpand dan periksa input papan ketik";
     setup_step_activate_detail =>
         "Then test a real expansion in a text field.",
         "Danach eine echte Erweiterung in einem Textfeld testen.",
         "Lalu uji ekspansi nyata di kolom teks.";
     setup_gnome_input =>
-        "Register and select the IBus source",
-        "IBus-Quelle registrieren und auswählen",
-        "Daftarkan dan pilih sumber IBus";
+        "Add WayExpand to your GNOME keyboard list",
+        "WayExpand zur GNOME-Tastaturliste hinzufügen",
+        "Tambahkan WayExpand ke daftar papan ketik GNOME";
     setup_gnome_input_detail =>
-        "Keep your existing keyboard sources and layout in GNOME.",
-        "Ihre bisherigen Eingabequellen und Tastaturbelegung in GNOME bleiben erhalten.",
-        "Sumber papan ketik dan tata letak Anda di GNOME tetap dipertahankan.";
+        "Your existing keyboard sources and layout are preserved.",
+        "Ihre bisherigen Eingabequellen und Tastaturbelegung bleiben erhalten.",
+        "Sumber papan ketik dan tata letak Anda tetap dipertahankan.";
     setup_gnome_tracking =>
-        "Enable GNOME window tracking",
-        "GNOME-Fensterverfolgung aktivieren",
-        "Aktifkan pelacakan jendela GNOME";
+        "Connect WayExpand to GNOME",
+        "WayExpand mit GNOME verbinden",
+        "Hubungkan WayExpand ke GNOME";
     setup_gnome_tracking_detail =>
-        "Used for app-specific snippets; ordinary snippets do not depend on it. No administrator access is needed.",
-        "Wird für anwendungsspezifische Snippets genutzt; gewöhnliche Snippets brauchen sie nicht. Keine Administratorrechte nötig.",
-        "Dipakai untuk cuplikan khusus aplikasi; cuplikan biasa tidak bergantung padanya. Tidak perlu akses administrator.";
+        "Needed to activate and verify WayExpand in GNOME; it also enables app-specific snippets. No administrator access is needed.",
+        "Wird benötigt, um WayExpand in GNOME zu aktivieren und zu prüfen; außerdem ermöglicht es anwendungsspezifische Snippets. Keine Administratorrechte nötig.",
+        "Diperlukan untuk mengaktifkan dan memverifikasi WayExpand di GNOME; juga mendukung cuplikan khusus aplikasi. Tidak perlu akses administrator.";
     setup_kde_input =>
-        "Connect IBus to the KDE virtual keyboard",
-        "IBus mit der virtuellen Tastatur von KDE verbinden",
-        "Hubungkan IBus ke papan ketik virtual KDE";
+        "Connect WayExpand to the KDE keyboard",
+        "WayExpand mit der KDE-Tastatur verbinden",
+        "Hubungkan WayExpand ke papan ketik KDE";
     setup_kde_input_detail =>
         "WayExpand will preserve your configured keyboard layout.",
         "WayExpand behält Ihre eingestellte Tastaturbelegung bei.",
         "WayExpand akan mempertahankan tata letak papan ketik Anda.";
     setup_kde_tracking =>
-        "Use KWin window tracking",
-        "KWin-Fensterverfolgung verwenden",
-        "Gunakan pelacakan jendela KWin";
+        "Enable app-specific snippets",
+        "Anwendungsspezifische Snippets aktivieren",
+        "Aktifkan cuplikan khusus aplikasi";
     setup_tracking_detail =>
-        "Used for app-specific snippets; ordinary snippets do not depend on it.",
-        "Wird für anwendungsspezifische Snippets genutzt; gewöhnliche Snippets brauchen sie nicht.",
-        "Dipakai untuk cuplikan khusus aplikasi; cuplikan biasa tidak bergantung padanya.";
+        "Only needed for snippets restricted to specific apps; ordinary snippets do not depend on it.",
+        "Nur für Snippets nötig, die auf bestimmte Apps beschränkt sind; gewöhnliche Snippets brauchen es nicht.",
+        "Hanya diperlukan untuk cuplikan yang dibatasi ke aplikasi tertentu; cuplikan biasa tidak memerlukannya.";
     setup_other_input =>
-        "Activate the IBus input source",
-        "IBus-Eingabequelle aktivieren",
-        "Aktifkan sumber input IBus";
+        "Activate WayExpand for typing",
+        "WayExpand für die Texteingabe aktivieren",
+        "Aktifkan WayExpand untuk mengetik";
     setup_other_input_detail =>
         "Your existing keyboard configuration is left in place.",
         "Ihre bisherige Tastaturkonfiguration bleibt unverändert.",
         "Konfigurasi papan ketik Anda tetap dibiarkan.";
     setup_other_tracking =>
-        "Check application window tracking",
-        "Fensterverfolgung für Anwendungen prüfen",
-        "Periksa pelacakan jendela aplikasi";
+        "Check app-specific snippet support",
+        "Unterstützung für app-spezifische Snippets prüfen",
+        "Periksa dukungan cuplikan khusus aplikasi";
     setup_unknown_tracking_detail =>
-        "App-specific snippets need a supported window tracker; Diagnostics will show whether one is available.",
-        "Anwendungsspezifische Snippets brauchen eine unterstützte Fensterverfolgung; die Diagnose zeigt, ob eine verfügbar ist.",
-        "Cuplikan khusus aplikasi memerlukan pelacak jendela yang didukung; Diagnostik akan menunjukkan apakah tersedia.";
+        "App-specific snippets need desktop focus support; Diagnostics will show whether your desktop provides it.",
+        "App-spezifische Snippets benötigen Fokusunterstützung durch den Desktop; die Diagnose zeigt, ob sie verfügbar ist.",
+        "Cuplikan khusus aplikasi memerlukan dukungan fokus dari desktop; Diagnostik akan menunjukkan apakah tersedia.";
     setup_other_tracking_detail =>
-        "App-specific snippets need a supported window tracker; ordinary snippets do not depend on it.",
-        "Anwendungsspezifische Snippets brauchen eine unterstützte Fensterverfolgung; gewöhnliche Snippets brauchen sie nicht.",
-        "Cuplikan khusus aplikasi memerlukan pelacak jendela yang didukung; cuplikan biasa tidak bergantung padanya.";
+        "App-specific snippets need desktop focus support; ordinary snippets do not depend on it.",
+        "App-spezifische Snippets benötigen Fokusunterstützung durch den Desktop; gewöhnliche Snippets brauchen sie nicht.",
+        "Cuplikan khusus aplikasi memerlukan dukungan fokus dari desktop; cuplikan biasa tidak memerlukannya.";
     setup_admin_needed =>
-        "WayExpand needs one system-wide input-method registration. An administrator prompt may appear to install the shared registration and engine; this does not grant raw keyboard-device access. You can cancel if you prefer to install a distribution package instead.",
-        "WayExpand braucht eine systemweite Registrierung als Eingabemethode. Eventuell erscheint eine Administrator-Abfrage, um die gemeinsame Registrierung und die Engine zu installieren; das gewährt keinen direkten Zugriff auf Tastaturgeräte. Sie können abbrechen, wenn Sie lieber ein Paket Ihrer Distribution installieren.",
-        "WayExpand memerlukan satu pendaftaran metode input untuk seluruh sistem. Permintaan administrator mungkin muncul untuk memasang pendaftaran bersama dan engine; ini tidak memberi akses langsung ke perangkat papan ketik. Anda dapat membatalkan jika lebih suka memasang paket distribusi.";
+        "WayExpand needs a shared keyboard integration. An administrator prompt may appear to register it; this does not grant raw keyboard-device access. You can cancel and install a distribution package instead.",
+        "WayExpand benötigt eine gemeinsame Tastaturintegration. Möglicherweise erscheint eine Administratorabfrage zur Registrierung; dadurch erhält WayExpand keinen direkten Zugriff auf Tastaturgeräte. Sie können abbrechen und stattdessen ein Distributionspaket installieren.",
+        "WayExpand memerlukan integrasi papan ketik bersama. Permintaan administrator mungkin muncul untuk mendaftarkannya; ini tidak memberi akses ke perangkat papan ketik mentah. Anda dapat membatalkan dan memasang paket distribusi.";
     setup_admin_checkbox =>
-        "Allow WayExpand to request administrator authorization for IBus registration if needed.",
-        "WayExpand darf bei Bedarf eine Administrator-Freigabe für die IBus-Registrierung anfordern.",
-        "Izinkan WayExpand meminta otorisasi administrator untuk pendaftaran IBus bila perlu.";
+        "Allow WayExpand to ask for administrator approval to register the keyboard integration if needed.",
+        "WayExpand darf bei Bedarf eine Administratorfreigabe zur Registrierung der Tastaturintegration anfordern.",
+        "Izinkan WayExpand meminta persetujuan administrator untuk mendaftarkan integrasi papan ketik bila diperlukan.";
     setup_admin_not_needed =>
-        "The shared input-method registration is already valid. No administrator authorization is needed for this step.",
-        "Die gemeinsame Registrierung als Eingabemethode ist bereits gültig. Für diesen Schritt ist keine Administrator-Freigabe nötig.",
-        "Pendaftaran metode input bersama sudah valid. Langkah ini tidak memerlukan otorisasi administrator.";
+        "The keyboard integration is already registered. No administrator approval is needed for this step.",
+        "Die Tastaturintegration ist bereits registriert. Für diesen Schritt ist keine Administratorfreigabe nötig.",
+        "Integrasi papan ketik sudah terdaftar. Langkah ini tidak memerlukan persetujuan administrator.";
     setup_consent_checkbox =>
         "I understand the interleaving and partial-write risk and want to enable tracked-focus replacement.",
         "Ich verstehe das Risiko vermischter und unvollständiger Eingaben und möchte die fokusverfolgte Ersetzung aktivieren.",
         "Saya memahami risiko teks bercampur dan tertulis sebagian, dan ingin mengaktifkan penggantian dengan pelacakan fokus.";
-    setup_consent_already =>
-        "Tracked-focus text replacement is already enabled.",
-        "Die fokusverfolgte Textersetzung ist bereits aktiviert.",
-        "Penggantian teks dengan pelacakan fokus sudah aktif.";
     setup_continue =>
         "Continue setup",
         "Einrichtung fortsetzen",
         "Lanjutkan penyiapan";
+}
+
+impl Strings {
+    /// Describe the actual persisted consent mode. In particular, do not
+    /// label `untracked-focus` as `tracked-focus`: users need to know which
+    /// non-atomic replacement policy is already active before continuing.
+    pub(crate) fn setup_consent_already(&self, mode: wayexpand_core::CompatibilityMode) -> String {
+        let mode = self.compatibility_mode_option(mode);
+        match self.lang {
+            Language::English => {
+                format!("Non-atomic text replacement is already enabled. Focus mode: {mode}.")
+            }
+            Language::German => format!(
+                "Die nicht atomare Textersetzung ist bereits aktiviert. Fokusmodus: {mode}."
+            ),
+            Language::Indonesian => {
+                format!("Penggantian teks non-atomik sudah aktif. Mode fokus: {mode}.")
+            }
+        }
+    }
 }
 
 texts! {
@@ -253,10 +325,10 @@ texts! {
         "Needs desktop restart: GNOME must load the installed extension after you log out and back in. Setup is not yet verified; resume it after the new session starts.",
         "Neustart der Sitzung nötig: GNOME lädt die installierte Erweiterung erst, nachdem Sie sich ab- und wieder angemeldet haben. Die Einrichtung ist noch nicht verifiziert; setzen Sie sie in der neuen Sitzung fort.",
         "Perlu memulai ulang desktop: GNOME memuat ekstensi yang terpasang setelah Anda keluar lalu masuk lagi. Penyiapan belum terverifikasi; lanjutkan setelah sesi baru dimulai.";
-    setup_needs_permission =>
-        "Needs permission: replacement is disabled. Review and explicitly authorize the non-atomic replacement behavior before expecting trigger expansion.",
-        "Freigabe nötig: Die Ersetzung ist deaktiviert. Prüfen und erlauben Sie ausdrücklich die nicht atomare Ersetzung, bevor Kürzel erweitert werden können.",
-        "Perlu izin: penggantian dinonaktifkan. Tinjau dan izinkan secara eksplisit perilaku penggantian non-atomik sebelum pemicu dapat diperluas.";
+    setup_replacement_consent_needed =>
+        "Replacement consent needed: automatic replacement is off. Review and explicitly allow non-atomic replacement before expecting triggers to expand.",
+        "Zustimmung zur Ersetzung nötig: Die automatische Ersetzung ist deaktiviert. Prüfen und erlauben Sie ausdrücklich die nicht atomare Ersetzung, bevor Kürzel erweitert werden können.",
+        "Persetujuan penggantian diperlukan: penggantian otomatis nonaktif. Tinjau dan izinkan secara eksplisit penggantian non-atomik sebelum pemicu dapat diperluas.";
     setup_output_observed =>
         "Output activity observed. Check the target field and confirm the exact text before recording a result.",
         "Ausgabe beobachtet. Prüfen Sie das Zielfeld und bestätigen Sie den exakten Text, bevor Sie ein Ergebnis festhalten.",
@@ -290,9 +362,9 @@ texts! {
         "Prüfen Sie die Einrichtungsschritte und nötige Zustimmungen, um fortzufahren.",
         "Tinjau tahap penyiapan dan persetujuan yang diperlukan untuk melanjutkan.";
     setup_desktop_test_running =>
-        "Desktop test running: switch to your test text field now and type the trigger once within 30 seconds. Do not press Enter.",
-        "Desktop-Test läuft: Wechseln Sie jetzt in Ihr Testfeld und tippen Sie das Kürzel innerhalb von 30 Sekunden einmal. Drücken Sie nicht die Eingabetaste.",
-        "Uji desktop berjalan: pindah ke kolom teks uji sekarang dan ketik pemicu sekali dalam 30 detik. Jangan tekan Enter.";
+        "A test field will open. Type the trigger there once; do not press Enter. If automatic checking is unavailable, WayExpand will ask you to confirm what appeared.",
+        "Ein Testfeld wird geöffnet. Tippen Sie dort einmal das Kürzel und drücken Sie nicht die Eingabetaste. Wenn die automatische Prüfung nicht verfügbar ist, fragt WayExpand, was angezeigt wurde.",
+        "Kolom uji akan terbuka. Ketik pemicu sekali di sana; jangan tekan Enter. Jika pemeriksaan otomatis tidak tersedia, WayExpand akan meminta Anda mengonfirmasi hasilnya.";
     setup_desktop_test_finished =>
         "Desktop test finished.",
         "Desktop-Test beendet.",
@@ -403,6 +475,20 @@ impl Strings {
             ),
         }
     }
+
+    pub fn machine_verified_in_application(&self, application: &str) -> String {
+        match self.lang {
+            Language::English => format!(
+                "WayExpand observed the exact replacement in {application}. This verifies that controlled field and session only."
+            ),
+            Language::German => format!(
+                "WayExpand hat die exakte Ersetzung in {application} beobachtet. Dies verifiziert nur dieses kontrollierte Feld und diese Sitzung."
+            ),
+            Language::Indonesian => format!(
+                "WayExpand mengamati penggantian yang tepat di {application}. Ini hanya memverifikasi kolom terkontrol dan sesi tersebut."
+            ),
+        }
+    }
 }
 
 impl Strings {
@@ -428,9 +514,9 @@ impl Strings {
 // The three-step first-run guide: connect, create, test.
 texts! {
     step_connect_title =>
-        "Connect your desktop",
-        "Desktop verbinden",
-        "Hubungkan desktop Anda";
+        "Prepare your desktop",
+        "Desktop vorbereiten",
+        "Siapkan desktop Anda";
     step_create_title =>
         "Create a snippet",
         "Snippet anlegen",
@@ -444,17 +530,17 @@ texts! {
         "Dieser Desktop wird geprüft …",
         "Memeriksa desktop ini…";
     first_run_connected =>
-        "Connected: {detail}",
-        "Verbunden: {detail}",
-        "Terhubung: {detail}";
+        "Desktop setup: {detail}",
+        "Desktop-Einrichtung: {detail}",
+        "Penyiapan desktop: {detail}";
     first_run_check_again =>
         "Check again",
         "Erneut prüfen",
         "Periksa lagi";
     first_run_snippet_ready =>
-        "Ready: typing {trigger} becomes “{replacement}”.",
-        "Bereit: Aus {trigger} wird „{replacement}“.",
-        "Siap: mengetik {trigger} menjadi “{replacement}”.";
+        "Test snippet saved: {trigger} → “{replacement}”. Step 3 checks that it appears in a text field.",
+        "Testsnippet gespeichert: {trigger} → „{replacement}“. In Schritt 3 wird geprüft, ob der Text im Eingabefeld erscheint.",
+        "Cuplikan uji tersimpan: {trigger} → “{replacement}”. Langkah 3 memeriksa apakah teks muncul di kolom.";
     first_run_test_needs_connection =>
         "Finish step 1 first. Until then you can copy snippets with Quick Picker and paste them yourself.",
         "Schließen Sie zuerst Schritt 1 ab. Bis dahin können Sie Snippets mit dem Schnellwähler kopieren und selbst einfügen.",
@@ -464,9 +550,13 @@ texts! {
         "Legen Sie zuerst in Schritt 2 ein Snippet an.",
         "Buat cuplikan di langkah 2 dulu.";
     first_run_test_help =>
-        "Open a plain, non-sensitive text field in another app, such as a new text editor document. Press the button below, switch to that field and type the trigger once within 30 seconds. WayExpand then asks whether the text appeared correctly.",
-        "Öffnen Sie ein normales, unkritisches Textfeld in einer anderen App, etwa ein neues Texteditor-Dokument. Klicken Sie unten, wechseln Sie innerhalb von 30 Sekunden in dieses Feld und geben Sie den Auslöser einmal ein. WayExpand fragt danach, ob der Text richtig erschienen ist.",
-        "Buka kolom teks biasa yang tidak sensitif di aplikasi lain, misalnya dokumen baru di editor teks. Tekan tombol di bawah, pindah ke kolom itu, lalu ketik pemicu sekali dalam 30 detik. WayExpand lalu menanyakan apakah teks muncul dengan benar.";
+        "A harmless test field opens. Type the trigger once. WayExpand checks the text there when possible; otherwise it asks you to confirm the result. This verifies only the tested field and desktop session.",
+        "Ein harmloses Testfeld wird geöffnet. Tippen Sie dort einmal das Kürzel. WayExpand prüft den Text nach Möglichkeit automatisch und fragt sonst nach Ihrer Bestätigung. Geprüft werden nur dieses Feld und diese Sitzung.",
+        "Kolom uji yang aman akan terbuka. Ketik pemicu sekali. WayExpand memeriksa teks jika memungkinkan; jika tidak, WayExpand meminta konfirmasi Anda. Pemeriksaan hanya berlaku untuk kolom dan sesi ini.";
+    first_run_terminal_test_help =>
+        "This setup captures only configured terminal apps. Start the test, switch to one of those terminals, and type the trigger once. WayExpand will observe activity and ask you to confirm the exact result.",
+        "Diese Einrichtung erfasst nur konfigurierte Terminal-Apps. Starten Sie den Test, wechseln Sie zu einem dieser Terminals und geben Sie das Kürzel einmal ein. WayExpand beobachtet die Aktivität und bittet Sie, das genaue Ergebnis zu bestätigen.",
+        "Penyiapan ini hanya menangkap aplikasi terminal yang dikonfigurasi. Mulai tes, pindah ke salah satu terminal tersebut, lalu ketik pemicu sekali. WayExpand akan mengamati aktivitas dan meminta Anda mengonfirmasi hasil yang tepat.";
     first_run_try_inside =>
         "Try the trigger inside WayExpand first",
         "Auslöser zuerst in WayExpand ausprobieren",
@@ -496,9 +586,9 @@ texts! {
         "Snippets in jeder App öffnen (optional)",
         "Buka cuplikan dari aplikasi mana pun (opsional)";
     shortcut_help =>
-        "Give the Quick Picker a keyboard shortcut. Press it in any app to search your snippets and insert one, including in fields where typing a trigger cannot expand.",
-        "Geben Sie dem Schnellwähler ein Tastenkürzel. Damit durchsuchen Sie Ihre Snippets in jeder App und fügen eines ein, auch in Feldern, in denen ein getippter Auslöser nicht ersetzt werden kann.",
-        "Beri Quick Picker pintasan papan ketik. Tekan di aplikasi mana pun untuk mencari cuplikan dan menyisipkannya, termasuk di kolom yang tidak bisa mengganti pemicu yang diketik.";
+        "Give the Quick Picker a keyboard shortcut. It can insert directly only when the destination is verified and the route supports atomic insertion. Otherwise, when policy allows, it copies the snippet so you can paste it yourself.",
+        "Geben Sie dem Schnellwähler ein Tastenkürzel. Direktes Einfügen ist nur möglich, wenn das Ziel verifiziert ist und der Eingabeweg atomare Einfügung unterstützt. Andernfalls wird das Snippet – sofern die Richtlinie es erlaubt – kopiert, damit Sie es selbst einfügen.",
+        "Beri Quick Picker pintasan papan ketik. Penyisipan langsung hanya tersedia jika tujuan terverifikasi dan jalur mendukung penyisipan atomik. Jika tidak, dan kebijakan mengizinkan, cuplikan disalin agar Anda dapat menempelkannya sendiri.";
     shortcut_use_keys =>
         "Use {keys}",
         "{keys} verwenden",

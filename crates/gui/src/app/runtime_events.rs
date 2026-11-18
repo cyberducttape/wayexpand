@@ -56,6 +56,7 @@ impl GuiApp {
                     self.permission_health = snapshot.permission_health;
                     self.daemon_status = snapshot.daemon_status;
                     self.daemon_capabilities = snapshot.daemon_capabilities;
+                    self.installation_audit = snapshot.installation_audit;
                     self.daemon_reachable = snapshot.daemon_reachable;
                     self.route_state = snapshot.route_state;
                     (self.ibus_active, self.ibus_instance) = runtime::ibus_engine_state();

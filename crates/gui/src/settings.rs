@@ -24,6 +24,9 @@ pub(crate) struct GuiPrefs {
     pub(crate) dark_mode: Option<bool>,
     /// Whether the user completed or skipped the first-run guide.
     pub(crate) onboarding_completed: bool,
+    /// Config path where the guide already offered or generated its harmless
+    /// test snippet. Different config files each get their own onboarding.
+    pub(crate) onboarding_test_snippet_created_for: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -37,6 +40,8 @@ struct StoredGuiPrefs {
     dark_mode: Option<bool>,
     #[serde(default)]
     onboarding_completed: bool,
+    #[serde(default)]
+    onboarding_test_snippet_created_for: Option<String>,
 }
 
 fn gui_prefs_path() -> PathBuf {
@@ -67,6 +72,7 @@ pub(crate) fn load_gui_prefs() -> GuiPrefs {
         font_scale: FontScale::Normal,
         dark_mode: None,
         onboarding_completed: false,
+        onboarding_test_snippet_created_for: None,
     };
     let Ok(contents) = fs::read_to_string(gui_prefs_path()) else {
         return defaults;
@@ -86,6 +92,7 @@ pub(crate) fn load_gui_prefs() -> GuiPrefs {
         font_scale: stored.font_scale,
         dark_mode: stored.dark_mode,
         onboarding_completed: stored.onboarding_completed,
+        onboarding_test_snippet_created_for: stored.onboarding_test_snippet_created_for,
     }
 }
 
@@ -98,6 +105,7 @@ pub(crate) fn save_gui_prefs(
     font_scale: FontScale,
     dark_mode: bool,
     onboarding_completed: bool,
+    onboarding_test_snippet_created_for: Option<String>,
 ) -> Result<(), String> {
     let path = gui_prefs_path();
     let parent = path
@@ -111,6 +119,7 @@ pub(crate) fn save_gui_prefs(
         font_scale,
         dark_mode: Some(dark_mode),
         onboarding_completed,
+        onboarding_test_snippet_created_for,
     };
     let contents = toml_edit::ser::to_string_pretty(&stored)
         .map_err(|error| format!("could not serialize preferences: {error}"))?;

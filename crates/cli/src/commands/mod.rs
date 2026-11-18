@@ -28,3 +28,10 @@ pub(crate) mod workflow;
 
 /// The remaining command-line arguments after the subcommand name.
 pub(crate) type Args = std::iter::Skip<std::env::Args>;
+
+/// Render one argument as a safely copyable POSIX-shell word for diagnostics
+/// and suggested commands. This string is for display only; execution paths
+/// should continue to pass arguments as an argv array.
+pub(crate) fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}

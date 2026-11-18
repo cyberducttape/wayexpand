@@ -545,10 +545,10 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `policy.policy.disable_control_socket_mutations` (bool): Whether the daemon refuses all state-changing control-socket commands; enforced regardless of `safe_mode`
 - `backends` (array): Available backends
   - `kind` (string): One of "input-method-v2", "evdev", "libei", "wlroots-virtual-keyboard", "uinput", "clipboard", "window-tracker"
-  - `state` (string): One of "Implemented", "Available", "Unavailable", "NotImplemented", "RequiresPermission" (the `BackendState` enum in `crates/core/src/backend.rs`; "Available" is defined but no backend reports it today). These legacy values mix implementation status with environment status; consumers should use the separate fields when present.
+  - `state` (string): One of "Implemented", "Available", "Unavailable", "NotImplemented", "RequiresPermission", or "ActionRequired" (the `BackendState` enum in `crates/core/src/backend.rs`). `RequiresPermission` means an operating-system or portal grant is needed. `ActionRequired` means a setup/configuration step remains; it does not imply a permission grant. Consumers should use the separate fields when present.
   - `implementation` (string): One of "Implemented" or "NotImplemented".
-  - `availability` (string): One of "Detected", "Unavailable", or "Unknown".
-  - `permission` (string): One of "Granted", "Required", or "NotApplicable".
+  - `availability` (string): One of "Detected", "Unavailable", or "Unknown". An `ActionRequired` state leaves availability `Unknown` until setup is completed.
+  - `permission` (string): One of "Granted", "Required", or "NotApplicable". `ActionRequired` maps to `NotApplicable`.
   - `policy_allowed` (bool|null): Whether the shared organization policy
     permits this selectable backend; null for input sources, trackers, and
     unshipped entries that are not directly governed as output backends.
@@ -1021,11 +1021,15 @@ content-free `terminal_paste_last_failure` stage, such as trigger erasure,
 focus validation, EIS device loss/disconnection/event backlog/flush failure,
 input interruption, cancellation, or paste-key delivery.
 When output may have started, inspect the target before continuing; WayExpand
-does not automatically replay uncertain output. `ibus` holds the newest typed field's
-`verdict` (an IBus field label such as `no-surrounding-text`), `keys` and
-`expansions`, all `null` before any typing. The control-only service (stdin
-source) counts as no daemon route. Exit code 0 when either route is running,
-4 when neither is. **Stability:** 🧪 **Experimental**.
+does not automatically replay uncertain output. `ibus` describes only the
+currently focused field that has received keys: `verdict` (an IBus field label
+such as `no-surrounding-text`), `keys` and `expansions`. It also reports
+`keys_seen_this_session`. When keys were seen earlier but no currently focused
+field has supplied input, the diagnosis uses `no_current_typed_field` and asks
+the user to type harmless text in the affected field; it does not reuse stale
+field evidence or claim that IBus received no input. The control-only service
+(stdin source) counts as no daemon route. Exit code 0 when either route is
+running, 4 when neither is. **Stability:** 🧪 **Experimental**.
 
 ---
 
@@ -1164,15 +1168,13 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   surrounding text but deletes and inserts in two steps, so it also needs a
   mode other than `off`; `wayexpand setup --backend ibus` asks for it.
 - `Settings::keystroke_max_chars` (integer 1–5000, default 8, omitted from
-  saved TOML at the default) — the longest insert-only payload a keystroke-
-  typed route (the libei keysym fallback) accepts. Automatic trigger
-  paced synthetic-key trigger replacement has a separate hard eight-character
-  output ceiling that cannot be raised by this setting or compatibility
-  consent; longer output is refused before the trigger is erased. A configured
-  terminal clipboard-paste route may carry a longer payload as one paste
-  operation, but trigger deletion remains non-atomic and still requires the
-  same compatibility consent and focus checks. It is reported as
-  `inject_max_text_chars`. Older
+  saved TOML at the default) — the longest output payload a keystroke or
+  non-atomic replacement route may send. Automatic replacement still requires
+  compatibility consent and focus admission; raising the limit does not make
+  output atomic or reversible. Terminal clipboard paste can carry a longer
+  payload in one paste operation, but trigger deletion remains non-atomic and
+  requires the same consent and focus checks. The active route limit is
+  reported as `inject_max_text_chars`. Older
   readers that reject unknown fields will not load a config that sets it.
 - `Settings::terminal_apps` (array of scope filters, default empty, omitted
   from saved TOML when empty) — terminal apps may use `app_id_exact:` (the

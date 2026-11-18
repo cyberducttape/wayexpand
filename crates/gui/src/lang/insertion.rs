@@ -188,22 +188,22 @@ impl Strings {
 
     pub fn keystroke_limit(&self) -> &'static str {
         match self.lang {
-            Language::English => "Insert-only keysym output limit",
-            Language::German => "Ausgabelimit für reine Keysym-Einfügungen",
-            Language::Indonesian => "Batas keluaran keysym khusus penyisipan",
+            Language::English => "Synthetic output and replacement limit",
+            Language::German => "Limit für synthetische Ausgabe und Ersetzungen",
+            Language::Indonesian => "Batas keluaran sintetis dan penggantian",
         }
     }
 
     pub fn keystroke_limit_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Characters (1–5000). This setting controls insert-only keysym output. Automatic replacement on any non-atomic route is always limited to 8 output characters, even with compatibility consent, because delivered text cannot be rolled back. Longer replacements are refused before deleting the trigger; use Quick Picker copy/paste or generate a file."
+                "Characters (1–5000; default 8). For non-atomic replacement, this limit applies only after you enable compatibility consent. Higher values allow longer text but increase the time an insertion can be interrupted and leave partial text; libei keysym output is about 83 characters/second. Keep it short for everyday use; use Quick Picker or Generate File for long text."
             }
             Language::German => {
-                "Zeichen (1–5000). Diese Einstellung gilt für reine Keysym-Ausgabe. Automatische Ersetzungen auf nicht-atomaren Wegen sind unabhängig von der Zustimmung immer auf 8 Ausgabezeichen begrenzt, da bereits gesendeter Text nicht zurückgenommen werden kann. Längere Ersetzungen werden vor dem Löschen des Triggers abgelehnt; Quick Picker zum Kopieren und Einfügen oder Dateierstellung verwenden."
+                "Zeichen (1–5000; Standard 8). Bei nicht-atomaren Ersetzungen gilt dieses Limit erst nach ausdrücklicher Kompatibilitätsfreigabe. Höhere Werte erlauben längere Texte, erhöhen aber die Zeit, in der eine Ausgabe unterbrochen werden und unvollständigen Text hinterlassen kann; libei-Keysym-Ausgabe schafft etwa 83 Zeichen/Sekunde. Für den Alltag kurz halten; für lange Texte Quick Picker oder Dateierstellung verwenden."
             }
             Language::Indonesian => {
-                "Karakter (1–5000). Pengaturan ini mengatur keluaran keysym khusus penyisipan. Penggantian otomatis pada rute non-atomik selalu dibatasi 8 karakter keluaran, meskipun kompatibilitas diizinkan, karena teks yang sudah terkirim tidak dapat dibatalkan. Penggantian lebih panjang ditolak sebelum pemicu dihapus; gunakan Quick Picker untuk salin-tempel atau buat berkas."
+                "Karakter (1–5000; bawaan 8). Untuk penggantian non-atomik, batas ini berlaku hanya setelah izin kompatibilitas diaktifkan. Nilai lebih tinggi mengizinkan teks lebih panjang tetapi memperbesar waktu penyisipan dapat terhenti dan meninggalkan teks parsial; keluaran keysym libei sekitar 83 karakter/detik. Gunakan nilai pendek sehari-hari; pakai Quick Picker atau Buat File untuk teks panjang."
             }
         }
     }

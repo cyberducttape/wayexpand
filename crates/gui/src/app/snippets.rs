@@ -98,7 +98,15 @@ impl GuiApp {
         self.status = Status::info(self.strings.new_snippet_draft());
     }
 
-    pub(crate) fn create_test_snippet(&mut self) {
+    pub(crate) fn create_test_snippet(&mut self) -> bool {
+        self.create_test_snippet_with_onboarding(true)
+    }
+
+    pub(crate) fn create_diagnostic_test_snippet(&mut self) -> bool {
+        self.create_test_snippet_with_onboarding(false)
+    }
+
+    fn create_test_snippet_with_onboarding(&mut self, show_onboarding: bool) -> bool {
         let base_trigger = ":wayexpand-test";
         let mut trigger = base_trigger.to_owned();
         let mut suffix = 2;
@@ -121,15 +129,15 @@ impl GuiApp {
             tags: vec!["tutorial".into()],
             category: self.strings.onboarding_sample_category().into(),
             app_filter: Vec::new(),
-            match_mode: MatchMode::WordBoundary,
+            match_mode: MatchMode::Immediate,
             command: None,
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
             output_file: None,
         });
-        self.onboarding_visible = true;
-        self.queue_save_config(candidate, SaveIntent::Created);
+        self.onboarding_visible = show_onboarding;
+        self.queue_save_config(candidate, SaveIntent::Created)
     }
 
     pub(crate) fn duplicate_selected(&mut self) {

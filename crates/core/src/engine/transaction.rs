@@ -298,16 +298,22 @@ impl ExpansionEngine {
         injector.admit(erases)?;
         let replacement_chars =
             result.insert.chars().count() + usize::from(result.reinsert_after.is_some());
+        let configured_limit = crate::keystroke_max_chars();
+        let output_limit = if capabilities.max_text_chars == 0 {
+            configured_limit
+        } else {
+            configured_limit.min(capabilities.max_text_chars)
+        };
         if erases
             && !capabilities.has_atomic_replacement_contract()
             && !capabilities.clipboard_assisted_replace
-            && replacement_chars > crate::MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS
+            && replacement_chars > output_limit
         {
             return Err(InjectorError {
                 backend: injector.name(),
                 message: format!(
-                    "automatic non-atomic keystroke replacement is limited to {} characters; use a configured clipboard-assisted route, Quick Picker clipboard/manual paste, or an atomic route for longer text",
-                    crate::MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS
+                    "automatic non-atomic replacement is limited to the configured {} characters; use Quick Picker clipboard/manual paste or an atomic route for longer text",
+                    output_limit
                 ),
                 retryable: false,
             });

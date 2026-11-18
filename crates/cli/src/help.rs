@@ -99,9 +99,9 @@ pub(crate) const COMMANDS: &[Command] = &[
         "setup [--check [--json]]",
         "setup --apply [--mode recommended|maximum|experimental] [--backend ibus|input-method|evdev] [--terminals | --evdev-apps] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]",
     ])
-    .details("Without options, setup shows the compatibility modes, its recommendation and the ranked input routes, then asks before applying the plan. --check reports what is ready and what is missing without changing anything. --apply configures the chosen route; --mode picks how much compatibility to trade for safety, and --backend picks the input route directly. --terminals or --evdev-apps limit raw keyboard capture to the apps listed in settings. Setup never grants raw keyboard access or portal consent without asking.")
+    .details("Without options, setup shows the compatibility modes, its recommendation and the ranked input routes, then asks before applying the plan. --check reports installed components, desktop integration, runtime readiness, and target insertion separately without changing anything; it never claims that text was verified in an application. --apply configures the chosen route; --mode picks how much compatibility to trade for safety, and --backend picks the input route directly. --terminals or --evdev-apps limit raw keyboard capture to the apps listed in settings. Setup never grants raw keyboard access or portal consent without asking.")
     .examples(&[
-        ("wayexpand setup --check", "See whether everything is ready"),
+        ("wayexpand setup --check", "Check setup prerequisites and integration"),
         ("wayexpand setup --apply", "Configure the recommended route"),
         ("wayexpand setup --apply --backend ibus --terminals", "IBus for apps, evdev only in terminals"),
     ]),
@@ -222,16 +222,16 @@ pub(crate) const COMMANDS: &[Command] = &[
     command("debug", Troubleshoot, "Explain live readiness, or guide a harmless insertion test", &[
         "debug [--json] [--trigger TEXT] [--live [--seconds 1..300]]",
         "debug --focused-app-id [--json]",
-        "debug --test TRIGGER [--application-class CLASS --focus-confirmed [--observe-only]]",
+        "debug --test [TRIGGER] [--application-class CLASS --focus-confirmed [--observe-only]]",
         "debug --gnome --interactive",
     ])
-    .details("--live watches the service for up to 300 seconds and reports counts only, never typed text. --focused-app-id prints the app ID snippet filters see for the focused window.")
+    .details("--live watches the service for up to 300 seconds and reports counts only, never typed text. --focused-app-id prints the app ID snippet filters see for the focused window. --test without a trigger uses only a known harmless tutorial snippet; otherwise preview a snippet and pass its trigger explicitly.")
     .examples(&[
         ("wayexpand debug --focused-app-id", "Which app ID does this window have?"),
         ("wayexpand debug --live --seconds 30", "Watch the service while you type"),
     ]),
     command("health", Troubleshoot, "Report readiness with a stable monitoring exit code", &["health [--json]"]).advanced(),
-    command("install-check", Troubleshoot, "Check that WayExpand's components are installed", &["install-check [--json]"]).advanced(),
+    command("install-check", Troubleshoot, "Check that WayExpand's components are installed", &["install-check [--json] [--config PATH]"]).advanced(),
     command("repair", Troubleshoot, "Show or apply installation repairs", &["repair --check|--apply [--json]", "repair --gnome-input-source [--json]"]),
     command("reset", Troubleshoot, "Preview and apply a scoped recovery reset", &["reset --integration|--services|--preferences [--check|--apply --yes] [--json]"]).advanced(),
     command("support-bundle", Troubleshoot, "Write a redacted report to attach to a bug report", &["support-bundle [--gnome] [--output FILE]"])

@@ -424,9 +424,10 @@ EOF
         "$(sink_field e2e-a cursor)"
 }
 
-scenario_paced_output_raised_limit_still_refuses() {
-    # Even an explicit larger keystroke_max_chars cannot override the hard
-    # eight-character limit for non-atomic automatic replacement.
+scenario_paced_output_raised_limit_applies() {
+    # An explicitly raised limit allows paced replacement after the normal
+    # compatibility and focus checks. This headless sink verifies final text;
+    # it does not certify physical-keyboard overlap behavior.
     saved_keystroke_max_chars=${e2e_keystroke_max_chars:-}
     e2e_keystroke_max_chars=250
     replacement=$(head -c 128 /dev/zero | tr '\000' A)
@@ -438,22 +439,16 @@ EOF
     e2e_keystroke_max_chars=$saved_keystroke_max_chars
     start_sink e2e-a && start_daemon || return 2
     expand_in e2e-a "" ";long" || return 2
-    wait_until 30 expansion_rejection_reported || {
-        printf 'raised keystroke_max_chars bypassed the non-atomic hard ceiling'
+    wait_until 100 sink_text_is e2e-a "$replacement" || {
+        printf 'configured paced replacement did not reach the sink; '
+        describe e2e-a
         return 1
     }
     status=$(daemon_status) || return 2
-    rejected=$(printf '%s\n' "$status" | sed -n 's/^expansions_rejected_total=//p')
     uncertain_total=$(printf '%s\n' "$status" | sed -n 's/^output_uncertain_total=//p')
     partial_total=$(printf '%s\n' "$status" | sed -n 's/^output_partial_total=//p')
-    if [ "${rejected:-0}" -lt 1 ] ||
-        [ "${uncertain_total:-0}" -ne 0 ] || [ "${partial_total:-0}" -ne 0 ]; then
-        printf 'raised-limit preflight refusal was not reported as certain and unapplied'
-        return 1
-    fi
-    if ! sink_text_is e2e-a ";long"; then
-        printf 'raised-limit preflight refusal changed the target before output; '
-        describe e2e-a
+    if [ "${uncertain_total:-0}" -ne 0 ] || [ "${partial_total:-0}" -ne 0 ]; then
+        printf 'completed sink insertion reported an uncertain or partial outcome'
         return 1
     fi
     describe e2e-a
@@ -482,7 +477,7 @@ EOF
 
     expand_in e2e-a "" ";long" || return 2
     wait_until 30 expansion_rejection_reported || {
-        printf 'replacement over the non-atomic hard ceiling was not rejected'
+        printf 'replacement over the configured non-atomic limit was not rejected'
         return 1
     }
     status=$(daemon_status) || return 2

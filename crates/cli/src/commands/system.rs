@@ -400,13 +400,18 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let test_trigger = setup_test_trigger(&test_config);
     let mut desktop_test_result = crate::commands::debug::DesktopTestResult::NotTested;
     if let Some(test_trigger) = test_trigger.as_deref() {
+        let quoted_trigger = crate::commands::shell_single_quote(test_trigger);
+        let preview_command = format!("wayexpand preview {quoted_trigger}");
+        let test_command = format!("wayexpand debug --test {quoted_trigger}");
         if assume_yes {
             println!("Activation completed. Real application insertion: NOT TESTED.");
-            println!("Next: run `wayexpand debug --test {test_trigger:?}` in a disposable text field and confirm the replacement.");
+            println!("Review the expected text first with `{preview_command}`.");
+            println!("Next: run `{test_command}` in a disposable text field and confirm the replacement.");
         } else if crate::prompt_yes_no(
             &format!("Activation checks completed; real insertion is not yet verified. Run the optional test with {test_trigger:?} now? [Y/n] "),
             true,
         )? {
+            println!("Review the expected text first with `{preview_command}`.");
             desktop_test_result = match crate::commands::debug::desktop_test(test_trigger) {
                 Ok(result) => result,
                 Err(error) => {
@@ -416,11 +421,12 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             };
         } else {
             println!("Activation completed. Real application insertion: NOT TESTED.");
-            println!("Next: run `wayexpand debug --test {test_trigger:?}` in a disposable text field and confirm the replacement.");
+            println!("Review the expected text first with `{preview_command}`.");
+            println!("Next: run `{test_command}` in a disposable text field and confirm the replacement.");
         }
     } else {
         println!("Activation completed. No enabled, safe-to-test expansion is configured; real application insertion remains NOT TESTED.");
-        println!("Setup is configured, but insertion is unverified. Add a harmless static expansion and run `wayexpand debug --test TRIGGER` in a disposable text field when ready.");
+        println!("Setup is configured, but insertion is unverified. In the GUI, open Test Expansion to create a dedicated harmless snippet and verify it. From the CLI, review a static snippet with `wayexpand preview TRIGGER`, then run `wayexpand debug --test TRIGGER` in a disposable field.");
     }
     if desktop_test_result == crate::commands::debug::DesktopTestResult::Failed {
         println!("SETUP RESULT: ACTION REQUIRED");
@@ -435,7 +441,13 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     } else {
         println!("SETUP RESULT: CONFIGURED, AWAITING TEST");
         if test_trigger.is_some() {
-            println!("Next: run `wayexpand debug --test {}` in a disposable text field and confirm the replacement.", test_trigger.as_deref().unwrap_or_default());
+            if let Some(test_trigger) = test_trigger.as_deref() {
+                let quoted_trigger = crate::commands::shell_single_quote(test_trigger);
+                println!(
+                    "Review the expected text first with `wayexpand preview {quoted_trigger}`."
+                );
+                println!("Next: run `wayexpand debug --test {quoted_trigger}` in a disposable text field and confirm the replacement.");
+            }
         }
     }
     if backend == "ibus" {
@@ -480,15 +492,30 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
 /// configurations need not keep it. Command-backed and templated entries are
 /// excluded so setup never executes actions or starts an incomplete form.
 pub(crate) fn setup_test_trigger(config: &Config) -> Option<String> {
+    const TUTORIAL_REPLACEMENT: &str = "WayExpand is working!";
     let is_testable = |expansion: &&wayexpand_core::ExpansionConfig| {
         expansion.is_keyboard_matchable()
+            && expansion.app_filter.is_empty()
             && expansion.command.is_none()
             && !expansion.replacement.contains("{{")
     };
     config
         .expansion
         .iter()
-        .find(|expansion| is_testable(expansion) && expansion.answers_to(";;hello"))
+        // Keep CLI setup and the GUI's first-run test on the same harmless
+        // tutorial snippet when it exists. Otherwise setup --check can show
+        // one trigger while the GUI asks the user to test another.
+        .find(|expansion| {
+            is_testable(expansion)
+                && expansion.replacement == TUTORIAL_REPLACEMENT
+                && expansion.tags.iter().any(|tag| tag == "tutorial")
+        })
+        .or_else(|| {
+            config
+                .expansion
+                .iter()
+                .find(|expansion| is_testable(expansion) && expansion.answers_to(";;hello"))
+        })
         .or_else(|| config.expansion.iter().find(is_testable))
         .map(|expansion| expansion.trigger.clone())
 }
@@ -980,6 +1007,17 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
             })
         })
         .collect();
+    // Keep package/file integrity beside process health in the same read-only
+    // upgrade report. This catches a package upgrade that changed the daemon
+    // but left a required desktop component missing.
+    let installation_checks = if action == "--check" {
+        crate::commands::install::checks()
+    } else {
+        Vec::new()
+    };
+    let installation_ready = installation_checks
+        .iter()
+        .all(|check| check.status != "fail");
     let report = serde_json::json!({
         "schema":1, "action":action, "cli_commit":cli_commit, "cli_version":cli_version,
         "current_install":current_target.as_ref().map(|v|v.to_string_lossy().into_owned()).or_else(|| installed_cli.as_ref().map(|p|p.display().to_string())),
@@ -993,7 +1031,8 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         "broker_restart_process":broker_restart_process.clone(),
         "runtime_action":runtime_action,
         "ibus_stale_engine_processes":stale_ibus_processes_json,
-        "ibus_engine_note":"IBus engine processes are owned by ibus-daemon; restarting a WayExpand systemd unit does not reload a stale engine."
+        "ibus_engine_note":"IBus engine processes are owned by ibus-daemon; restarting a WayExpand systemd unit does not reload a stale engine.",
+        "installation_check":{"schema":2,"level":"installed","ready":installation_ready,"checks":installation_checks}
     });
     if action == "--check" {
         if json {
@@ -1009,6 +1048,14 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                     "valid"
                 } else {
                     "invalid or missing"
+                }
+            );
+            println!(
+                "Installed components: {}",
+                if installation_ready {
+                    "self-check passed"
+                } else {
+                    "required component missing; run `wayexpand install-check`"
                 }
             );
             println!(
@@ -1111,6 +1158,13 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         } else {
             println!("No running daemon version mismatch; nothing to apply.");
         }
+        let failures = installation_check_failures();
+        if !failures.is_empty() {
+            bail!(
+                "post-upgrade installation self-check failed for {}. Run `wayexpand install-check --json` for details",
+                failures.join(", ")
+            )
+        }
         if !stale_ibus_processes.is_empty() {
             print_ibus_engine_restart_guidance(&stale_ibus_processes);
         }
@@ -1199,12 +1253,34 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
             bail!("action broker health check failed; no saved payload is available for automatic rollback")
         }
     }
+    let installation_failures = installation_check_failures();
+    if !installation_failures.is_empty() {
+        let restored = rollback_file.is_file()
+            && restore_previous_install(&library, &current, &rollback_file, Some(unit)).is_ok();
+        bail!(
+            "post-upgrade installation self-check failed for {}; automatic rollback {}. Run `wayexpand install-check --json` for details",
+            installation_failures.join(", "),
+            if restored {
+                "restored the previous payload"
+            } else {
+                "was unavailable or failed; inspect the installation before using it"
+            }
+        )
+    }
     println!("Restarted {unit}; daemon build {restarted_build} now matches this CLI.");
     let stale_ibus_processes = crate::setup_ibus::stale_engine_processes();
     if !stale_ibus_processes.is_empty() {
         print_ibus_engine_restart_guidance(&stale_ibus_processes);
     }
     Ok(())
+}
+
+fn installation_check_failures() -> Vec<&'static str> {
+    crate::commands::install::checks()
+        .into_iter()
+        .filter(|check| check.status == "fail")
+        .map(|check| check.component)
+        .collect()
 }
 
 fn upgrade_restart_process(unit: &str) -> serde_json::Value {

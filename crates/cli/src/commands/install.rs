@@ -1,6 +1,6 @@
 //! Installation readiness and narrowly scoped, non-consent repairs.
 use super::Args;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::{
     env, fs,
@@ -584,24 +584,34 @@ fn evdev_capture_scope_check(daemon: Option<&serde_json::Value>) -> Option<Readi
         .get("capture_app_scope_state")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("unknown");
-    let (status, detail, problem_id, remediation) = match state {
-        "allowed" => (
+    let process_identity = daemon
+        .get("window_process_identity_state")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let (status, detail, problem_id, remediation) = match (state, process_identity) {
+        ("allowed", _) => (
             "pass",
             "the focused application is within the configured evdev capture allowlist",
             serde_json::Value::Null,
             serde_json::Value::Null,
         ),
-        "denied" => (
+        ("denied", _) => (
             "unavailable",
             "the focused application is outside the configured evdev allowlist; terminal-only matching is intentionally blocked here",
             serde_json::json!("WX-EVDEV-SCOPE-001"),
-            serde_json::json!("If this is a terminal, confirm its stable desktop application ID is listed in settings.terminal_apps, then recheck with `wayexpand status`."),
+            serde_json::json!("wayexpand debug --focused-app-id --json"),
+        ),
+        ("unknown", "compositor-process-id") => (
+            "unavailable",
+            "KWin reported its own process ID instead of the focused client application ID; terminal-only matching is blocked before trigger matching or output",
+            serde_json::json!("WX-EVDEV-FOCUS-006"),
+            serde_json::json!("wayexpand debug --focused-app-id --json"),
         ),
         _ => (
             "unavailable",
             "the compositor has not supplied a focused application ID; terminal-only matching fails closed until focus identity is available",
             serde_json::json!("WX-EVDEV-FOCUS-001"),
-            serde_json::json!("Run `wayexpand debug --live --seconds 60`, type a harmless configured trigger in the terminal, then inspect the sanitized app_scope and input_activity events."),
+            serde_json::json!("wayexpand debug --focused-app-id --json"),
         ),
     };
     Some(readiness_check(
@@ -614,6 +624,7 @@ fn evdev_capture_scope_check(daemon: Option<&serde_json::Value>) -> Option<Readi
             "window_tracker_updates_total":daemon.get("window_tracker_updates_total"),
             "window_context_available":daemon.get("window_context_available"),
             "window_app_id_available":daemon.get("window_app_id_available"),
+            "window_process_identity_state":process_identity,
             "problem_id":problem_id,
             "remediation":remediation,
         }),
@@ -639,6 +650,10 @@ fn gnome_extension_install_check(path: Option<&Path>, package_install: bool) -> 
 }
 
 pub(crate) fn checks() -> Vec<Check> {
+    checks_for_config(&wayexpand_core::default_config_path())
+}
+
+fn checks_for_config(config_path: &Path) -> Vec<Check> {
     let mut out = Vec::new();
     out.push(Check {
         component: "xdg_config_home",
@@ -798,12 +813,11 @@ pub(crate) fn checks() -> Vec<Check> {
             },
         });
     }
-    let config = wayexpand_core::default_config_path();
-    let valid = config.is_file() && wayexpand_core::Config::load(&config).is_ok();
+    let valid = config_path.is_file() && wayexpand_core::Config::load(config_path).is_ok();
     out.push(Check {
         component: "active_configuration",
         status: if valid { "pass" } else { "fail" },
-        path: config.display().to_string(),
+        path: config_path.display().to_string(),
         detail: "user's active configuration exists and parses",
     });
     let contract: toml::Value =
@@ -826,8 +840,8 @@ pub(crate) fn checks() -> Vec<Check> {
     }
     out
 }
-fn print_report(title: &str, json: bool) -> Result<bool> {
-    let rows = checks();
+fn print_report_for_config(title: &str, json: bool, config_path: &Path) -> Result<bool> {
+    let rows = checks_for_config(config_path);
     let healthy = rows.iter().all(|r| r.status != "fail");
     let identity = installation_identity();
     if json {
@@ -868,14 +882,21 @@ fn print_report(title: &str, json: bool) -> Result<bool> {
 }
 pub(crate) fn install_check(args: Args) -> Result<()> {
     let mut json = false;
-    for arg in args {
-        if arg == "--json" {
-            json = true
-        } else {
-            bail!("usage: wayexpand install-check [--json]")
+    let mut config_path = None;
+    let mut args = args;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--config" if config_path.is_none() => {
+                config_path = Some(PathBuf::from(
+                    args.next().context("--config requires a path")?,
+                ));
+            }
+            _ => bail!("usage: wayexpand install-check [--json] [--config PATH]"),
         }
     }
-    if !print_report("WayExpand installation audit", json)? {
+    let config_path = config_path.unwrap_or_else(wayexpand_core::default_config_path);
+    if !print_report_for_config("WayExpand installation audit", json, &config_path)? {
         bail!("installation audit found missing required components")
     }
     Ok(())
@@ -888,6 +909,186 @@ fn setup_preflight_fields(ready_for_setup: bool) -> (bool, &'static str) {
         "prerequisites_incomplete"
     };
     (ready_for_setup, state)
+}
+
+fn activation_is_active(
+    setup_backend: &str,
+    configured_backend: Option<&str>,
+    ibus: &wayexpand_backend_ibus::chain::IbusChainReport,
+    daemon: Option<&serde_json::Value>,
+) -> bool {
+    if setup_backend == "ibus" {
+        let selected_and_running = ibus.check("selected").is_some_and(|check| {
+            check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+        }) && ibus.check("engine").is_some_and(|check| {
+            check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+        });
+        return selected_and_running
+            && (ibus.desktop != wayexpand_backend_ibus::chain::IbusDesktop::Gnome
+                || ibus.check("gnome-source-active").is_some_and(|check| {
+                    check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+                }));
+    }
+    if configured_backend != Some(setup_backend) {
+        return false;
+    }
+    daemon.is_some_and(|status| {
+        let source = status.get("source").and_then(serde_json::Value::as_str);
+        let expected_source = match setup_backend {
+            "evdev" => source == Some("evdev"),
+            "input-method" => matches!(source, Some("input-method" | "input-method-v2")),
+            _ => false,
+        };
+        expected_source
+            && matches!(
+                status.get("state").and_then(serde_json::Value::as_str),
+                Some("connected" | "running")
+            )
+    })
+}
+
+/// Whether replacement consent is required and whether it is currently
+/// present. Atomic verified routes need no compatibility consent; unknown
+/// status remains `None` for the grant rather than looking like a denial.
+fn replacement_consent_state(
+    setup_backend: &str,
+    ibus: &wayexpand_backend_ibus::chain::IbusChainReport,
+    daemon: Option<&serde_json::Value>,
+) -> (bool, Option<bool>) {
+    use wayexpand_backend_ibus::chain::IbusCheckState;
+    if setup_backend == "ibus" {
+        let granted = ibus.check("consent").and_then(|check| match check.state {
+            IbusCheckState::Pass => Some(true),
+            IbusCheckState::Fail => Some(false),
+            _ => None,
+        });
+        return (true, granted);
+    }
+    let atomic_verified = daemon.is_some_and(|status| {
+        status
+            .get("inject_atomic_replace")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+            && status
+                .get("replacement_assurance")
+                .and_then(serde_json::Value::as_str)
+                == Some("verified")
+    });
+    if atomic_verified {
+        return (false, Some(false));
+    }
+    let granted = daemon
+        .and_then(|status| status.get("compatibility_mode"))
+        .and_then(serde_json::Value::as_str)
+        .map(|mode| mode != "off");
+    (true, granted)
+}
+
+/// Choose the first repair that can unblock setup, rather than always
+/// printing `setup --apply` when the first failed check requires a different
+/// command. This is also serialized for automation clients.
+fn setup_next_action(
+    integration: &[ReadinessCheck],
+    operational: &[ReadinessCheck],
+    terminal_match: &serde_json::Value,
+    installation_ready: bool,
+    route_available: bool,
+    setup_backend: &str,
+    recommendation_backend: &str,
+) -> (String, String) {
+    if let Some(identity) = integration
+        .iter()
+        .find(|check| check.component == "installation_path_identity")
+        .map(|check| &check.evidence)
+    {
+        if identity["cli_method"] == "developer-build"
+            && identity["path_method"] != "developer-build"
+            && identity["path_shadow_detected"] == true
+        {
+            let installed_cli = identity["path_executable"]
+                .as_str()
+                .map(crate::commands::shell_single_quote);
+            let command = installed_cli
+                .as_deref()
+                .map(|path| format!("{path} setup --check --json"))
+                .unwrap_or_else(|| "wayexpand install-check --json".into());
+            return (
+                command,
+                "This command is running from a developer build, which differs from the installed CLI and running daemon. Use the exact installed executable shown here to check the active installation before applying setup.".into(),
+            );
+        }
+    }
+    if let Some(check) = operational
+        .iter()
+        .find(|check| check.component == "evdev_capture_scope" && check.status != "pass")
+    {
+        if let Some(remediation) = check.evidence["remediation"].as_str() {
+            let safety_note = if check.evidence["problem_id"] == "WX-EVDEV-FOCUS-006" {
+                "Do not allowlist `kwin_wayland` or a window title. For immediate use, run `wayexpand-gui --picker --copy-only`, copy the snippet, and paste it in the target app."
+            } else if check.evidence["problem_id"] == "WX-EVDEV-SCOPE-001" {
+                "Only add a verified terminal application ID to `settings.terminal_apps`; use Quick Picker to copy and paste meanwhile."
+            } else {
+                "Follow the reported problem ID and suggested action; do not allowlist a compositor or window title. Use Quick Picker to copy and paste meanwhile."
+            };
+            return (
+                remediation.to_owned(),
+                format!(
+                    "{}. {safety_note}",
+                    check.detail.trim().trim_end_matches('.')
+                ),
+            );
+        }
+    }
+    if terminal_match["status"] == "fail" {
+        if let Some(remediation) = terminal_match["remediation"].as_str() {
+            return (
+                remediation.to_owned(),
+                terminal_match["detail"]
+                    .as_str()
+                    .unwrap_or("The running daemon did not pass the terminal matching check.")
+                    .to_owned(),
+            );
+        }
+    }
+    // An existing route is preserved by `setup` unless the user explicitly
+    // chooses the recommendation. Do not tell them to repair IBus when the
+    // activation command below will still configure a different backend.
+    if setup_backend == recommendation_backend && recommendation_backend == "ibus" {
+        if let Some(check) = integration.iter().find(|check| {
+            check.component.starts_with("ibus_route:")
+                && check.status == "fail"
+                && check.evidence["remediation"].as_str().is_some()
+        }) {
+            return (
+                check.evidence["remediation"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                check.detail.clone(),
+            );
+        }
+    }
+    if !installation_ready {
+        return (
+            "wayexpand install-check --json".into(),
+            "Required installation artifacts are missing; inspect the failed components and install or repair the package before activation.".into(),
+        );
+    }
+    if !route_available {
+        return (
+            "wayexpand setup --apply".into(),
+            "No policy-allowed input route is ready; setup will report the missing route prerequisite.".into(),
+        );
+    }
+    let command = if setup_backend == "unavailable" {
+        "wayexpand setup --apply".to_owned()
+    } else {
+        format!("wayexpand setup --backend {setup_backend} --apply")
+    };
+    (
+        command,
+        format!("Activate the {setup_backend} route; real application insertion still requires a separate test."),
+    )
 }
 
 pub(crate) fn setup_check(json: bool) -> Result<()> {
@@ -903,10 +1104,11 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     });
     let ibus_report = wayexpand_backend_ibus::chain::diagnose();
     let ibus_readiness = ibus_report.readiness();
-    let first_run_test_available =
+    let first_run_test_trigger =
         wayexpand_core::Config::load(wayexpand_core::default_config_path())
             .ok()
-            .is_some_and(|config| crate::commands::system::setup_test_trigger(&config).is_some());
+            .and_then(|config| crate::commands::system::setup_test_trigger(&config));
+    let first_run_test_available = first_run_test_trigger.is_some();
     let daemon_status_response = crate::doctor::status::read_daemon_status().ok();
     let configured_backend = daemon_status_response.as_deref().and_then(|response| {
         crate::commands::system::existing_setup_backend_from_status(response, &policy)
@@ -924,14 +1126,66 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     let integration = integrated_checks(&ibus_report);
     let operational = operational_checks(&ibus_readiness, daemon_status.as_ref());
     let installed = rows.iter().all(|r| r.status != "fail");
-    let route_ready = configured_backend.is_some() || recommendation.backend != "unavailable";
+    // This means a policy-allowed route candidate exists. It does not mean
+    // that its integration is active or that the route can currently match.
+    let route_available = configured_backend.is_some() || recommendation.backend != "unavailable";
     let terminal_match_required = terminal_only_runtime;
     let terminal_match_ok = terminal_match
         .get("status")
         .and_then(|value| value.as_str())
         == Some("pass");
-    let ready = installed && route_ready && (!terminal_match_required || terminal_match_ok);
+    let ready = installed && route_available && (!terminal_match_required || terminal_match_ok);
     let (ready_for_setup, preflight_state) = setup_preflight_fields(ready);
+    let (next_action, next_action_reason) = setup_next_action(
+        &integration,
+        &operational,
+        &terminal_match,
+        installed,
+        route_available,
+        setup_backend,
+        recommendation.backend.as_str(),
+    );
+    let activation_command = if setup_backend == "unavailable" {
+        "wayexpand setup --apply".to_owned()
+    } else {
+        format!("wayexpand setup --backend {setup_backend} --apply")
+    };
+    let activation_active = activation_is_active(
+        setup_backend,
+        configured_backend,
+        &ibus_report,
+        daemon_status.as_ref(),
+    );
+    let activation_state = if activation_active {
+        "running"
+    } else if configured_backend == Some(setup_backend) {
+        "configured"
+    } else {
+        "not_configured"
+    };
+    let (consent_required, consent_granted) =
+        replacement_consent_state(setup_backend, &ibus_report, daemon_status.as_ref());
+    let consent_summary = match (consent_required, consent_granted) {
+        (false, _) => "not required by verified atomic replacement",
+        (true, Some(true)) => "granted",
+        (true, Some(false)) => "not granted",
+        (true, None) => "unknown",
+    };
+    let recommended_route_command = configured_backend
+        .filter(|backend| *backend != recommendation.backend.as_str())
+        .map(|_| "wayexpand setup --mode recommended --apply");
+    let manual_test_command = first_run_test_trigger.as_deref().map(|trigger| {
+        format!(
+            "wayexpand debug --test {}",
+            crate::commands::shell_single_quote(trigger)
+        )
+    });
+    let test_preview_command = first_run_test_trigger.as_deref().map(|trigger| {
+        format!(
+            "wayexpand preview {}",
+            crate::commands::shell_single_quote(trigger)
+        )
+    });
     if json {
         println!(
             "{}",
@@ -949,9 +1203,13 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                     "target_insertion":{"status":"not_tested","verified":false},
                     "terminal_matching_self_test":&terminal_match,
                 },
-            "installation_ready":installed, "route_ready":route_ready,
+                "installation_ready":installed,
+                "route_available":route_available,
+                // Compatibility alias; unlike readiness_levels, this only
+                // means a route candidate exists and setup can select it.
+                "route_ready":route_available,
                 "installation_checks":rows,
-                "desktop":{"session":crate::doctor::backends::session_description(),"recommended_input":recommendation.label,"recommended_backend":recommendation.backend,"configured_backend":configured_backend,"setup_backend":setup_backend,"setup_backend_reason":if configured_backend.is_some() {"preserve_configured_route"} else {"automatic_recommendation"},"reason":recommendation.detail},
+                "desktop":{"session":crate::doctor::backends::session_description(),"recommended_input":recommendation.label,"recommended_backend":recommendation.backend,"recommended_route_command":recommended_route_command,"configured_backend":configured_backend,"setup_backend":setup_backend,"setup_backend_reason":if configured_backend.is_some() {"preserve_configured_route"} else {"automatic_recommendation"},"reason":recommendation.detail},
                 "route_assessments":route_plan.routes.iter().map(|planned| serde_json::json!({
                     "id":planned.contract.id,
                     "standing":planned.standing.as_str(),
@@ -960,8 +1218,13 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                 })).collect::<Vec<_>>(),
             "ibus_runtime":ibus_readiness,
                 "terminal_matching_self_test":&terminal_match,
-                "activation":{"required":true,"command":"wayexpand setup --apply","real_insertion_verified":false,"consent_granted":false},
-                "first_run_test":{"command":"wayexpand setup --apply","manual_command":"wayexpand debug --test <trigger>","selection":"prefer a testable ;;hello sample, otherwise an enabled static snippet","available":first_run_test_available,"real_application_confirmation_required":true,"verified":false}
+                "next_action":{"command":next_action,"reason":next_action_reason},
+                "activation":{"state":activation_state,"detail":match activation_state {"running" => "input route process is running; this does not prove matching or application insertion", "configured" => "input route is configured but is not running", _ => "input route is not configured"},"required":!activation_active,"active":activation_active,"command":activation_command,"real_insertion_verified":false,"consent_required":consent_required,"consent_granted":consent_granted},
+                "expansion_evidence":{"pattern_match":"not_tested","application_delivery":"not_tested","matcher_preview_proves_application_delivery":false},
+                // This command is the test itself. Setup activation is
+                // reported separately above so automation cannot mistake
+                // configuring a route for proving application insertion.
+                "first_run_test":{"command":manual_test_command,"manual_command":manual_test_command,"preview_command":test_preview_command,"selection":"enabled global static snippet selected by first-run order; the command and preview identify the exact trigger","available":first_run_test_available,"real_application_confirmation_required":true,"verified":false}
             })
         );
     } else {
@@ -1047,13 +1310,22 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                     format!("recommended {setup_backend}")
                 },
             ),
+            ("Activation command:", activation_command.clone()),
+            (
+                "Input route:",
+                match activation_state {
+                    "running" => "process running; matching and application insertion are separate checks",
+                    "configured" => "configured; not running",
+                    _ => "not configured",
+                }
+                .to_owned(),
+            ),
+            ("Replacement consent:", consent_summary.to_owned()),
             (
                 "Switch route:",
-                if configured_backend.is_some() && configured_backend != Some(recommendation.backend.as_str()) {
-                    "wayexpand setup --mode recommended".to_owned()
-                } else {
-                    "not needed".to_owned()
-                },
+                recommended_route_command
+                    .unwrap_or("not needed")
+                    .to_owned(),
             ),
             (
                 "Preflight:",
@@ -1064,20 +1336,37 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                 }
                 .to_owned(),
             ),
-            ("Insertion:", "NOT TESTED".to_owned()),
+            ("Pattern match:", "NOT TESTED".to_owned()),
+            ("Application insertion:", "NOT TESTED".to_owned()),
+            (
+                "Test command:",
+                manual_test_command.clone().unwrap_or_else(|| {
+                    "not available; create a harmless global static snippet in the GUI".into()
+                }),
+            ),
+            (
+                "Preview command:",
+                test_preview_command.clone().unwrap_or_else(|| {
+                    "not available until a testable snippet exists".into()
+                }),
+            ),
             (
                 "First run:",
                 if first_run_test_available {
-                    "`wayexpand setup --apply` can offer a real-app test using an enabled static snippet (requires confirmation)"
+                    "review the preview, then run the test command in a disposable text field and confirm the visible replacement"
                 } else {
-                    "no enabled static snippet is configured; add a harmless one for an optional test"
+                    "no enabled global static snippet is configured; create one in the GUI for a real-app test"
                 }
                 .to_owned(),
             ),
         ] {
             print!("{}", labelled_row(label, &value));
         }
-        println!("\nNext: wayexpand setup --apply\n");
+        println!("\nNext: {next_action}");
+        println!(
+            "{}\n",
+            crate::help::wrap(&next_action_reason, 6, crate::help::WIDTH)
+        );
         print!(
             "{}",
             crate::help::wrap(
@@ -1114,11 +1403,15 @@ fn check_row(status: &str, component: &str, detail: &str) -> String {
 
 /// A `Label: value` summary line, the value wrapped under itself.
 fn labelled_row(label: &str, value: &str) -> String {
-    const COLUMN: usize = 13;
-    let wrapped = crate::help::wrap(value, COLUMN, crate::help::WIDTH);
+    const MIN_COLUMN: usize = 13;
+    // Longer labels are used by setup preflight. Keep at least one separating
+    // space after the label instead of slicing the wrapped value at a fixed
+    // byte offset that can land inside the label's display column.
+    let column = MIN_COLUMN.max(label.chars().count() + 1);
+    let wrapped = crate::help::wrap(value, column, crate::help::WIDTH);
     format!(
-        "{label:<COLUMN$}{}",
-        wrapped.get(COLUMN..).unwrap_or_default()
+        "{label:<column$}{}",
+        wrapped.get(column..).unwrap_or_default()
     )
 }
 
@@ -1180,7 +1473,9 @@ fn stale_daemon_terminal_match_report(
         "status": "fail",
         "problem_id": "WX-VERSION-001",
         "detail": "the running daemon is from a different or unverifiable build; its terminal matcher was not tested",
-        "remediation": "wayexpand upgrade --apply",
+        // Setup preflight is read-only. Let the user inspect the restart or
+        // rollback plan before any installation or service state changes.
+        "remediation": "wayexpand upgrade --check",
         "configuration_source": "not_tested_stale_daemon"
     });
     if let Some(status) = daemon_status {
@@ -1630,7 +1925,7 @@ mod tests {
         assert!(check.evidence["remediation"]
             .as_str()
             .unwrap()
-            .contains("wayexpand debug --live"));
+            .contains("wayexpand debug --focused-app-id --json"));
     }
 
     #[test]
@@ -1759,7 +2054,7 @@ mod tests {
         let report = stale_daemon_terminal_match_report(Some(&status));
         assert_eq!(report["status"], "fail");
         assert_eq!(report["problem_id"], "WX-VERSION-001");
-        assert_eq!(report["remediation"], "wayexpand upgrade --apply");
+        assert_eq!(report["remediation"], "wayexpand upgrade --check");
         assert_eq!(report["configuration_source"], "not_tested_stale_daemon");
         assert_eq!(report["configuration_path"], status["config_active_path"]);
         assert!(report["detail"]

@@ -4,6 +4,145 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- First-run now visibly labels active compatibility-mode replacement as non-atomic, limits a real-app test claim to that app and session, and points to Quick Picker copy/paste as the safer fallback.
+- IBus diagnostics now retain recent normal-field input evidence after the field loses focus or closes. This reports historical input delivery without identifying the application or claiming the current field is working.
+- The first-run Quick Picker shortcut instructions now distinguish direct insertion from copy-and-paste: direct insertion requires a verified destination and an atomic route; otherwise, copying is offered only when policy allows.
+- `wayexpand why` now retains content-free IBus evidence for the most recent
+  field that received input for up to five minutes. It remains useful after
+  switching to a terminal to request help, labels the evidence as historical
+  when focus changed, and never identifies the target application from it.
+- Setup diagnostics now recommend the read-only `wayexpand upgrade --check`
+  before any upgrade action when the daemon build is stale. Setup preflight
+  will not jump directly to `upgrade --apply`.
+- `wayexpand debug --focused-app-id` now verifies daemon build identity as well
+  as the status schema before presenting a focused app ID or scope telemetry.
+  Stale or unknown daemon identity is withheld and reported as `WX-VERSION-001`
+  with an upgrade-check action.
+- The first-run matcher-preview link now opens a visible preview for the same
+  eligible snippet selected by the desktop typing test. It asks the user to
+  save or discard an unsaved draft before changing snippet selection.
+- `wayexpand why` now checks that the running daemon build matches the CLI
+  before interpreting route telemetry. A stale or unverifiable daemon gets a
+  version diagnosis and upgrade-check action instead of a potentially stale
+  focus, match, or delivery conclusion.
+- The GUI now requires a unique compatible daemon status schema and matching
+  build identity before interpreting pause, focus, match, output status, or
+  the daemon's control-only classification. Stale-daemon advice is aligned
+  with `wayexpand why`, offers the version check before route-specific
+  repairs, suppresses stale transaction history in the diagnostics card, and
+  no longer labels a stale route as Ready in the header. A saved real-app
+  verification is no longer considered current when the daemon's route
+  identity cannot be trusted.
+- First-run now labels a snippet as a saved matcher rule and points to the
+  separate desktop insertion test, so a saved trigger/replacement is not
+  described as already working in other applications.
+- Matcher-preview evidence is cleared when the saved configuration or tested
+  application changes, preventing an old local match from appearing current.
+- `wayexpand why` and the GUI now report when the current daemon has zero
+  enabled expansions, instead of directing users to inspect individual
+  triggers; the finding is used only with a current, verified daemon status
+  and observed input. The GUI no longer offers an empty Quick Picker fallback
+  when the library has no enabled entries.
+- Setup readiness now labels the selected test consistently in the CLI and
+  GUI: the tutorial snippet, then `;;hello`, then another eligible global
+  static snippet. The report marks matching and application insertion as
+  separate untested stages until a real-app test is confirmed.
+- `wayexpand setup --check --json` now reports the desktop insertion-test
+  command in `first_run_test.command`; setup activation remains a separate
+  command and is never presented as proof of application delivery. The text
+  report prints the exact preview and test commands when a safe snippet is
+  available. Activation and compatibility-consent state now reflect the live
+  IBus or daemon route instead of static defaults.
+- The next-step banner now keeps the diagnosis-specific repair as its primary
+  action and offers a direct copy-only Quick Picker action alongside it. This
+  gives users a safe way to continue when automatic matching or delivery is
+  unavailable without presenting matcher success as application insertion.
+- The failed snippet-action button now says it returns to the snippet library,
+  matching its behavior. Its instructions ask the user to select the item they
+  just used; the GUI does not claim it can identify that item from content-free
+  outcome telemetry.
+- `WX-EVDEV-FOCUS-006` no longer asks users to repeat the same focus check when
+  KWin has already returned its compositor PID. CLI and GUI now state that no
+  allowlist setting can make that identity trustworthy, keep terminal matching
+  blocked, and provide copy-only Quick Picker as the immediate workaround.
+- `wayexpand why --json` now annotates each recent output transaction with
+  whether its trigger match was established and whether delivery was submitted,
+  refused, partial, or uncertain. The application result remains explicitly
+  unverified even when the backend recorded an applied output operation.
+- `wayexpand setup --check --json` now exposes `route_available` for the
+  existence of a selectable route candidate. The older `route_ready` field is
+  retained as a compatibility alias, with documentation clarifying that
+  integration and runtime checks establish actual readiness.
+- The GUI now states that a confirmed real-app insertion covers only the
+  application used for that test. When later field activity lacks a confirmed
+  trigger match, it directs users to inspect the snippet and test delivery in
+  the current application; matcher preview is not treated as insertion proof.
+- A real-app test in one application no longer suppresses troubleshooting in
+  another IBus field with no current input evidence. The GUI asks for a live
+  test in the affected application instead of treating route-level success as
+  universal application support.
+- When a field reports no trigger match or a surrounding-text mismatch, the
+  GUI now offers a real-application test alongside matcher review. GNOME's
+  unselected-source guidance names Keyboard settings, asks for a live test in
+  the affected app, and keeps copy-only Quick Picker available meanwhile.
+- `wayexpand why` now distinguishes the IBus input watch from a real insertion
+  test: selecting the source is followed by the GUI's test flow and visible
+  confirmation in the affected app. The watch is described as capture-only.
+- The README now distinguishes route-readiness diagnostics from a real-app
+  insertion test; a successful matcher preview is never described as proof
+  that desktop expansion works.
+- The GUI no longer labels an unprobed desktop portal candidate as requiring
+  permission. It points to the explicit injection test, which verifies EIS
+  support and asks before inserting its harmless marker.
+- GUI route verification now explicitly says it covers only the application
+  used for the real test; other applications remain unverified.
+- The GUI now checks GNOME setup-continuation markers with the same compositor
+  and Wayland-session evidence as the CLI, so `XDG_CURRENT_DESKTOP` metadata
+  cannot make the GUI hide a continuation that CLI setup would resume.
+- The GNOME continuation card can now cancel its resume marker from the GUI.
+  This clears only the pending continuation; it does not remove prepared
+  extension files, snippets, or integration settings.
+- When a private continuation marker is expired or belongs to another desktop
+  session, the first-run guide now explains that it will not resume and offers
+  to remove the stale marker without changing integration state.
+- When terminal-only evdev is blocked by unknown KWin client identity and IBus
+  is recommended, the GUI now offers an explicit IBus setup path beside the
+  copy-only fallback. It starts with a read-only preflight and still requires
+  review of administrator integration and non-atomic replacement consent.
+- Setup preflight now distinguishes a passing synthetic terminal matcher check
+  from live app-scope availability. When KWin reports its own process ID, it
+  surfaces `WX-EVDEV-FOCUS-006` and recommends a focused-app diagnostic plus
+  the copy-only picker instead of suggesting that terminal expansion is ready.
+- First-run now keeps transport connection separate from operational matching:
+  a daemon that explicitly reports matching unavailable is not marked ready,
+  and the guide does not offer a desktop insertion test that the route will
+  refuse.
+- `wayexpand why` now keeps a terminal-only evdev focus failure scoped to
+  terminals and also reports the separate IBus diagnosis for browser/editor
+  fields when that route is available, without claiming that either route
+  matched or delivered the user's text.
+- KDE's recent IBus helper-crash guidance now gives the executable-based
+  `coredumpctl info ibus-ui-gtk3` command directly, without a PID placeholder.
+- Running setup preflight from a workspace build now points to the exact
+  installed CLI executable when that is the version matching the active
+  installation, rather than recommending the same check command again.
+- The GUI no longer describes a previously verified route as unverified when
+  current field telemetry cannot establish whether the intended trigger
+  matched. It directs users to inspect the snippet, while an explicit recent
+  no-match remains a distinct diagnosis. CLI `why` now reports the same
+  no-match action in its field detail and overall diagnosis.
+- Setup preflight now recommends repairing an IBus prerequisite only when
+  its activation command will select IBus. If an existing route is preserved,
+  the primary action targets that route and route switching remains explicit.
+- The GUI now surfaces the daemon's `application_scope_unknown` refusal for
+  terminal-only input as a focus-tracking problem. Its diagnosis points to a
+  focused-app ID check and KWin tracking repair instead of blaming snippet
+  matching or replacement. `wayexpand why` uses the same live refusal as its
+  primary diagnosis and reports trigger matching as blocked, with text delivery
+  not attempted. The GUI's two stage indicators use that same scope result
+  instead of showing unrelated IBus field telemetry. When KWin returns its
+  own process identity, both surfaces name that condition and warn against
+  allowlisting `kwin_wayland` or using a window title as a substitute.
 - The headless GNOME GTK Unicode acceptance case now uses an eight-character
   replacement, within the route's non-atomic safety ceiling. KWin E2E cases
   now assert that oversized output is rejected before changing the target,
@@ -15,17 +154,142 @@ All notable changes to WayExpand are documented here.
   verified. This check is scoped to the current desktop session, build, and
   route instance, and the Quick Picker remains the action for fields that
   refuse safe replacement.
+- On GNOME, an unavailable live input-source bridge now points to guided
+  setup for the Shell integration instead of asking the user to refresh a
+  status that cannot become available until the integration is restored.
+- The first-run headline now says **Checking setup** while route diagnostics
+  are pending, stale, or reconnecting, rather than showing **Setup incomplete**
+  before a blocker has been established.
+- The GNOME and KDE IBus engine-unavailable diagnosis now explains that
+  guided setup will reconnect the selected engine, and tells users to complete
+  a requested GNOME logout/login before testing again.
+- Guided setup now resumes GNOME or KDE IBus repair from the observed IBus
+  route even when automatic route recommendation is unavailable, without
+  overriding a configured non-IBus typing backend.
 - `wayexpand why` now checks GNOME's live input-source selection and the KDE
-  IBus selection when no other typing route is active, and gives a specific
-  repair, live-input test, or copy-only fallback. Reports state explicitly
-  that matcher preview and output submission do not verify application text.
+  IBus selection when no other typing route is active, including when the
+  control-only daemon runs alongside IBus. Reports separate recent trigger
+  matches from output delivery and state explicitly that matcher previews and
+  submitted output do not verify application text. The GUI's explanation uses
+  fresh focused-field IBus match evidence when that is the active route, rather
+  than unrelated control-daemon counters.
   The GUI now refreshes while GNOME readiness is unknown, treats unknown IBus
   replacement consent as not authorized (matching first-run), and labels a
   matcher result as a snippet check rather than a desktop success.
+- When fresh IBus telemetry confirms that the latest input did not match an
+  enabled trigger, the GUI now directs users to inspect that snippet in
+  Matcher Preview. It does not infer which trigger they intended, and keeps
+  matcher success separate from a real-application delivery test. The
+  diagnosis button opens the preview directly.
+- The GUI now distinguishes a selected IBus route with no focused-field input
+  from a route that received input but has not verified delivery. Its live
+  test action opens the real-application test without reopening first-run
+  onboarding or clearing a prior setup confirmation.
+- If troubleshooting finds no eligible saved snippet for a real-application
+  test, the test dialog now offers to add a harmless static test snippet. This
+  works without a special sample already existing and does not reopen
+  onboarding.
+- The GUI preserves the focused IBus field's content-free verdict, so a
+  trigger/text mismatch, policy refusal, missing field-type report, and
+  submitted-but-unverified output each have a distinct diagnosis and next
+  step.
+- `wayexpand why` now reports an explicit IBus `no_match` stage when the
+  matcher evaluated input without finding a trigger, instead of conflating
+  that result with missing match telemetry. The GUI notes that the intended
+  trigger and field application identity are not recorded.
+- `wayexpand why` now gives the IBus no-match result the same diagnosis as the
+  GUI and directs users to inspect the exact trigger, enabled state, matching
+  mode, and application filters. It keeps that pattern check separate from a
+  real-application test of visible text delivery.
+- IBus readiness diagnostics no longer assume the sample `;;hello` snippet
+  exists. They direct users to run a real-application test with any enabled,
+  harmless static trigger from their own library.
+- `wayexpand debug --test` now selects only a known harmless tutorial snippet
+  automatically, never an arbitrary personal expansion. Otherwise it directs
+  users to create a dedicated test in the GUI or preview and explicitly choose
+  a trigger. IBus status remedies and setup's no-sample result now share those
+  instructions.
+- `wayexpand why` now checks the active IBus route alongside a terminal-only
+  capture daemon. Focused-field evidence can therefore diagnose browser and
+  editor input instead of being hidden by a daemon that only handles terminal
+  applications. Without a current IBus field, it asks for a short focused
+  field capture check instead of inferring the target from older session
+  counters. Its text output now keeps that IBus blocker as the single primary
+  diagnosis and reports the terminal-only daemon only as route-scope context.
+  It ends with the primary repair or verification action rather than appending
+  a second generic trigger-debugging instruction.
+- CLI and GUI IBus troubleshooting now evaluate an unsafe shared component
+  manifest at the same stage, unless fresh focused-field evidence identifies
+  a more immediate input or replacement problem. This keeps the primary
+  diagnosis and action consistent across both entry points.
+- KWin IBus route failures and recent helper crashes now direct users to the
+  dedicated real-application test instead of asking them to invent a harmless
+  trigger. The test remains separate from a matcher preview and reports when
+  capture or visible insertion is unverified.
+- `wayexpand setup --check` now reports the first evidence-backed repair
+  command, distinguishes it from the backend activation command, and supplies
+  an actual preview/test command for an eligible snippet instead of a trigger
+  placeholder. JSON also provides an explicit recommended-route switch command
+  when it differs from the configured route. Suggested trigger commands are
+  shell-quoted, and setup tells users to preview the exact replacement first.
+  A developer build that differs from the installed CLI points users back to
+  the installed preflight before recommending an upgrade.
+- KDE and GNOME setup guidance now treats an unsafe shared IBus manifest as
+  an explicit repair step, even if an already-running engine appears active.
+  The GUI and `wayexpand why` direct users to install the system-owned engine
+  registration or use the distribution package.
+- The GUI keeps KDE IBus readiness visible beside a terminal-only daemon, so
+  terminal capture cannot mask an unsafe shared registration or a missing
+  browser/editor input route. First-run now evaluates the IBus route for both
+  KDE and GNOME in this configuration before reporting the desktop connected.
+- First-run consent readiness now reads from the active IBus engine on KDE as
+  well as GNOME, including when a terminal-only daemon runs beside IBus. The
+  companion daemon's unrelated injection capabilities no longer make a
+  consented KDE IBus route appear unauthorized.
+- KDE IBus readiness now requires the engine's current live-status check as
+  well as a selected source and running process. Unknown or stale engine state
+  asks for a refresh; a confirmed unavailable engine leads to guided repair.
+- KDE's diagnosed IBus Wayland route failure or recent helper crash now feeds
+  the same primary next-step guidance as `wayexpand why`. A current focused
+  field result takes precedence over historical crash and shared-manifest
+  warnings, so input already observed is diagnosed at the matcher/output stage.
+  A confirmed KWin route failure now opens guided setup, which can configure
+  the IBus Wayland input method after review; manual settings remain the
+  fallback if setup lacks the required KDE tool or component. The CLI diagnosis
+  now recommends the same guided repair before its manual-settings fallback.
+- GUI troubleshooting no longer lets a recent output transaction from a
+  control-only or terminal-scoped daemon override the IBus diagnosis for a
+  browser/editor field.
+- GNOME GUI troubleshooting now prioritizes fresh field-specific evidence
+  over the separate shared-manifest hardening warning, matching `wayexpand
+  why`; first-run setup readiness still requires a verified shared manifest.
+- The guided IBus setup checklist now shows the evidence and recommended
+  action for failed or degraded checks, including why a shared manifest needs
+  system-owned registration. It also shows the IBus manifest target, desktop
+  routing, engine selection, and running-engine checks independently; GNOME
+  also shows the live Shell-bridge check separately from source registration.
 - KDE IBus readiness in the GUI now requires current diagnostics for the
   running engine and confirmation that WayExpand is the selected input
   method. A live but unselected engine points to guided setup; missing or
   stale selection evidence points to refresh instead of appearing ready.
+- First-run now distinguishes a configured route awaiting its real-app test
+  from a route where automatic replacement is unavailable and copy/paste is
+  the fallback.
+- Backend readiness now separates a required setup action from an actual
+  permission grant. Missing IBus registration, source selection, or replacement
+  consent no longer appears in Diagnostics as an operating-system permission
+  failure.
+- Setup completion now calls out IBus replacement consent directly instead
+  of suggesting an operating-system permission is missing.
+- An unknown GNOME active-source status now opens IBus diagnostics and leaves
+  setup in a checking state. It no longer launches guided setup based only on
+  an unavailable query.
+- Unreadable or unknown IBus replacement-consent evidence now remains a
+  checking state. Only an explicit consent refusal is described as needing
+  setup.
+- First-run now reuses a saved real-application confirmation when it still
+  matches the current desktop session, build, route, and route instance. A GUI
+  restart after verification no longer discards that setup progress.
 - Quick Picker now supports validated form templates with editable fields and
   an exact rendered preview before copying. Organization policy, app scope,
   clipboard/secret variables, and field validators are enforced on the copy
@@ -38,12 +302,11 @@ All notable changes to WayExpand are documented here.
   imports, and a **Developer / administrator** workspace for packs and
   diagnostics. The matcher test is open by default after onboarding, and the
   Quick Picker shortcut is available from the main actions menu.
-- Automatic non-atomic replacements now have a hard eight-character output
-  ceiling that cannot be raised by compatibility consent or
-  `keystroke_max_chars`. Longer replacements are refused before deletion and
-  remain available through Quick Picker clipboard/manual paste or an atomic
-  replacement route. Partial and uncertain output remains quarantined and is
-  never automatically replayed.
+- Automatic non-atomic replacements now default to an eight-character output
+  limit. An explicitly raised `keystroke_max_chars` applies only after the
+  existing compatibility and focus checks; longer output can still be
+  interrupted and is not covered by physical-desktop certification. Partial
+  and uncertain output remains quarantined and is never automatically replayed.
 - The first-run route summary reports capture and insertion readiness
   independently. Unsupported protocols, unchecked capability evidence,
   IBus replacement consent, raw-device access, and portal authorization now

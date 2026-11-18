@@ -4,6 +4,7 @@ use anyhow::{bail, Result};
 use std::{
     collections::{HashSet, VecDeque},
     io::{self, Write},
+    process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -13,6 +14,10 @@ use std::{
 struct FocusedAppScopeStatus {
     daemon_status_schema: Option<u64>,
     daemon_schema_compatible: Option<bool>,
+    daemon_commit: Option<String>,
+    daemon_version: Option<String>,
+    daemon_build_matches: Option<bool>,
+    daemon_status_trusted: Option<bool>,
     scope_state: Option<String>,
     terminal_apps_only: Option<bool>,
     window_tracker_connected: Option<bool>,
@@ -32,10 +37,27 @@ fn focused_app_scope_from_status(status_response: Option<&str>) -> FocusedAppSco
     let daemon_status_schema = status
         .field("status_schema")
         .and_then(|schema| schema.parse::<u64>().ok());
+    let daemon_commit = status.field("daemon_commit").map(str::to_owned);
+    let daemon_version = status.field("daemon_version").map(str::to_owned);
+    let daemon_schema_compatible =
+        daemon_status_schema.map(|schema| schema == u64::from(crate::CONTROL_STATUS_SCHEMA));
+    let daemon_build_matches = if daemon_commit.is_some() || daemon_version.is_some() {
+        Some(crate::doctor::status::daemon_build_matches(
+            daemon_commit.as_deref(),
+            daemon_version.as_deref(),
+        ))
+    } else {
+        None
+    };
     FocusedAppScopeStatus {
         daemon_status_schema,
-        daemon_schema_compatible: daemon_status_schema
-            .map(|schema| schema == u64::from(crate::CONTROL_STATUS_SCHEMA)),
+        daemon_schema_compatible,
+        daemon_commit,
+        daemon_version,
+        daemon_build_matches,
+        daemon_status_trusted: Some(
+            daemon_schema_compatible == Some(true) && daemon_build_matches == Some(true),
+        ),
         scope_state: status.field("capture_app_scope_state").map(str::to_owned),
         terminal_apps_only: status.bool_field("terminal_apps_only"),
         window_tracker_connected: status.bool_field("window_tracker_connected"),
@@ -98,7 +120,11 @@ fn focused_app_diagnostic(
     match matching_status {
         "daemon_status_incompatible" => Some((
             "WX-VERSION-001",
-            "The running daemon reports a different status protocol schema, so this focus diagnosis may be incomplete. Run `wayexpand upgrade-status` and `wayexpand upgrade --check`; restart or upgrade the daemon before using this result to change application allowlists.",
+            "The running daemon reports an incompatible status schema, so this focus diagnosis may be incomplete. Run `wayexpand upgrade --check` with the CLI from the active installation; follow its reported action, then repeat this focus check before changing application allowlists.",
+        )),
+        "daemon_build_unverified" | "daemon_status_unavailable" => Some((
+            "WX-VERSION-001",
+            "WayExpand cannot verify that focused-app identity came from the current daemon build. Do not change application allowlists from this result. Run `wayexpand upgrade --check` with the CLI from the active installation, follow its report, and retry this diagnostic.",
         )),
         "suppressed_unknown_focus"
             if focus.window_tracker_connected == Some(true)
@@ -108,7 +134,7 @@ fn focused_app_diagnostic(
             if focus.window_process_identity_state.as_deref() == Some("compositor-process-id") {
                 return Some((
                     "WX-EVDEV-FOCUS-006",
-                    "KWin reported its own process ID for the focused compositor surface, not an application process. Focus the actual terminal or browser window and rerun this diagnostic; do not allowlist `kwin_wayland` or use a window title as a substitute for client identity.",
+                    "KWin reported its own process ID for the focused compositor surface, not an application process. WayExpand cannot safely identify this target, so terminal-only matching stays blocked; there is no allowlist setting that fixes this evidence. Use `wayexpand-gui --picker --copy-only` and paste manually. Do not allowlist `kwin_wayland` or substitute a window title. Retest automatic matching only after KWin reports a verified client application identity.",
                 ));
             }
             if focus.window_tracker_identity_source.as_deref() == Some("process-name") {
@@ -179,6 +205,7 @@ struct DesktopTestOptions {
     application_class: Option<String>,
     focus_confirmed: bool,
     observe_only: bool,
+    controlled_client: bool,
 }
 
 pub(crate) fn debug_command(args: Args) -> Result<()> {
@@ -186,10 +213,12 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
     let mut json = false;
     let mut seconds = 60_u64;
     let mut trigger: Option<String> = None;
+    let mut desktop_test_requested = false;
     let mut test_trigger: Option<String> = None;
     let mut test_application_class: Option<String> = None;
     let mut test_focus_confirmed = false;
     let mut test_observe_only = false;
+    let mut test_controlled_client = false;
     let mut gnome_interactive = false;
     let mut gnome = false;
     let mut focused_app_id = false;
@@ -236,10 +265,10 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                 values.remove(index);
             }
             "--test" => {
-                if index + 1 >= values.len() {
-                    bail!("--test requires a configured trigger to test");
+                desktop_test_requested = true;
+                if index + 1 < values.len() && !values[index + 1].starts_with("--") {
+                    test_trigger = Some(values.remove(index + 1));
                 }
-                test_trigger = Some(values.remove(index + 1));
                 values.remove(index);
             }
             "--application-class" => {
@@ -257,21 +286,26 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                 test_observe_only = true;
                 values.remove(index);
             }
+            "--controlled-client" => {
+                test_controlled_client = true;
+                values.remove(index);
+            }
             _ => {
                 index += 1;
             }
         }
     }
     if !values.is_empty() {
-        bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --focused-app-id [--json] | --test TRIGGER [--application-class CLASS --focus-confirmed [--observe-only]]");
+        bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --focused-app-id [--json] | --test [TRIGGER] [--controlled-client] [--application-class CLASS --focus-confirmed [--observe-only]]");
     }
     if focused_app_id {
         if live
             || trigger.is_some()
-            || test_trigger.is_some()
+            || desktop_test_requested
             || test_application_class.is_some()
             || test_focus_confirmed
             || test_observe_only
+            || test_controlled_client
             || gnome
             || gnome_interactive
         {
@@ -285,27 +319,42 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             .lines()
             .find_map(|line| line.strip_prefix("focused_app_id="))
             .ok_or_else(|| anyhow::anyhow!("daemon returned an invalid focused app ID response"))?;
-        let focused_process_executable = process_executable_from_app_identity(app_id);
-        let focused_process_name = process_name_from_app_identity(app_id);
-        let focused_application_id = (app_id != "unavailable"
-            && focused_process_executable.is_none()
-            && focused_process_name.is_none())
-        .then_some(app_id);
         // Read the scope decision beside the identity. This turns the command
         // into a useful diagnosis for terminal-scoped evdev routes instead of
-        // making users compare the ID against configuration by hand. Older
-        // daemons may not publish these fields, so keep them optional.
+        // making users compare the ID against configuration by hand. The
+        // identity is content-free but still version-sensitive: a stale
+        // daemon must not provide an apparently authoritative app ID.
         let status_response =
             crate::control_operation(wayexpand_core::DaemonOperation::Status).ok();
         let focus = focused_app_scope_from_status(status_response.as_deref());
-        let matching_status = focused_app_matching_status(
-            (app_id != "unavailable").then_some(app_id),
-            focus.scope_state.as_deref(),
-            focus.terminal_apps_only,
-            focus.window_tracker_identity_source.as_deref(),
-            focus.daemon_schema_compatible,
-        );
+        let matching_status = if focus.daemon_schema_compatible == Some(false) {
+            "daemon_status_incompatible"
+        } else if focus.daemon_status_trusted == Some(false) {
+            "daemon_build_unverified"
+        } else if focus.daemon_status_trusted.is_none() {
+            "daemon_status_unavailable"
+        } else {
+            focused_app_matching_status(
+                (app_id != "unavailable").then_some(app_id),
+                focus.scope_state.as_deref(),
+                focus.terminal_apps_only,
+                focus.window_tracker_identity_source.as_deref(),
+                focus.daemon_schema_compatible,
+            )
+        };
         let diagnostic = focused_app_diagnostic(matching_status, &focus);
+        let identity_is_trusted = focus.daemon_status_trusted == Some(true);
+        let focused_process_executable = identity_is_trusted
+            .then(|| process_executable_from_app_identity(app_id))
+            .flatten();
+        let focused_process_name = identity_is_trusted
+            .then(|| process_name_from_app_identity(app_id))
+            .flatten();
+        let focused_application_id = (identity_is_trusted
+            && app_id != "unavailable"
+            && focused_process_executable.is_none()
+            && focused_process_name.is_none())
+        .then_some(app_id);
         if json {
             println!(
                 "{}",
@@ -315,27 +364,43 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                     "focused_process_name": focused_process_name,
                     "daemon_status_schema": focus.daemon_status_schema,
                     "daemon_schema_compatible": focus.daemon_schema_compatible,
-                    "capture_app_scope_state": focus.scope_state,
-                    "terminal_apps_only": focus.terminal_apps_only,
-                    "window_tracker_connected": focus.window_tracker_connected,
-                    "window_context_available": focus.window_context_available,
-                    "window_app_id_available": focus.window_app_id_available,
-                    "window_process_executable_available": focus.window_process_executable_available,
-                    "window_process_name_available": focus.window_process_name_available,
-                    "window_tracker_identity_source": focus.window_tracker_identity_source,
-                    "window_process_identity_state": focus.window_process_identity_state,
+                    "daemon_commit": focus.daemon_commit,
+                    "daemon_version": focus.daemon_version,
+                    "daemon_build_matches": focus.daemon_build_matches,
+                    "daemon_status_trusted": focus.daemon_status_trusted,
+                    "capture_app_scope_state": focus.scope_state.as_deref().filter(|_| identity_is_trusted),
+                    "terminal_apps_only": focus.terminal_apps_only.filter(|_| identity_is_trusted),
+                    "window_tracker_connected": focus.window_tracker_connected.filter(|_| identity_is_trusted),
+                    "window_context_available": focus.window_context_available.filter(|_| identity_is_trusted),
+                    "window_app_id_available": focus.window_app_id_available.filter(|_| identity_is_trusted),
+                    "window_process_executable_available": focus.window_process_executable_available.filter(|_| identity_is_trusted),
+                    "window_process_name_available": focus.window_process_name_available.filter(|_| identity_is_trusted),
+                    "window_tracker_identity_source": focus.window_tracker_identity_source.as_deref().filter(|_| identity_is_trusted),
+                    "window_process_identity_state": focus.window_process_identity_state.as_deref().filter(|_| identity_is_trusted),
                     "matching_status": matching_status,
                     "problem_id": diagnostic.map(|(id, _)| id),
                     "suggested_action": diagnostic.map(|(_, action)| action),
                 })
             );
-        } else if matching_status == "daemon_status_incompatible" {
-            println!("The running daemon uses an incompatible status schema.");
+        } else if matches!(
+            matching_status,
+            "daemon_status_incompatible" | "daemon_build_unverified" | "daemon_status_unavailable"
+        ) {
             println!(
-                "Reported schema: {}",
+                "Focused application identity could not be verified against the active daemon."
+            );
+            println!(
+                "Daemon schema: {} · build: {}",
                 focus
                     .daemon_status_schema
-                    .map_or_else(|| "unknown".into(), |schema| schema.to_string())
+                    .map_or_else(|| "unknown".into(), |schema| schema.to_string()),
+                if focus.daemon_build_matches == Some(true) {
+                    "current"
+                } else if focus.daemon_build_matches == Some(false) {
+                    "mismatch"
+                } else {
+                    "unverified"
+                }
             );
             if let Some((problem_id, suggested_action)) = diagnostic {
                 println!("Problem: {problem_id}");
@@ -410,25 +475,39 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             || live
             || json
             || trigger.is_some()
-            || test_trigger.is_some()
+            || desktop_test_requested
             || test_application_class.is_some()
             || test_focus_confirmed
             || test_observe_only
+            || test_controlled_client
         {
             bail!("usage: wayexpand debug --gnome --interactive");
         }
         return gnome_interactive_test();
     }
-    if test_trigger.is_some() && (live || json || trigger.is_some()) {
+    if desktop_test_requested && (live || json || trigger.is_some()) {
         bail!("--test cannot be combined with --json, --trigger, or --live");
     }
     validate_desktop_test_options(
-        test_trigger.is_some(),
+        desktop_test_requested,
         test_application_class.as_deref(),
         test_focus_confirmed,
         test_observe_only,
+        test_controlled_client,
     )?;
-    if let Some(trigger) = test_trigger {
+    if desktop_test_requested {
+        let trigger = match test_trigger {
+            Some(trigger) => trigger,
+            None => {
+                let config = wayexpand_core::Config::load(wayexpand_core::default_config_path())
+                    .map_err(|error| {
+                        anyhow::anyhow!("configuration check failed: {}", error.safe_summary())
+                    })?;
+                safe_default_desktop_test_trigger(&config).ok_or_else(|| {
+                    anyhow::anyhow!("no dedicated harmless test snippet is available; create one with the WayExpand GUI Test Expansion flow, or review a specific snippet with `wayexpand preview TRIGGER` and select it explicitly with `wayexpand debug --test TRIGGER`")
+                })?
+            }
+        };
         return desktop_test_for(
             &trigger,
             false,
@@ -436,6 +515,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                 application_class: test_application_class,
                 focus_confirmed: test_focus_confirmed,
                 observe_only: test_observe_only,
+                controlled_client: test_controlled_client,
             },
         )
         .map(|_| ());
@@ -452,14 +532,37 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
     Ok(())
 }
 
+/// The argument-free test may only choose a known harmless tutorial. Arbitrary
+/// user snippets can contain private or surprising text, so they require an
+/// explicit trigger choice even when they are otherwise static and global.
+fn safe_default_desktop_test_trigger(config: &wayexpand_core::Config) -> Option<String> {
+    config
+        .expansion
+        .iter()
+        .find(|expansion| {
+            expansion.is_keyboard_matchable()
+                && expansion.app_filter.is_empty()
+                && expansion.command.is_none()
+                && !expansion.replacement.contains("{{")
+                && (expansion.tags.iter().any(|tag| tag == "tutorial")
+                    && expansion.replacement == "WayExpand is working!"
+                    || expansion.answers_to(";;hello")
+                        && expansion.replacement == "Hello from Wayland!")
+        })
+        .map(|expansion| expansion.trigger.clone())
+}
+
 fn validate_desktop_test_options(
-    has_test_trigger: bool,
+    test_requested: bool,
     application_class: Option<&str>,
     focus_confirmed: bool,
     observe_only: bool,
+    controlled_client: bool,
 ) -> Result<()> {
-    if !has_test_trigger && (application_class.is_some() || focus_confirmed || observe_only) {
-        bail!("--application-class, --focus-confirmed, and --observe-only apply only to --test");
+    if !test_requested
+        && (application_class.is_some() || focus_confirmed || observe_only || controlled_client)
+    {
+        bail!("desktop-test options apply only to --test");
     }
     if focus_confirmed != application_class.is_some() {
         bail!("--focus-confirmed and --application-class must be provided together");
@@ -482,6 +585,101 @@ fn validate_desktop_test_options(
 /// accepts a static, enabled snippet without command execution or form fields.
 pub(crate) fn desktop_test(trigger: &str) -> Result<DesktopTestResult> {
     desktop_test_for(trigger, false, DesktopTestOptions::default())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControlledClientResult {
+    Verified,
+    InputNotObserved,
+    TriggerNotReplaced,
+    OutputWithoutInputMarker,
+    FieldMismatch,
+    Closed,
+    CannotCorrelate,
+    Unavailable,
+}
+
+/// Open a real GTK field and let it verify its own final text. Only the
+/// harmless test contract crosses the private stdin pipe; neither trigger
+/// nor replacement is printed, logged, or placed in process arguments.
+fn run_controlled_gtk_client(
+    trigger: &str,
+    input_marker: &str,
+    expected: &str,
+) -> ControlledClientResult {
+    const CLIENT: &str =
+        include_str!("../../../../scripts/certification-clients/gtk_wayexpand_desktop_test.py");
+    let Ok(mut child) = Command::new("python3")
+        .arg("-c")
+        .arg(CLIENT)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return ControlledClientResult::Unavailable;
+    };
+    let payload = serde_json::json!({
+        "trigger": trigger,
+        "input_marker": input_marker,
+        "expected": expected
+    });
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        return ControlledClientResult::Unavailable;
+    };
+    if serde_json::to_writer(&mut stdin, &payload).is_err() {
+        let _ = child.kill();
+        return ControlledClientResult::Unavailable;
+    }
+    drop(stdin);
+
+    let deadline = Instant::now() + Duration::from_secs(55);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return ControlledClientResult::InputNotObserved;
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return ControlledClientResult::Unavailable;
+            }
+        }
+    }
+    let Ok(output) = child.wait_with_output() else {
+        return ControlledClientResult::Unavailable;
+    };
+    controlled_client_result(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn controlled_client_result(output: &str) -> ControlledClientResult {
+    let result = output
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .and_then(|value| {
+            value
+                .get("state")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        });
+    match result.as_deref() {
+        Some("verified") => ControlledClientResult::Verified,
+        Some("input_not_observed") => ControlledClientResult::InputNotObserved,
+        Some("trigger_not_replaced") => ControlledClientResult::TriggerNotReplaced,
+        Some("output_without_input_marker") => ControlledClientResult::OutputWithoutInputMarker,
+        Some("field_mismatch") => ControlledClientResult::FieldMismatch,
+        Some("closed") => ControlledClientResult::Closed,
+        Some("unavailable") => ControlledClientResult::Unavailable,
+        _ => ControlledClientResult::Unavailable,
+    }
 }
 
 fn desktop_test_for(
@@ -511,7 +709,104 @@ fn desktop_test_for(
     println!("Capture [{test_id}]: pending — no input content will be recorded");
     println!("Output [{test_id}]: pending — no Enter key will be sent");
     println!("Replacement [{test_id}]: pending — you will verify the final text in the target app");
-    println!("\nReview the expected text with `wayexpand preview {trigger:?}` first.");
+    if options.controlled_client {
+        let input_marker = if expansion.match_mode == wayexpand_core::MatchMode::Immediate {
+            trigger
+                .char_indices()
+                .last()
+                .map_or("", |(last_index, _)| &trigger[..last_index])
+        } else {
+            trigger
+        };
+        let input_marker = if input_marker == expansion.replacement.as_str() {
+            ""
+        } else {
+            input_marker
+        };
+        let controlled_result = if input_marker.is_empty() {
+            ControlledClientResult::CannotCorrelate
+        } else {
+            println!("\nOpening a small GTK test field. Type the trigger there once; the field will verify its final text without recording its contents.");
+            let baseline = snapshot();
+            let controlled =
+                run_controlled_gtk_client(trigger, input_marker, &expansion.replacement);
+            match controlled {
+                ControlledClientResult::Verified => {
+                    let after = snapshot();
+                    let ibus_transaction = (after.4 > baseline.4)
+                        .then_some(after.5.as_ref())
+                        .flatten()
+                        .filter(|transaction| baseline.5.as_ref() != Some(*transaction))
+                        .cloned();
+                    let daemon_transaction =
+                        new_applied_transaction_id(baseline.0.as_ref(), after.0.as_ref());
+                    let transaction = ibus_transaction.or(daemon_transaction);
+                    println!("Test field [{test_id}]: GTK 3 controlled test field.");
+                    println!("Capture: key activity and the expected input sequence reached the controlled GTK 3 field.");
+                    println!("Replacement: exact configured test output observed in the controlled GTK 3 field.");
+                    if let Some(transaction) = transaction {
+                        println!("Output activity: a new transaction ID was reported during this test window ({transaction}). The route does not bind it directly to the trigger.");
+                        println!("Correlation: the field observed the expected input and exact output, and a new transaction was reported in this test window. The result is limited to this controlled field and session.");
+                        println!("Scope: GTK 3 text field in this desktop session only; other applications remain untested.");
+                        println!("DESKTOP TEST RESULT: VERIFIED IN CONTROLLED GTK 3 FIELD");
+                        return Ok(DesktopTestResult::Verified);
+                    }
+                    println!("Capture [{test_id}]: ACTIVITY OBSERVED — the configured input marker and key activity reached this field.");
+                    println!("Output activity [{test_id}]: exact expected text observed, but no unique transaction ID was available.");
+                    println!("Output activity: no uniquely new transaction ID was available; aggregate counters are not enough to verify this test.");
+                    println!("Correlation: the field observed the expected input and exact output, but the route could not bind an output transaction to this test window.");
+                    println!("DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW");
+                    println!("Confirm the exact target text visually before recording a pass.");
+                    return Ok(DesktopTestResult::AwaitingReview);
+                }
+                result => result,
+            }
+        };
+        match controlled_result {
+            ControlledClientResult::CannotCorrelate => {
+                println!("This trigger cannot be distinguished from its expected output in the controlled field. Continuing with visual confirmation in your selected application.");
+            }
+            ControlledClientResult::Unavailable => {
+                println!("Controlled GTK test client is unavailable (Python GTK 3 bindings or a graphical session are required). Continuing with the visual test in your selected application.");
+            }
+            result => {
+                let (summary, problem) = match result {
+                    ControlledClientResult::InputNotObserved => (
+                        "No key activity reached the controlled GTK field before the test expired.",
+                        "WX-TEST-INPUT-001",
+                    ),
+                    ControlledClientResult::TriggerNotReplaced => (
+                        "The trigger reached the controlled GTK field, but WayExpand did not replace it.",
+                        "WX-TEST-REPLACE-001",
+                    ),
+                    ControlledClientResult::OutputWithoutInputMarker => (
+                        "The expected text appeared, but the controlled field did not observe the configured typed input first. The result was not counted as a verified expansion.",
+                        "WX-TEST-CORRELATION-002",
+                    ),
+                    ControlledClientResult::FieldMismatch => (
+                        "The controlled GTK field did not contain the exact expected result. Its contents were not recorded.",
+                        "WX-TEST-OUTPUT-001",
+                    ),
+                    ControlledClientResult::Closed => (
+                        "The controlled GTK test field was closed before verification.",
+                        "WX-TEST-CANCELLED-001",
+                    ),
+                    ControlledClientResult::Verified
+                    | ControlledClientResult::CannotCorrelate
+                    | ControlledClientResult::Unavailable => {
+                        unreachable!("handled above")
+                    }
+                };
+                println!("{summary}");
+                println!("Problem: {problem}");
+                println!("Next: open WayExpand Diagnostics, review the input and insertion status, then retry once in a normal text field.");
+                println!("DESKTOP TEST RESULT: CONTROLLED GTK TEST FAILED");
+                return Ok(DesktopTestResult::Failed);
+            }
+        }
+    }
+    let quoted_trigger = crate::commands::shell_single_quote(trigger);
+    println!("\nReview the expected text with `wayexpand preview {quoted_trigger}` first.");
     println!("This test types the configured replacement into the focused application when you type {trigger:?}.");
     let application_class = if let Some(application_class) = options.application_class.as_deref() {
         application_class.trim().to_owned()
@@ -773,18 +1068,24 @@ mod desktop_test_option_tests {
 
     #[test]
     fn observe_only_requires_a_test_class_and_explicit_focus_acknowledgment() {
-        assert!(validate_desktop_test_options(true, Some("GTK"), true, true).is_ok());
-        assert!(validate_desktop_test_options(true, None, true, true).is_err());
-        assert!(validate_desktop_test_options(true, Some("GTK"), false, true).is_err());
-        assert!(validate_desktop_test_options(false, Some("GTK"), true, true).is_err());
+        assert!(validate_desktop_test_options(true, Some("GTK"), true, true, false).is_ok());
+        assert!(validate_desktop_test_options(true, None, true, true, false).is_err());
+        assert!(validate_desktop_test_options(true, Some("GTK"), false, true, false).is_err());
+        assert!(validate_desktop_test_options(false, Some("GTK"), true, true, false).is_err());
+        assert!(validate_desktop_test_options(true, None, false, false, true).is_ok());
+        assert!(validate_desktop_test_options(false, None, false, false, true).is_err());
     }
 
     #[test]
     fn application_class_is_bounded_and_control_free() {
-        assert!(validate_desktop_test_options(true, Some("GTK"), true, true).is_ok());
-        assert!(validate_desktop_test_options(true, Some(""), true, true).is_err());
-        assert!(validate_desktop_test_options(true, Some("gtk\nterminal"), true, true).is_err());
-        assert!(validate_desktop_test_options(true, Some(&"a".repeat(65)), true, true).is_err());
+        assert!(validate_desktop_test_options(true, Some("GTK"), true, true, false).is_ok());
+        assert!(validate_desktop_test_options(true, Some(""), true, true, false).is_err());
+        assert!(
+            validate_desktop_test_options(true, Some("gtk\nterminal"), true, true, false).is_err()
+        );
+        assert!(
+            validate_desktop_test_options(true, Some(&"a".repeat(65)), true, true, false).is_err()
+        );
     }
 }
 
@@ -804,6 +1105,7 @@ mod focused_app_scope_tests {
             FocusedAppScopeStatus {
                 scope_state: Some("outside_allowlist".into()),
                 terminal_apps_only: Some(true),
+                daemon_status_trusted: Some(false),
                 ..FocusedAppScopeStatus::default()
             }
         );
@@ -821,6 +1123,7 @@ mod focused_app_scope_tests {
             )),
             FocusedAppScopeStatus {
                 terminal_apps_only: Some(true),
+                daemon_status_trusted: Some(false),
                 ..FocusedAppScopeStatus::default()
             }
         );
@@ -933,10 +1236,9 @@ mod focused_app_scope_tests {
             focused_app_diagnostic("daemon_status_incompatible", &focus)
                 .expect("incompatible schema needs a specific remediation");
         assert_eq!(problem_id, "WX-VERSION-001");
-        assert!(suggested_action.contains("wayexpand upgrade-status"));
-        assert!(
-            suggested_action.contains("before using this result to change application allowlists")
-        );
+        assert!(suggested_action.contains("wayexpand upgrade --check"));
+        assert!(suggested_action
+            .contains("repeat this focus check before changing application allowlists"));
 
         let compatible = focused_app_scope_from_status(Some(&format!(
             "running\nstatus_schema={current}\nterminal_apps_only=true\ncapture_app_scope_state=allowed\n"
@@ -1103,6 +1405,37 @@ fn status_counter(status: Option<&serde_json::Value>, key: &str) -> u64 {
                 .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
         })
         .unwrap_or(0)
+}
+
+fn new_applied_transaction_id(
+    before: Option<&serde_json::Value>,
+    after: Option<&serde_json::Value>,
+) -> Option<String> {
+    let previous: HashSet<String> = before
+        .and_then(|status| status.get("recent_expansion_outcomes"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|record| {
+            record
+                .get("transaction_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    after
+        .and_then(|status| status.get("recent_expansion_outcomes"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .find_map(|record| {
+            let transaction_id = record
+                .get("transaction_id")
+                .and_then(serde_json::Value::as_str)?;
+            let applied =
+                record.get("completion").and_then(serde_json::Value::as_str) == Some("applied");
+            (applied && !previous.contains(transaction_id)).then(|| transaction_id.to_owned())
+        })
 }
 
 fn status_counter_compat(status: Option<&serde_json::Value>, current: &str, legacy: &str) -> u64 {

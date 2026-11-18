@@ -822,13 +822,13 @@ impl IbusEngineAdapter {
                     }
                     let replacement_chars = result.insert.chars().count()
                         + usize::from(result.reinsert_after.is_some());
-                    if replacement_chars > wayexpand_core::MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS
-                    {
+                    let replacement_limit = self.engine.keystroke_max_chars();
+                    if replacement_chars > replacement_limit {
                         self.note(|telemetry, field| telemetry.refusal(field, IbusRefusal::Policy));
                         warn!(
                             replacement_chars,
-                            limit = wayexpand_core::MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS,
-                            "IBus non-atomic replacement refused by the output safety limit"
+                            limit = replacement_limit,
+                            "IBus non-atomic replacement refused by the configured output limit"
                         );
                         self.engine.restore_deferred_match(&result.matched_text);
                         policy_blocked = true;

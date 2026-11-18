@@ -85,6 +85,79 @@ case "$package" in
 esac
 
 binaries='wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-gui wayexpand-ui wayexpand-ibus'
+smoke_user_home=''
+smoke_config=''
+smoke_config_hash=''
+
+prepare_upgrade_configuration() {
+    id wxsmoke >/dev/null 2>&1 || useradd --create-home wxsmoke
+    smoke_user_home=$(getent passwd wxsmoke | cut -d: -f6)
+    smoke_config="$smoke_user_home/.config/wayexpand/expansions.toml"
+    install -d -o wxsmoke -g wxsmoke -m 0700 "$smoke_user_home/.config/wayexpand"
+    if [ ! -f "$smoke_config" ]; then
+        install -o wxsmoke -g wxsmoke -m 0600 /etc/wayexpand/expansions.toml.example "$smoke_config"
+    fi
+    # Keep a user-owned snippet and its metadata across package upgrades and rollback.
+    cat >> "$smoke_config" <<'TOML'
+
+[[expansion]]
+trigger = ";package-smoke-user"
+replacement = "User-owned package upgrade check."
+description = "Verifies package lifecycle preservation"
+enabled = true
+tags = ["package-smoke", "user-owned"]
+category = "CI fixture"
+TOML
+    chown wxsmoke:wxsmoke "$smoke_config"
+    smoke_config_hash=$(sha256sum "$smoke_config" | cut -d ' ' -f 1)
+}
+
+check_upgrade_configuration_preserved() {
+    [ -n "$smoke_config_hash" ] || return 0
+    stage='verifying user configuration survived package lifecycle transition'
+    actual_hash=$(sha256sum "$smoke_config" | cut -d ' ' -f 1)
+    if [ "$actual_hash" != "$smoke_config_hash" ]; then
+        printf 'error: package lifecycle changed user configuration %s\n' "$smoke_config" >&2
+        return 1
+    fi
+    # shellcheck disable=SC2016
+    su wxsmoke -s /bin/sh -c 'wayexpand config validate "$1"' wayexpand "$smoke_config"
+    python3 - "$smoke_config" <<'PY'
+import pathlib
+import sys
+import tomllib
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+config = tomllib.loads(text)
+expansions = config.get("expansion", [])
+expected = {
+    ";;hello": {"replacement": "Hello from Wayland!"},
+    ";package-smoke-user": {
+        "replacement": "User-owned package upgrade check.",
+        "description": "Verifies package lifecycle preservation",
+        "enabled": True,
+        "tags": ["package-smoke", "user-owned"],
+        "category": "CI fixture",
+    },
+}
+for trigger, fields in expected.items():
+    actual = next(
+        (expansion for expansion in expansions if expansion.get("trigger") == trigger),
+        None,
+    )
+    if actual is None:
+        raise SystemExit(f"user configuration lost snippet {trigger!r}")
+    for name, value in fields.items():
+        if actual.get(name) != value:
+            raise SystemExit(f"snippet {trigger!r} lost {name}: {actual.get(name)!r}")
+PY
+    # The first validation may migrate the 1.3.2 fixture by adding stable
+    # snippet IDs and normalizing TOML. The semantic checks above permit that
+    # deliberate rewrite; later package operations preserve the migrated file
+    # byte-for-byte.
+    smoke_config_hash=$(sha256sum "$smoke_config" | cut -d ' ' -f 1)
+}
 
 check_installed() {
     check_version=$expected_version
@@ -146,9 +219,12 @@ executables = [element.text for element in manifest.findall("./exec")]
 if executables != ["wayexpand-ibus"]:
     raise SystemExit(f"unexpected IBus engine executable in {sys.argv[1]}: {executables!r}")
 PY
-    install -D -o wxsmoke -m 0600 /etc/wayexpand/expansions.toml.example \
-        /home/wxsmoke/.config/wayexpand/expansions.toml
     wxsmoke_home=$(getent passwd wxsmoke | cut -d: -f6)
+    if [ ! -f "$wxsmoke_home/.config/wayexpand/expansions.toml" ]; then
+        install -D -o wxsmoke -g wxsmoke -m 0600 /etc/wayexpand/expansions.toml.example \
+            "$wxsmoke_home/.config/wayexpand/expansions.toml"
+    fi
+    check_upgrade_configuration_preserved
     stage='validating the packaged configuration as an unprivileged user'
     # $1 must expand in the target user's `su` shell, not in this installer.
     # shellcheck disable=SC2016
@@ -214,6 +290,7 @@ if [ -n "$previous_package" ]; then
         printf '%s\n' 'error: previous package did not install the WayExpand CLI' >&2
         exit 1
     }
+    prepare_upgrade_configuration
     stage='upgrading from the previous package version'
     printf '%s\n' 'Upgrading to the candidate package'
     install_package
@@ -254,4 +331,19 @@ for binary in $binaries; do
         exit 1
     fi
 done
+if [ -n "$previous_package" ]; then
+    printf '%s\n' 'Reinstalling after uninstall and verifying user configuration remains available'
+    stage='reinstalling after uninstall'
+    install_package
+    check_installed
+    check_upgrade_configuration_preserved
+    stage='removing package after post-uninstall reinstall'
+    remove_package
+    for binary in $binaries; do
+        if [ -e "/usr/bin/$binary" ]; then
+            printf 'error: /usr/bin/%s remains after final removal\n' "$binary" >&2
+            exit 1
+        fi
+    done
+fi
 printf 'package smoke test passed: %s\n' "$(basename "$package")"

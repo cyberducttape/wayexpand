@@ -1950,6 +1950,12 @@ fn field_input_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
             Some("focus the target field, run `wayexpand ibus watch --seconds 30`, and type harmless text; only counters are recorded".into()),
         );
     };
+    // `focused` describes whether the context is focused now, not whether it
+    // was focused when its IBus key events arrived. The test client (and many
+    // real applications) destroys or blurs its input context before status is
+    // queried, so requiring current focus loses valid evidence of recent
+    // input. Key events are delivered to the owning IBus context; this remains
+    // aggregate activity evidence and does not identify the application.
     let normal_field_input = reading.status.recent_fields.iter().any(|field| {
         field.keys > 0 && field.content_type == crate::telemetry::IbusContentTypeState::Normal
     });
@@ -1958,7 +1964,7 @@ fn field_input_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
             "field-input",
             "Normal-field input observed",
             IbusCheckState::Pass,
-            "at least one recent normal IBus field delivered key events to the engine; contents and application identity are not recorded, so this does not identify a particular browser",
+            "at least one recent normal IBus field delivered key events to the engine; it may no longer be focused, and contents and application identity are not recorded, so this does not identify the current field or a particular browser",
             None,
         )
     } else {
@@ -1994,7 +2000,9 @@ fn surrounding_text_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
         .status
         .recent_fields
         .iter()
-        .filter(|field| field.content_type == crate::telemetry::IbusContentTypeState::Normal)
+        .filter(|field| {
+            field.focused && field.content_type == crate::telemetry::IbusContentTypeState::Normal
+        })
         .collect::<Vec<_>>();
     if normal_fields
         .iter()
@@ -2046,7 +2054,7 @@ fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
             IbusCheckState::Unknown,
             "no live IBus engine outcome is available",
             Some(
-                "use `wayexpand debug --test ';;hello'` in a real application's text field".into(),
+                "run `wayexpand debug --test` in a disposable text field; it uses a known harmless tutorial snippet only. If none is configured, create one in the GUI or preview a specific snippet and pass its trigger explicitly".into(),
             ),
         );
     };
@@ -2061,7 +2069,7 @@ fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
             "Target application result",
             IbusCheckState::Fail,
             "the IBus engine recorded an output failure; target text may be partial",
-            Some("inspect the target field and do not retry blindly; run `wayexpand debug --test ';;hello'` after recovery".into()),
+            Some("inspect the target field and do not retry blindly; after recovery, run `wayexpand debug --test` in a disposable field if the tutorial snippet is configured, or explicitly select a snippet after reviewing its preview".into()),
         );
     }
     if reading.status.totals.expansions > 0 {
@@ -2070,7 +2078,7 @@ fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
             "Target application result",
             IbusCheckState::Warn,
             "IBus emitted replacement actions, but the client does not acknowledge the resulting target text",
-            Some("visually confirm the text or run `wayexpand debug --test ';;hello'` in this application".into()),
+            Some("visually confirm the text or run `wayexpand debug --test` in this application; it selects only a known harmless tutorial snippet, when configured".into()),
         )
     } else {
         check(
@@ -2079,7 +2087,7 @@ fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
             IbusCheckState::Unknown,
             "no replacement has been emitted in the current engine session",
             Some(
-                "use `wayexpand debug --test ';;hello'` in a real application's text field".into(),
+                "run `wayexpand debug --test` in a disposable text field; it uses a known harmless tutorial snippet only. If none is configured, create one in the GUI or preview a specific snippet and pass its trigger explicitly".into(),
             ),
         )
     }
@@ -2496,6 +2504,9 @@ mod tests {
         telemetry.content_type(Some(field), false);
         telemetry.surrounding_text(Some(field), true);
         telemetry.key(Some(field), true);
+        // The client can close or blur before diagnostics are collected. The
+        // recorded input remains valid historical evidence for this context.
+        telemetry.focus_out(Some(field));
         let reading = IbusStatusReading {
             status: telemetry.snapshot(),
             live: true,
@@ -2509,6 +2520,7 @@ mod tests {
             .detail
             .contains("application identity are not recorded"));
         assert!(observed.detail.contains("particular browser"));
+        assert!(observed.detail.contains("may no longer be focused"));
 
         let missing = field_input_check(None);
         assert_eq!(missing.state, IbusCheckState::Unknown);

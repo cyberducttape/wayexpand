@@ -2,9 +2,12 @@
 
 use crate::{diagnostics, status::Status};
 use std::{
+    io::Read,
     path::PathBuf,
+    process::Stdio,
     sync::mpsc::{self, Receiver, SyncSender},
     thread,
+    time::{Duration, Instant},
 };
 use toml_edit::DocumentMut;
 use wayexpand_backend_ibus::engine_available as ibus_engine_available;
@@ -82,6 +85,7 @@ pub(crate) struct ReloadSnapshot {
 }
 
 pub(crate) struct DiagnosticsSnapshot {
+    pub installation_audit: InstallationAudit,
     pub backend_status: Vec<wayexpand_core::BackendStatus>,
     pub recommended_route: Option<RecommendedRoute>,
     pub route_plan: RoutePlan,
@@ -98,6 +102,17 @@ pub(crate) struct DiagnosticsSnapshot {
     pub ibus_route: wayexpand_backend_ibus::chain::IbusChainReport,
     pub picker_shortcut: Option<PickerShortcut>,
     pub announce: bool,
+}
+
+/// Read-only installed-component audit captured with the regular startup
+/// diagnostics. `None` means the CLI could not provide the versioned report;
+/// missing evidence is never treated as a passing installation.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct InstallationAudit {
+    pub ready: Option<bool>,
+    pub failed_components: Vec<String>,
+    pub path_shadow_detected: bool,
+    pub mixed_installation: bool,
 }
 
 /// The Quick Picker's global shortcut, as `wayexpand shortcut --json`
@@ -825,6 +840,7 @@ pub(crate) fn load_config_snapshot(path: PathBuf) -> Result<ReloadSnapshot, Stri
 }
 
 fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot {
+    let installation_audit = run_installation_audit(&config_path);
     let backend_status = discover_backends();
     let selection_capabilities = probe_capabilities();
     let ibus_available = ibus_engine_available();
@@ -881,6 +897,7 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         &daemon_status,
     );
     DiagnosticsSnapshot {
+        installation_audit,
         backend_status,
         recommended_route,
         route_plan,
@@ -897,6 +914,125 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         ibus_route,
         picker_shortcut: read_picker_shortcut(),
         announce,
+    }
+}
+
+/// Check the installed payload after every GUI launch and diagnostics refresh.
+/// The command is read-only, runs off the UI thread, and has a hard deadline.
+fn run_installation_audit(config_path: &std::path::Path) -> InstallationAudit {
+    const OUTPUT_LIMIT: usize = 32 * 1024;
+    const TIMEOUT: Duration = Duration::from_secs(8);
+
+    let mut command = std::process::Command::new(cli_executable());
+    wayexpand_process_supervisor::configure_process_group(&mut command);
+    let mut child = match command
+        .args(["install-check", "--json", "--config"])
+        .arg(config_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return InstallationAudit::default(),
+    };
+    let Some(mut stdout) = child.stdout.take() else {
+        return InstallationAudit::default();
+    };
+    // Drain concurrently with the child. Waiting for exit before reading can
+    // deadlock if a broken CLI emits more than the pipe buffer can hold.
+    let output_reader = thread::spawn(move || {
+        let mut output = Vec::new();
+        let result = stdout
+            .by_ref()
+            .take((OUTPUT_LIMIT + 1) as u64)
+            .read_to_end(&mut output);
+        (output, result)
+    });
+    let mut supervisor = wayexpand_process_supervisor::ChildSupervisor::new(child);
+    let deadline = Instant::now() + TIMEOUT;
+    let status = loop {
+        match supervisor.has_exited() {
+            Ok(true) => match supervisor.reap() {
+                Ok(status) => break status,
+                Err(_) => {
+                    supervisor.kill_group();
+                    let _ = supervisor.reap();
+                    let _ = output_reader.join();
+                    return InstallationAudit::default();
+                }
+            },
+            Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            Ok(false) | Err(_) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                let _ = output_reader.join();
+                return InstallationAudit::default();
+            }
+        }
+    };
+    let Ok((output, read_result)) = output_reader.join() else {
+        return InstallationAudit::default();
+    };
+    if read_result.is_err() || output.len() > OUTPUT_LIMIT {
+        return InstallationAudit::default();
+    }
+    let Ok(report) = serde_json::from_slice::<serde_json::Value>(&output) else {
+        return InstallationAudit::default();
+    };
+    let ready = if report.get("schema").and_then(serde_json::Value::as_u64) == Some(2)
+        && report.get("level").and_then(serde_json::Value::as_str) == Some("installed")
+    {
+        report.get("ready").and_then(serde_json::Value::as_bool)
+    } else {
+        None
+    };
+    let Some(mut ready) = ready else {
+        return InstallationAudit::default();
+    };
+    let identity = report.get("installation_identity");
+    let path_shadow_detected = identity.is_some_and(|identity| {
+        identity
+            .get("path_shadow_detected")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    });
+    let mixed_installation = identity.is_some_and(|identity| {
+        identity
+            .get("mixed_cli_daemon_installation")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    });
+    let identity_mismatch = path_shadow_detected || mixed_installation;
+    if identity_mismatch {
+        ready = false;
+    }
+    // `install-check` deliberately exits nonzero when required components are
+    // missing. Accept that status only when the structured report agrees.
+    if !status.success() && ready {
+        return InstallationAudit::default();
+    }
+    let failed_components: Vec<String> = report
+        .get("checks")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|check| check.get("status").and_then(serde_json::Value::as_str) == Some("fail"))
+        .filter_map(|check| check.get("component").and_then(serde_json::Value::as_str))
+        .filter(|component| {
+            !component.is_empty()
+                && component.len() <= 64
+                && component.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_-".contains(&byte)
+                })
+        })
+        .map(str::to_owned)
+        .collect();
+    InstallationAudit {
+        ready: Some(ready),
+        failed_components,
+        path_shadow_detected,
+        mixed_installation,
     }
 }
 
@@ -922,14 +1058,18 @@ pub(crate) enum DaemonBuildState {
 /// A responsive daemon can still be running old safety or output behavior.
 /// Compare exact build identities when available, as `wayexpand doctor` does.
 pub(crate) fn daemon_build_state(response: &str) -> DaemonBuildState {
-    let daemon_commit = status_field(response, "daemon_commit");
-    let daemon_version = status_field(response, "daemon_version");
+    let status = wayexpand_core::DaemonStatus::parse(response);
+    if !daemon_status_schema_compatible(&status) {
+        return DaemonBuildState::Unverified;
+    }
+    let daemon_commit = status.field("daemon_commit");
+    let daemon_version = status.field("daemon_version");
     let gui_commit = env!("WAYEXPAND_COMMIT");
     let gui_version = env!("WAYEXPAND_BUILD_VERSION");
     if gui_version.contains(".dirty-unknown") {
         return DaemonBuildState::Unverified;
     }
-    let Some(daemon_commit) = daemon_commit.filter(|commit| commit != "unknown") else {
+    let Some(daemon_commit) = daemon_commit.filter(|commit| *commit != "unknown") else {
         return DaemonBuildState::Unverified;
     };
     if gui_commit == "unknown" {
@@ -938,13 +1078,18 @@ pub(crate) fn daemon_build_state(response: &str) -> DaemonBuildState {
     if daemon_commit != gui_commit {
         return DaemonBuildState::RestartRequired;
     }
-    match daemon_version.as_deref() {
+    match daemon_version {
         Some("unknown") => DaemonBuildState::Unverified,
         Some(version) if version == gui_version => DaemonBuildState::Current,
         Some(_) => DaemonBuildState::RestartRequired,
         None if gui_version.contains(".dirty.") => DaemonBuildState::Unverified,
         None => DaemonBuildState::Current,
     }
+}
+
+fn daemon_status_schema_compatible(status: &wayexpand_core::DaemonStatus) -> bool {
+    status.field_is_unique("status_schema")
+        && status.status_schema() == Some(wayexpand_core::CONTROL_STATUS_SCHEMA)
 }
 
 pub(crate) fn control_command(
@@ -1069,9 +1214,10 @@ mod tests {
     fn daemon_build_state_requires_exact_tree_identity_for_dirty_builds() {
         let commit = env!("WAYEXPAND_COMMIT");
         let version = env!("WAYEXPAND_BUILD_VERSION");
+        let schema = wayexpand_core::CONTROL_STATUS_SCHEMA;
         assert_eq!(
             super::daemon_build_state(&format!(
-                "daemon_commit={commit}\ndaemon_version={version}\n"
+                "status_schema={schema}\ndaemon_commit={commit}\ndaemon_version={version}\n"
             )),
             if commit == "unknown" || version == "unknown" || version.contains(".dirty-unknown") {
                 super::DaemonBuildState::Unverified
@@ -1081,7 +1227,7 @@ mod tests {
         );
         assert_eq!(
             super::daemon_build_state(&format!(
-                "daemon_commit={commit}\ndaemon_version={version}-other-tree\n"
+                "status_schema={schema}\ndaemon_commit={commit}\ndaemon_version={version}-other-tree\n"
             )),
             if commit == "unknown" || version.contains(".dirty-unknown") {
                 super::DaemonBuildState::Unverified
@@ -1090,7 +1236,7 @@ mod tests {
             }
         );
         assert_eq!(
-            super::daemon_build_state(&format!("daemon_commit={commit}\n")),
+            super::daemon_build_state(&format!("status_schema={schema}\ndaemon_commit={commit}\n")),
             if commit == "unknown"
                 || version.contains(".dirty.")
                 || version.contains(".dirty-unknown")
@@ -1101,7 +1247,9 @@ mod tests {
             }
         );
         assert_eq!(
-            super::daemon_build_state("daemon_commit=older-build\n"),
+            super::daemon_build_state(&format!(
+                "status_schema={schema}\ndaemon_commit=older-build\n"
+            )),
             if commit == "unknown" || version.contains(".dirty-unknown") {
                 super::DaemonBuildState::Unverified
             } else {
@@ -1113,9 +1261,23 @@ mod tests {
             super::DaemonBuildState::Unverified
         );
         assert_eq!(
+            super::daemon_build_state(&format!(
+                "status_schema=11\ndaemon_commit=older-build\ndaemon_version={version}\n"
+            )),
+            super::DaemonBuildState::Unverified
+        );
+        assert!(!super::daemon_status_schema_compatible(
+            &wayexpand_core::DaemonStatus::parse(&format!(
+                "status_schema={schema}\nstatus_schema=11\n"
+            ))
+        ));
+        assert_eq!(
             super::daemon_build_state("daemon_commit=unknown\n"),
             super::DaemonBuildState::Unverified
         );
+        assert!(super::daemon_status_schema_compatible(
+            &wayexpand_core::DaemonStatus::parse(&format!("status_schema={schema}\n"))
+        ));
     }
 
     #[test]

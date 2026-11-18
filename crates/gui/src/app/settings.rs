@@ -33,6 +33,7 @@ impl GuiApp {
             self.settings_font_scale,
             self.dark_mode,
             self.onboarding_completed,
+            self.onboarding_test_snippet_created_for.clone(),
         ) {
             self.status = Status::warning(self.strings.status_appearance_save_failed(&error));
         }
@@ -47,6 +48,7 @@ impl GuiApp {
             self.settings_font_scale,
             self.dark_mode,
             self.onboarding_completed,
+            self.onboarding_test_snippet_created_for.clone(),
         ) {
             self.status = Status::warning(self.strings.status_appearance_save_failed(&error));
         }
@@ -61,6 +63,7 @@ impl GuiApp {
             self.settings_font_scale,
             self.dark_mode,
             self.onboarding_completed,
+            self.onboarding_test_snippet_created_for.clone(),
         ) {
             self.status = Status::warning(self.strings.status_appearance_save_failed(&error));
         }
@@ -85,6 +88,7 @@ impl GuiApp {
             scale,
             self.dark_mode,
             self.onboarding_completed,
+            self.onboarding_test_snippet_created_for.clone(),
         ) {
             Ok(()) => self.status = Status::success(self.strings.status_font_size_saved()),
             Err(error) => {
