@@ -3787,6 +3787,10 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
         semantics.contains("The shared keyboard integration currently points to a program in your personal folder."),
         "the default view should explain the issue without exposing component paths: {semantics}"
     );
+    assert!(
+        !semantics.contains("WX-IBUS-MULTIUSER-001"),
+        "the internal diagnostic ID belongs in detailed checks, not the setup summary: {semantics}"
+    );
 }
 
 #[test]

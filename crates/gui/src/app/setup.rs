@@ -1495,7 +1495,7 @@ impl GuiApp {
                         } else {
                             title
                         };
-                        let id = if problem_id.is_empty() {
+                        let id = if problem_id.is_empty() || problem_id == "WX-IBUS-MULTIUSER-001" {
                             String::new()
                         } else {
                             format!(" [{problem_id}]")
