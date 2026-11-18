@@ -165,7 +165,7 @@ this check; it does not use arbitrary personal snippet text as test output.
 You can start the same controlled field from the CLI:
 
 ```sh
-wayexpand debug --test ':wayexpand-test' --controlled-client
+wayexpand debug --test ';hello' --controlled-client
 ```
 
 The controlled field observes the expected input sequence and reads back whether

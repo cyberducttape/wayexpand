@@ -107,7 +107,7 @@ impl GuiApp {
     }
 
     fn create_test_snippet_with_onboarding(&mut self, show_onboarding: bool) -> bool {
-        let base_trigger = ":wayexpand-test";
+        let base_trigger = ";hello";
         let mut trigger = base_trigger.to_owned();
         let mut suffix = 2;
         while self

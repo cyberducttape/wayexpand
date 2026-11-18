@@ -2554,7 +2554,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         "guide must remain after snippet save"
     );
     assert_eq!(app.config.expansion.len(), 1, "{}", app.status.text());
-    assert_eq!(app.config.expansion[0].trigger, ":wayexpand-test");
+    assert_eq!(app.config.expansion[0].trigger, ";hello");
     assert_eq!(app.config.expansion[0].replacement, "WayExpand is working!");
     assert!(app.config.expansion[0]
         .tags
@@ -2570,7 +2570,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     app.strings.set_language(Language::English);
     if let Some(rewrite) =
         app.playground
-            .edit(&app.config, "", "input-method-v2", ":wayexpand-test ", true)
+            .edit(&app.config, "", "input-method-v2", ";hello ", true)
     {
         app.playground.text = rewrite.text;
     }
@@ -4166,7 +4166,7 @@ fn creating_the_test_snippet_selects_it_and_leaves_the_desktop_test_enabled() {
     assert_eq!(app.selected_index(), Some(2), "the new snippet is last");
     assert_eq!(
         app.draft.as_ref().map(|draft| draft.trigger.as_str()),
-        Some(":wayexpand-test")
+        Some(";hello")
     );
     assert!(
         !app.desktop_test_blocked_by_draft(),
@@ -4404,7 +4404,7 @@ fn desktop_test_candidates_follow_library_changes_including_reloads() {
     assert_eq!(first_run.len(), 2);
     assert_eq!(
         app.config.expansion[first_run[0]].trigger,
-        ":wayexpand-test"
+        ";hello"
     );
 
     // Changed on disk and reloaded: the cache must not keep the old list.

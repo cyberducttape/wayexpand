@@ -1,7 +1,7 @@
 use crate::app::setup::onboarding_step;
 use crate::*;
 
-const ONBOARDING_TRIGGER: &str = ":wayexpand-test";
+const ONBOARDING_TRIGGER: &str = ";hello";
 const ONBOARDING_REPLACEMENT: &str = "WayExpand is working!";
 /// What `wayexpand shortcut set` assigns without an argument.
 const DEFAULT_PICKER_SHORTCUT: &str = "Ctrl+Alt+Space";
@@ -1340,7 +1340,7 @@ mod tests {
         let mut config = Config::parse("").unwrap();
         let mut tutorial = ExpansionConfig {
             id: ExpansionConfig::new_id(),
-            trigger: ":wayexpand-test".into(),
+            trigger: ";hello".into(),
             aliases: Vec::new(),
             replacement: "WayExpand is working!".into(),
             delivery: wayexpand_core::ExpansionDelivery::Insert,
@@ -1360,7 +1360,7 @@ mod tests {
         tutorial.app_filter.clear();
         config.expansion[0] = tutorial;
         let snippet = onboarding_test_snippet(&config).expect("global tutorial is testable");
-        assert_eq!(snippet.trigger, ":wayexpand-test");
+        assert_eq!(snippet.trigger, ";hello");
         assert_eq!(snippet.replacement, "WayExpand is working!");
 
         // With another testable snippet listed first, the tutorial still wins.
@@ -1371,14 +1371,14 @@ mod tests {
         both.expansion.push(config.expansion[0].clone());
         assert_eq!(
             onboarding_test_snippet(&both).unwrap().trigger,
-            ":wayexpand-test"
+            ";hello"
         );
     }
 
     #[test]
     fn invalid_tutorial_variants_are_not_selected_for_first_run() {
         let config = Config::parse(
-            "[[expansion]]\ntrigger = ':wayexpand-test'\nreplacement = 'WayExpand is working! {{field:review}}'\ntags = ['tutorial']\n",
+            "[[expansion]]\ntrigger = ';hello'\nreplacement = 'WayExpand is working! {{field:review}}'\ntags = ['tutorial']\n",
         )
         .unwrap();
         assert!(onboarding_test_snippet(&config).is_none());
