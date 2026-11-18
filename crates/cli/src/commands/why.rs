@@ -403,30 +403,11 @@ fn diagnose_input_method_route(
             });
         }
     }
-    if !is_gnome {
-        if let Some(desktop) = report.check("desktop") {
-            match (desktop.problem_id, desktop.state) {
-                (Some("WX-KWIN-IBUS-001"), IbusCheckState::Fail) => {
-                    return Some(InputMethodGuidance {
-                        state: "kwin_ibus_route_unavailable",
-                        answer: "KWin is not routing keyboard input through IBus, so WayExpand cannot receive typing on this route.",
-                        action: "Run `wayexpand setup --backend ibus` to configure KWin's IBus Wayland route after reviewing the changes. If setup reports that `kwriteconfig` is unavailable or cannot apply the setting, select IBus Wayland in KDE System Settings → Keyboard → Virtual Keyboard. Then run `wayexpand debug --test` in a disposable text field to verify a real insertion. Use `wayexpand-gui --picker --copy-only` and paste meanwhile.",
-                    });
-                }
-                (Some("WX-KWIN-IBUS-002"), IbusCheckState::Warn) if recent_field.is_none() => {
-                    return Some(InputMethodGuidance {
-                        state: "kwin_ibus_helper_recently_crashed",
-                        answer: "KWin's IBus Wayland helper has crashed recently, although it is running now. Input delivery needs a live test.",
-                        action: "Run `wayexpand debug --test` in a disposable text field; it uses only a known harmless tutorial snippet. If no tutorial is configured, create one with the GUI Test Expansion flow or review a snippet and select its trigger explicitly. If the test sees no input, run `wayexpand ibus watch --seconds 30`, then `coredumpctl info ibus-ui-gtk3` and check for an IBus package update. Use `wayexpand-gui --picker --copy-only` and paste meanwhile.",
-                    });
-                }
-                _ => {}
-            }
-        }
-    }
     // Match the GUI's route-readiness gate: fresh field activity does not make
     // an unsafe shared registration ready. Keep the repair visible in both
-    // interfaces even when the engine happened to receive recent input.
+    // interfaces even when the engine happened to receive recent input. Check
+    // this before transient KWin helper health: a typing test cannot validate
+    // the route while its shared executable registration is unsafe.
     if let Some(scope) = report.check("manifest-scope") {
         if scope.state != IbusCheckState::Pass {
             let invalid = scope.state == IbusCheckState::Fail;
@@ -447,6 +428,27 @@ fn diagnose_input_method_route(
                     "Run `wayexpand ibus status --json` to inspect the shared-registration check. If it fails, run `wayexpand setup --backend ibus --install-system-integration` or install the distribution package; then rerun this diagnosis."
                 },
             });
+        }
+    }
+    if !is_gnome {
+        if let Some(desktop) = report.check("desktop") {
+            match (desktop.problem_id, desktop.state) {
+                (Some("WX-KWIN-IBUS-001"), IbusCheckState::Fail) => {
+                    return Some(InputMethodGuidance {
+                        state: "kwin_ibus_route_unavailable",
+                        answer: "KWin is not routing keyboard input through IBus, so WayExpand cannot receive typing on this route.",
+                        action: "Run `wayexpand setup --backend ibus` to configure KWin's IBus Wayland route after reviewing the changes. If setup reports that `kwriteconfig` is unavailable or cannot apply the setting, select IBus Wayland in KDE System Settings → Keyboard → Virtual Keyboard. Then run `wayexpand debug --test` in a disposable text field to verify a real insertion. Use `wayexpand-gui --picker --copy-only` and paste meanwhile.",
+                    });
+                }
+                (Some("WX-KWIN-IBUS-002"), IbusCheckState::Warn) if recent_field.is_none() => {
+                    return Some(InputMethodGuidance {
+                        state: "kwin_ibus_helper_recently_crashed",
+                        answer: "KWin's IBus Wayland helper has crashed recently, although it is running now. Input delivery needs a live test.",
+                        action: "Run `wayexpand debug --test` in a disposable text field; it uses only a known harmless tutorial snippet. If no tutorial is configured, create one with the GUI Test Expansion flow or review a snippet and select its trigger explicitly. If the test sees no input, run `wayexpand ibus watch --seconds 30`, then `coredumpctl info ibus-ui-gtk3` and check for an IBus package update. Use `wayexpand-gui --picker --copy-only` and paste meanwhile.",
+                    });
+                }
+                _ => {}
+            }
         }
     }
     let active = report.check(if is_gnome {
@@ -1680,6 +1682,56 @@ mod tests {
         assert_eq!(value["desktop_input_route"]["state"], "not_selected");
         assert_eq!(value["matcher_preview_proves_application_delivery"], false);
         assert_eq!(value["application_delivery_verified"], false);
+    }
+
+    #[test]
+    fn kde_unsafe_shared_ibus_registration_precedes_transient_helper_warning() {
+        let report = IbusChainReport {
+            desktop: IbusDesktop::KdeWayland,
+            checks: vec![
+                wayexpand_backend_ibus::chain::IbusCheck {
+                    id: "registered",
+                    title: "WayExpand engine is registered in IBus",
+                    state: IbusCheckState::Pass,
+                    problem_id: None,
+                    detail: "IBus registry lists WayExpand".into(),
+                    fix: None,
+                },
+                wayexpand_backend_ibus::chain::IbusCheck {
+                    id: "desktop",
+                    title: "KWin IBus helper",
+                    state: IbusCheckState::Warn,
+                    problem_id: Some("WX-KWIN-IBUS-002"),
+                    detail: "helper crashed recently".into(),
+                    fix: None,
+                },
+                wayexpand_backend_ibus::chain::IbusCheck {
+                    id: "manifest-scope",
+                    title: "Shared registration is protected",
+                    state: IbusCheckState::Fail,
+                    problem_id: Some("WX-IBUS-MULTIUSER-001"),
+                    detail: "shared manifest points into a user home".into(),
+                    fix: None,
+                },
+            ],
+            activity: None,
+        };
+
+        let guidance = diagnose_input_method_route(&report, None, None, false).unwrap();
+        assert_eq!(guidance.state, "ibus_manifest_scope_invalid");
+        assert!(guidance.answer.contains("not safe for multi-user use"));
+        assert!(guidance.action.contains("--install-system-integration"));
+        assert!(guidance.action.contains("administrator authorization"));
+
+        let json = report_json(None, None, 0, None, None, Some(&guidance));
+        assert_eq!(
+            json["desktop_input_route"]["state"],
+            "ibus_manifest_scope_invalid"
+        );
+        assert!(json["desktop_input_route"]["next_action"]
+            .as_str()
+            .unwrap()
+            .contains("--install-system-integration"));
     }
 
     #[test]
