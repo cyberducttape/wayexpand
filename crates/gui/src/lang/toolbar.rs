@@ -893,6 +893,90 @@ impl Strings {
         }
     }
 
+    /// Plain-language route state for the primary first-run step. Detailed
+    /// backend and protocol evidence belongs in Diagnostics, not in the
+    /// first thing a desktop user sees.
+    pub fn onboarding_integration_state(
+        &self,
+        checking: bool,
+        route_ready: bool,
+        recommendation: Option<RouteRecommendation>,
+    ) -> &'static str {
+        use BackendState as S;
+
+        if checking {
+            return match self.lang {
+                Language::English => "Checking desktop integration…",
+                Language::German => "Desktop-Integration wird geprüft …",
+                Language::Indonesian => "Memeriksa integrasi desktop…",
+            };
+        }
+        if route_ready {
+            return match self.lang {
+                Language::English => "Integration connected",
+                Language::German => "Integration verbunden",
+                Language::Indonesian => "Integrasi terhubung",
+            };
+        }
+
+        let Some(recommendation) = recommendation else {
+            return match self.lang {
+                Language::English => "No supported integration was detected",
+                Language::German => "Keine unterstützte Integration erkannt",
+                Language::Indonesian => "Tidak ada integrasi yang didukung",
+            };
+        };
+        if recommendation.blocked_by_policy {
+            return match self.lang {
+                Language::English => "The available integration is blocked by organization policy",
+                Language::German => {
+                    "Die verfügbare Integration wird durch die Organisationsrichtlinie blockiert"
+                }
+                Language::Indonesian => {
+                    "Integrasi yang tersedia diblokir oleh kebijakan organisasi"
+                }
+            };
+        }
+        if recommendation.capture_state == S::RequiresPermission
+            || recommendation.injection_state == S::RequiresPermission
+        {
+            return match self.lang {
+                Language::English => "Desktop permission is needed",
+                Language::German => "Eine Desktop-Berechtigung ist erforderlich",
+                Language::Indonesian => "Izin desktop diperlukan",
+            };
+        }
+        if matches!(
+            recommendation.capture_state,
+            S::Unavailable | S::NotImplemented
+        ) || matches!(
+            recommendation.injection_state,
+            S::Unavailable | S::NotImplemented
+        ) {
+            return match self.lang {
+                Language::English => "The recommended integration is not available in this session",
+                Language::German => {
+                    "Die empfohlene Integration ist in dieser Sitzung nicht verfügbar"
+                }
+                Language::Indonesian => "Integrasi yang disarankan tidak tersedia di sesi ini",
+            };
+        }
+        if recommendation.capture_state == S::ActionRequired
+            || recommendation.injection_state == S::ActionRequired
+        {
+            return match self.lang {
+                Language::English => "Integration setup is needed",
+                Language::German => "Die Integration muss eingerichtet werden",
+                Language::Indonesian => "Integrasi perlu disiapkan",
+            };
+        }
+        match self.lang {
+            Language::English => "Checking integration support",
+            Language::German => "Integrationsunterstützung wird geprüft",
+            Language::Indonesian => "Memeriksa dukungan integrasi",
+        }
+    }
+
     pub fn onboarding_probe_caveat(&self) -> &'static str {
         match self.lang {
             Language::English => "Backend probes show what may be available; they do not certify reliable input or output.",

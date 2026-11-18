@@ -677,6 +677,24 @@ impl GuiApp {
                         route_ready,
                     );
                     ui.indent("first_run_connect", |ui| {
+                        ui.label(
+                            RichText::new(self.strings.onboarding_desktop(&desktop, is_wayland))
+                                .small()
+                                .color(palette.muted),
+                        );
+                        ui.label(
+                            RichText::new(self.strings.onboarding_integration_state(
+                                checking,
+                                route_ready,
+                                recommendation,
+                            ))
+                            .strong()
+                            .color(if route_ready {
+                                palette.success
+                            } else {
+                                palette.muted
+                            }),
+                        );
                         if checking {
                             ui.horizontal(|ui| {
                                 ui.spinner();
