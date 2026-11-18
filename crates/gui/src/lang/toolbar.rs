@@ -970,6 +970,15 @@ impl Strings {
                 Language::Indonesian => "Integrasi perlu disiapkan",
             };
         }
+        if recommendation.capture_state == S::Available
+            && recommendation.injection_state == S::Available
+        {
+            return match self.lang {
+                Language::English => "Integration is available to set up",
+                Language::German => "Die Integration kann eingerichtet werden",
+                Language::Indonesian => "Integrasi tersedia untuk disiapkan",
+            };
+        }
         match self.lang {
             Language::English => "Checking integration support",
             Language::German => "Integrationsunterstützung wird geprüft",
