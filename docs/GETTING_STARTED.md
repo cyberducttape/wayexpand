@@ -47,13 +47,20 @@ If no automatic route is available, Quick Picker remains available in
 copy-only mode: choose a snippet, switch to the target application, and paste
 it yourself. It does not enable raw capture or attempt insertion.
 
-Some clients, including browser text fields that do not report surrounding
-text to IBus, cannot safely support automatic trigger replacement. In that
-case WayExpand passes typing through unchanged and reports that input arrived
-but replacement was unavailable; it does not guess, delete the trigger, or
-fall back to synthetic typing. Open **Quick Picker (copy and paste)** from
-Diagnostics to use snippets in that field. Browser and embedded-editor support
-must be verified per client; success in one GTK field does not establish it.
+IBus alone cannot safely replace a trigger in fields that do not report
+verifiable surrounding text; it passes typing through unchanged rather than
+guessing what to delete. An explicitly enabled, app-scoped evdev fallback can
+cover configured browser applications, including fields without IBus
+surrounding text. This is a separate privacy tradeoff: evdev observes raw
+keyboard events globally while capture is active, cannot detect password
+fields, and the app list limits matching rather than observation. Its output
+is still non-atomic and not certified for every browser field. Configure it
+only after reviewing [the sensitive-field limits](BACKENDS_SENSITIVE_FIELDS.md):
+`wayexpand setup --backend ibus --evdev-apps` previews the browser allowlist
+and ownership handoff before applying it. If you do not accept raw capture,
+open **Quick Picker (copy and paste)** from Diagnostics. Browser and
+embedded-editor support must be verified per client; success in one GTK field
+does not establish it.
 
 ## Advanced CLI setup and route diagnostics
 
