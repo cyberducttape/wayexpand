@@ -3736,7 +3736,7 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
             id: "manifest-scope",
             title: "",
             state: IbusCheckState::Fail,
-            problem_id: Some("WX-IBUS-MANIFEST-SCOPE-001"),
+            problem_id: Some("WX-IBUS-MULTIUSER-001"),
             detail: "shared manifest refers to a home-directory executable".into(),
             fix: None,
         }],
@@ -3746,7 +3746,7 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
         "checks": [{
             "id": "manifest-scope",
             "state": "fail",
-            "problem_id": "WX-IBUS-MANIFEST-SCOPE-001",
+            "problem_id": "WX-IBUS-MULTIUSER-001",
             "title": "Shared IBus engine uses a protected system executable",
             "detail": "The shared component points to a home-directory executable.",
             "fix": "Install a system-owned engine executable."
@@ -3778,8 +3778,14 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
         "unsafe shared registration must be visible in the consent dialog: {semantics}"
     );
     assert!(
-        semantics.contains("Next: Install a system-owned engine executable."),
-        "the dialog must explain that the unsafe scope will be repaired: {semantics}"
+        semantics.contains(
+            "Continue below to install a protected, system-owned IBus engine. WayExpand will ask before requesting administrator approval."
+        ),
+        "the dialog must explain the repair and administrator approval step: {semantics}"
+    );
+    assert!(
+        semantics.contains("The shared keyboard integration currently points to a program in your personal folder."),
+        "the default view should explain the issue without exposing component paths: {semantics}"
     );
 }
 

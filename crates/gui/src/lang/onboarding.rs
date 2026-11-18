@@ -274,6 +274,10 @@ texts! {
         "Continue below to install a protected, system-owned IBus engine. WayExpand will ask before requesting administrator approval.",
         "Fahren Sie unten fort, um eine geschützte, systemeigene IBus-Engine zu installieren. WayExpand fragt, bevor eine Administratorfreigabe angefordert wird.",
         "Lanjutkan di bawah untuk memasang mesin IBus milik sistem yang terlindungi. WayExpand akan meminta persetujuan sebelum meminta akses administrator.";
+    setup_system_registration_reason =>
+        "The shared keyboard integration currently points to a program in your personal folder. WayExpand needs to install a protected system copy so the integration works safely for all accounts.",
+        "Die gemeinsame Tastaturintegration verweist derzeit auf ein Programm in Ihrem persönlichen Ordner. WayExpand muss eine geschützte Systemkopie installieren, damit die Integration für alle Konten sicher funktioniert.",
+        "Integrasi papan ketik bersama saat ini mengarah ke program di folder pribadi Anda. WayExpand perlu memasang salinan sistem yang terlindungi agar integrasi berfungsi dengan aman untuk semua akun.";
     setup_consent_checkbox =>
         "I understand the interleaving and partial-write risk and want to enable tracked-focus replacement.",
         "Ich verstehe das Risiko vermischter und unvollständiger Eingaben und möchte die fokusverfolgte Ersetzung aktivieren.",

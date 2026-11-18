@@ -1496,24 +1496,31 @@ impl GuiApp {
                             format!(" [{problem_id}]")
                         };
                         ui.label(format!("{symbol} {title}{id}"));
-                        ui.label(
-                            RichText::new(detail)
-                                .small()
-                                .color(ui.visuals().weak_text_color()),
-                        );
                         if problem_id == "WX-IBUS-MULTIUSER-001" {
+                            ui.label(
+                                RichText::new(self.strings.setup_system_registration_reason())
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
+                            );
                             ui.label(
                                 RichText::new(self.strings.setup_system_registration_action())
                                     .small(),
                             );
-                        } else if let Some(fix) = fix {
+                        } else {
                             ui.label(
-                                RichText::new(format!(
-                                    "{} {fix}",
-                                    self.strings.setup_check_action()
-                                ))
-                                .small(),
+                                RichText::new(detail)
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
                             );
+                            if let Some(fix) = fix {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} {fix}",
+                                        self.strings.setup_check_action()
+                                    ))
+                                    .small(),
+                                );
+                            }
                         }
                     }
                 });
