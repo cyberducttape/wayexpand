@@ -848,13 +848,28 @@ impl GuiApp {
                     );
                     ui.indent("first_run_snippet", |ui| {
                         if let Some((trigger, replacement)) = &test_snippet {
-                            ui.colored_label(
-                                palette.success,
-                                crate::lang::fill(
-                                    self.strings.first_run_snippet_ready(),
-                                    &[&trigger, &replacement],
-                                ),
-                            );
+                            ui.label(self.strings.first_run_test_trigger_label());
+                            ui.horizontal_wrapped(|ui| {
+                                ui.colored_label(
+                                    palette.success,
+                                    RichText::new(trigger).strong().monospace(),
+                                );
+                                if theme::secondary_button(
+                                    ui,
+                                    palette,
+                                    self.strings.first_run_copy_trigger(),
+                                )
+                                .clicked()
+                                {
+                                    ui.ctx().copy_text(trigger.clone());
+                                    self.status =
+                                        Status::info(self.strings.first_run_trigger_copied());
+                                }
+                            });
+                            ui.label(crate::lang::fill(
+                                self.strings.first_run_expected_output(),
+                                &[replacement],
+                            ));
                         } else {
                             ui.label(
                                 RichText::new(self.strings.onboarding_snippet_help())

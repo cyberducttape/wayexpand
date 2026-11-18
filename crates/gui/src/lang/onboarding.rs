@@ -541,10 +541,22 @@ texts! {
         "Check again",
         "Erneut prüfen",
         "Periksa lagi";
-    first_run_snippet_ready =>
-        "Test snippet saved: {trigger} → “{replacement}”. Step 3 checks that it appears in a text field.",
-        "Testsnippet gespeichert: {trigger} → „{replacement}“. In Schritt 3 wird geprüft, ob der Text im Eingabefeld erscheint.",
-        "Cuplikan uji tersimpan: {trigger} → “{replacement}”. Langkah 3 memeriksa apakah teks muncul di kolom.";
+    first_run_test_trigger_label =>
+        "TEST TRIGGER",
+        "TESTKÜRZEL",
+        "PEMICU UJI";
+    first_run_copy_trigger =>
+        "Copy trigger",
+        "Kürzel kopieren",
+        "Salin pemicu";
+    first_run_trigger_copied =>
+        "Test trigger copied. Type it in the test field.",
+        "Testkürzel kopiert. Geben Sie es im Testfeld ein.",
+        "Pemicu uji disalin. Ketikkan di kolom uji.";
+    first_run_expected_output =>
+        "Expected output: {0}",
+        "Erwartete Ausgabe: {0}",
+        "Hasil yang diharapkan: {0}";
     first_run_test_needs_connection =>
         "Finish step 1 first. Until then you can copy snippets with Quick Picker and paste them yourself.",
         "Schließen Sie zuerst Schritt 1 ab. Bis dahin können Sie Snippets mit dem Schnellwähler kopieren und selbst einfügen.",
