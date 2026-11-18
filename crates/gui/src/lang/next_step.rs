@@ -291,13 +291,13 @@ impl Strings {
                 "IBus tidak menemukan mesin WayExpand, jadi metode input tidak dapat dimulai."
             }
             (Problem::IbusManifestScopeInvalid, En) => {
-                "WayExpand's desktop integration points to a file in your personal folder. It needs a safe shared installation before the desktop can start it."
+                "WayExpand's desktop integration is not installed safely: it points to a program in a personal folder, or other accounts could change its files. It needs a protected shared installation before WayExpand treats it as ready."
             }
             (Problem::IbusManifestScopeInvalid, De) => {
-                "Die WayExpand-Desktopintegration verweist auf eine Datei in Ihrem persönlichen Ordner. Sie muss sicher für das System installiert werden, bevor der Desktop sie starten kann."
+                "Die WayExpand-Desktopintegration ist nicht sicher installiert: Sie verweist auf ein Programm in einem persönlichen Ordner, oder andere Konten könnten ihre Dateien ändern. Sie benötigt eine geschützte gemeinsame Installation, bevor WayExpand sie als bereit betrachtet."
             }
             (Problem::IbusManifestScopeInvalid, Id) => {
-                "Integrasi desktop WayExpand menunjuk ke berkas di folder pribadi Anda. Integrasi ini perlu dipasang dengan aman untuk sistem sebelum desktop dapat menjalankannya."
+                "Integrasi desktop WayExpand tidak terpasang dengan aman: integrasi ini menunjuk ke program di folder pribadi, atau akun lain dapat mengubah berkasnya. Integrasi ini perlu dipasang secara bersama dan terlindungi sebelum WayExpand menganggapnya siap."
             }
             (Problem::IbusDesktopRouteUnavailable, En) => {
                 "KWin is not routing keyboard input through IBus, so WayExpand cannot receive typing on this route."

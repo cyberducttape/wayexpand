@@ -1635,7 +1635,11 @@ pub(crate) fn repair(args: Args) -> Result<()> {
     ] {
         let dst = unit_dir.join(unit);
         let src = source.join(unit);
-        if !dst.exists() && src.is_file() {
+        // `exists()` follows symlinks, so a dangling link would be offered
+        // as a repair that `--apply` then fails to create (EEXIST). Only
+        // offer a link where nothing, not even a broken link, occupies the
+        // path; replacing an existing entry is not an automatic repair.
+        if fs::symlink_metadata(&dst).is_err() && src.is_file() {
             repairs.push((src, dst));
         }
     }
