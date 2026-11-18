@@ -424,7 +424,9 @@ impl GuiApp {
         // A running IBus engine is only a configured GNOME route when GNOME
         // has registered and actually selected the source. A connection by
         // itself must never look like a working desktop integration.
-        let route_ready = if gnome_ibus {
+        let route_ready = if self.installation_audit.ready == Some(false) {
+            false
+        } else if gnome_ibus {
             self.gnome_ibus_route_ready()
         } else if kde_ibus {
             self.ibus_route_active()
@@ -677,31 +679,13 @@ impl GuiApp {
                                 );
                             }
                         } else if route_ready {
-                            if self.installation_audit.ready == Some(false) {
-                                ui.colored_label(
-                                    palette.warning,
-                                    self.strings
-                                        .problem_text(super::Problem::InstallationIncomplete),
-                                );
-                                if theme::primary_button(
-                                    ui,
-                                    palette,
-                                    self.strings
-                                        .action_label(super::NextAction::CheckInstallation),
-                                )
-                                .clicked()
-                                {
-                                    self.perform_next_step(super::NextAction::CheckInstallation);
-                                }
-                            } else {
-                                ui.colored_label(
-                                    palette.success,
-                                    crate::lang::fill(
-                                        self.strings.first_run_connected(),
-                                        &[&route_state_detail],
-                                    ),
-                                );
-                            }
+                            ui.colored_label(
+                                palette.success,
+                                crate::lang::fill(
+                                    self.strings.first_run_connected(),
+                                    &[&route_state_detail],
+                                ),
+                            );
                         } else {
                             // One problem and one action: the same answer the
                             // banner under the header gives after first run.
