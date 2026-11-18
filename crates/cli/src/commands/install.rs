@@ -1,6 +1,6 @@
 //! Installation readiness and narrowly scoped, non-consent repairs.
 use super::Args;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::{
     env, fs,
@@ -650,6 +650,10 @@ fn gnome_extension_install_check(path: Option<&Path>, package_install: bool) -> 
 }
 
 pub(crate) fn checks() -> Vec<Check> {
+    checks_for_config(&wayexpand_core::default_config_path())
+}
+
+fn checks_for_config(config_path: &Path) -> Vec<Check> {
     let mut out = Vec::new();
     out.push(Check {
         component: "xdg_config_home",
@@ -809,12 +813,11 @@ pub(crate) fn checks() -> Vec<Check> {
             },
         });
     }
-    let config = wayexpand_core::default_config_path();
-    let valid = config.is_file() && wayexpand_core::Config::load(&config).is_ok();
+    let valid = config_path.is_file() && wayexpand_core::Config::load(config_path).is_ok();
     out.push(Check {
         component: "active_configuration",
         status: if valid { "pass" } else { "fail" },
-        path: config.display().to_string(),
+        path: config_path.display().to_string(),
         detail: "user's active configuration exists and parses",
     });
     let contract: toml::Value =
@@ -837,8 +840,8 @@ pub(crate) fn checks() -> Vec<Check> {
     }
     out
 }
-fn print_report(title: &str, json: bool) -> Result<bool> {
-    let rows = checks();
+fn print_report_for_config(title: &str, json: bool, config_path: &Path) -> Result<bool> {
+    let rows = checks_for_config(config_path);
     let healthy = rows.iter().all(|r| r.status != "fail");
     let identity = installation_identity();
     if json {
@@ -879,14 +882,21 @@ fn print_report(title: &str, json: bool) -> Result<bool> {
 }
 pub(crate) fn install_check(args: Args) -> Result<()> {
     let mut json = false;
-    for arg in args {
-        if arg == "--json" {
-            json = true
-        } else {
-            bail!("usage: wayexpand install-check [--json]")
+    let mut config_path = None;
+    let mut args = args;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--config" if config_path.is_none() => {
+                config_path = Some(PathBuf::from(
+                    args.next().context("--config requires a path")?,
+                ));
+            }
+            _ => bail!("usage: wayexpand install-check [--json] [--config PATH]"),
         }
     }
-    if !print_report("WayExpand installation audit", json)? {
+    let config_path = config_path.unwrap_or_else(wayexpand_core::default_config_path);
+    if !print_report_for_config("WayExpand installation audit", json, &config_path)? {
         bail!("installation audit found missing required components")
     }
     Ok(())

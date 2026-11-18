@@ -926,8 +926,8 @@ fn run_installation_audit(config_path: &std::path::Path) -> InstallationAudit {
     let mut command = std::process::Command::new(cli_executable());
     wayexpand_process_supervisor::configure_process_group(&mut command);
     let mut child = match command
-        .args(["install-check", "--json"])
-        .env("WAYEXPAND_CONFIG", config_path)
+        .args(["install-check", "--json", "--config"])
+        .arg(config_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
