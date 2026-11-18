@@ -164,17 +164,16 @@ You can start the same controlled field from the CLI:
 wayexpand debug --test ':wayexpand-test' --controlled-client
 ```
 
-The controlled field reads back whether it contains the exact replacement and
-requires WayExpand output counters to advance during the same test window before
-recording a pass. Those counters are aggregate; they are not uniquely linked to
-the trigger. The field result is observed directly, and its contents are never
-logged. If the controlled field cannot start or the replacement is multiline,
-the test falls back to visual confirmation. You can request the controlled
-field from the CLI with that command. If the guide added a numbered trigger
-because the base trigger was already in use, replace it with the displayed one.
-
-If the controlled test field cannot start, the existing visual confirmation
-flow can test an enabled static trigger in a normal, non-sensitive field.
+The controlled field observes the expected input sequence and reads back whether
+it contains the exact replacement; its contents are never logged. Automatic
+verification also requires a new output transaction ID during the test window.
+That ID is not bound directly to the trigger. If the route exposes only
+aggregate counters, the GUI asks you to confirm the exact result before marking
+the test complete. If the controlled field cannot start or the replacement is
+multiline, the test falls back to visual confirmation. You can request the
+controlled field from the CLI with that command. If the guide added a numbered
+trigger because the base trigger was already in use, replace it with the
+displayed one.
 
 When the visual fallback is used, follow its prompt, type the trigger once,
 inspect the resulting text, and confirm only if it exactly matches the expected
