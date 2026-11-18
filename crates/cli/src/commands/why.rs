@@ -716,6 +716,7 @@ fn report_json(
                 &route.diagnosis,
                 now,
                 route.terminal_paste_last_failure.as_deref(),
+                route.raw_capture_app_count.unwrap_or_default(),
             );
             serde_json::json!({
                 "state": verdict.code(),
@@ -976,7 +977,12 @@ fn print_report(
                     Some("Open WayExpand's snippet library, enable a keyboard expansion or create a text expansion, save, and run `wayexpand reload`. Then type its trigger in the affected application.".to_owned()),
                 )
             } else {
-                verdict_text(diagnosis, now, route.terminal_paste_last_failure.as_deref())
+                verdict_text(
+                    diagnosis,
+                    now,
+                    route.terminal_paste_last_failure.as_deref(),
+                    route.raw_capture_app_count.unwrap_or_default(),
+                )
             };
             let (pattern_match, delivery_status) = if empty_library {
                 ("not_matched", "not_attempted")
@@ -1032,6 +1038,7 @@ fn verdict_text(
     diagnosis: &ExpansionDiagnosis,
     now: u64,
     terminal_paste_failure: Option<&str>,
+    raw_capture_app_count: usize,
 ) -> (String, Option<String>) {
     use MatchingBlock as B;
     let verdict = diagnosis.verdict(now);
@@ -1136,7 +1143,9 @@ fn verdict_text(
             (answer.to_owned(), Some(fix.to_owned()))
         }
         Verdict::NoTypingSeen => (
-            if diagnosis.terminal_apps_only {
+            if diagnosis.terminal_apps_only && raw_capture_app_count > 0 {
+                "No typing has reached this route since it started. It handles configured terminal apps and explicitly allowlisted raw-capture apps."
+            } else if diagnosis.terminal_apps_only {
                 "No typing has reached this route since it started. It only handles your configured terminal apps."
             } else {
                 "No typing has reached this route since it started."
@@ -1151,7 +1160,9 @@ fn verdict_text(
         Verdict::NothingMatched => (
             format!(
                 "Typing reaches this route, but nothing has expanded in the last two minutes. Usually the text did not match: a typo, a word-boundary trigger typed right after a letter, or an app filter that leaves this app out{}.",
-                if diagnosis.terminal_apps_only {
+                if diagnosis.terminal_apps_only && raw_capture_app_count > 0 {
+                    ". This route skips apps outside the configured terminal and raw-capture app lists"
+                } else if diagnosis.terminal_apps_only {
                     ". This route also skips every app that is not one of your terminal apps"
                 } else {
                     ""
@@ -1436,7 +1447,7 @@ mod tests {
         DaemonRoute {
             source: "evdev".into(),
             backend: "libei".into(),
-            diagnosis: diagnosis("terminal_apps_only=true\n"),
+            diagnosis: diagnosis("terminal_apps_only=true\ninput_events_total=0\n"),
             capture_app_scope_state: capture_app_scope_state.map(str::to_owned),
             raw_capture_fallback_enabled: true,
             raw_capture_app_count: Some(15),
@@ -1465,6 +1476,19 @@ mod tests {
     }
 
     #[test]
+    fn no_input_guidance_names_configured_raw_capture_apps() {
+        let route = scoped_daemon_route(Some("allowed"));
+        let (answer, _) = verdict_text(
+            &route.diagnosis,
+            1,
+            None,
+            route.raw_capture_app_count.unwrap_or_default(),
+        );
+        assert!(answer.contains("explicitly allowlisted raw-capture apps"));
+        assert!(!answer.contains("only handles your configured terminal apps"));
+    }
+
+    #[test]
     fn every_verdict_has_an_answer_and_only_real_commands_as_fixes() {
         let bodies = [
             "matching_unavailable_reason=paused\n",
@@ -1486,7 +1510,7 @@ mod tests {
             .map(|command| command.name)
             .collect::<Vec<_>>();
         for body in bodies {
-            let (answer, fix) = verdict_text(&diagnosis(body), 1, None);
+            let (answer, fix) = verdict_text(&diagnosis(body), 1, None, 0);
             assert!(answer.ends_with('.'), "{body}: {answer}");
             let commands = fix
                 .iter()
