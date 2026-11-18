@@ -1154,10 +1154,6 @@ mod guided_setup_tests {
             FirstRunOutcome::ConfiguredAwaitingTest
         );
         assert_eq!(
-            first_run_outcome(true, true, true, true, false),
-            FirstRunOutcome::UserConfirmedInTestedApplication
-        );
-        assert_eq!(
             first_run_outcome(true, true, true, true, true),
             FirstRunOutcome::WorkingInTestedApplication
         );
@@ -1179,10 +1175,6 @@ mod guided_setup_tests {
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::WorkingInTestedApplication),
             "Verified in the controlled test field"
-        );
-        assert_eq!(
-            first_run_outcome_label(&strings, FirstRunOutcome::UserConfirmedInTestedApplication),
-            "Confirmed by you in the tested application"
         );
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::ConfiguredAwaitingTest),

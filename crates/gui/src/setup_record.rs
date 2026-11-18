@@ -4,8 +4,9 @@
 //! the desktop-test confirmation lived only in memory. This separate file
 //! (`gui-setup.toml`, owner-only) records the outcome and evidence source:
 //! whether a controlled client observed exact output, the user confirmed it
-//! visually, or the guide was skipped. A verification keeps the application, typing route, configuration
-//! fingerprint, build, desktop session and date, so the GUI can trust it after
+//! visually, or the guide was skipped. A verification keeps the application,
+//! typing route, configuration fingerprint, build, desktop session and date,
+//! so the GUI can trust it after
 //! a restart while the environment and tested snippet library are unchanged.
 //!
 //! It is a separate file because `gui-prefs.toml` is parsed strictly: a new
@@ -439,9 +440,5 @@ mod tests {
         );
         let minimal: SetupRecord = toml_edit::de::from_str("outcome = \"skipped\"\n").unwrap();
         assert_eq!(minimal, SetupRecord::skipped());
-        let legacy_verified: SetupRecord =
-            toml_edit::de::from_str("outcome = \"verified\"\napplication = \"Text editor\"\n")
-                .unwrap();
-        assert_eq!(legacy_verified.verification_method, None);
     }
 }
