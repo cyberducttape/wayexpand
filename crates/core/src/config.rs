@@ -202,11 +202,12 @@ pub struct Settings {
     /// Omitted when off so saved configs still load in older readers.
     #[serde(skip_serializing_if = "CompatibilityMode::is_off")]
     pub compatibility_mode: CompatibilityMode,
-    /// Longest insert-only payload, in characters, that a paced keystroke
-    /// route (the libei keysym fallback, about 83 characters a second) will
-    /// type. Automatic replacements on non-atomic routes have a separate hard
-    /// eight-character ceiling. Omitted when it is the default so saved
-    /// configs still load in older readers.
+    /// Longest payload, in characters, that a paced keystroke route will type
+    /// or a non-atomic route will use for replacement. Replacement still
+    /// requires explicit compatibility consent and verified focus admission.
+    /// The default is intentionally short; raising it accepts a longer
+    /// non-atomic output window. Omitted when default so saved configs still
+    /// load in older readers.
     #[serde(
         default = "default_keystroke_max_chars",
         skip_serializing_if = "is_default_keystroke_max_chars"

@@ -65,7 +65,8 @@ pub enum InsertionStrategy {
 /// should use [`plan_replacement`] so trigger erasure and cursor movement are
 /// included in the paced-work estimate. Unknown or unsupported routes fail to
 /// the manual clipboard path. Paced synthesis is recommended only when it fits
-/// the route limit and hard non-atomic replacement ceiling.
+/// the route limit. Runtime output also requires explicit compatibility
+/// consent and applies the user's configured output limit before sending text.
 pub fn plan_insertion(
     characters: usize,
     route: Option<InsertionRouteCapabilities>,
@@ -91,11 +92,6 @@ pub fn plan_replacement(
     let Some(route) = route else {
         return InsertionStrategy::ClipboardAssistedPaste;
     };
-    if !route.atomic_verified_replace
-        && output_characters > MAX_AUTOMATIC_NONATOMIC_REPLACEMENT_CHARS
-    {
-        return InsertionStrategy::ClipboardAssistedPaste;
-    }
     if route.max_text_chars > 0 && output_characters > route.max_text_chars {
         return InsertionStrategy::ClipboardAssistedPaste;
     }
@@ -155,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    fn long_nonatomic_native_commit_uses_manual_paste_even_with_consent() {
+    fn long_nonatomic_native_commit_can_use_explicit_compatibility_consent() {
         assert_eq!(
             plan_insertion(
                 5_000,
@@ -166,7 +162,7 @@ mod tests {
                 }),
                 CompatibilityMode::TrackedFocus,
             ),
-            InsertionStrategy::ClipboardAssistedPaste
+            InsertionStrategy::NativeTextCommit
         );
     }
 
@@ -178,8 +174,10 @@ mod tests {
         );
         assert_eq!(
             plan_insertion(250, Some(route()), CompatibilityMode::TrackedFocus),
-            InsertionStrategy::ClipboardAssistedPaste,
-            "raising the keysym setting cannot lift the hard replacement-integrity ceiling"
+            InsertionStrategy::PacedSyntheticKeystrokes {
+                predicted_ms: 3_013
+            },
+            "the configured route limit governs paced output"
         );
         assert_eq!(
             plan_insertion(251, Some(route()), CompatibilityMode::TrackedFocus),

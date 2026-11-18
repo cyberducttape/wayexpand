@@ -1961,7 +1961,8 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
 }
 
 #[test]
-fn non_atomic_replacement_has_a_hard_short_limit_even_when_route_limit_is_raised() {
+fn non_atomic_replacement_obeys_the_explicit_configured_limit() {
+    crate::set_keystroke_max_chars(1_000);
     let result = ExpansionResult {
         snippet_id: Arc::from(""),
         trigger: ":x".into(),
@@ -1988,23 +1989,21 @@ fn non_atomic_replacement_has_a_hard_short_limit_even_when_route_limit_is_raised
     assert!(matches!(
         ExpansionEngine::apply(&mut injector, &over_route_limit),
         crate::TransactionOutcome::NotApplied { ref source }
-            if source.message.contains("limited to 8 characters")
+            if source.message.contains("configured 250 characters")
     ));
     assert!(injector.calls.is_empty());
     let mut too_long = result.clone();
     too_long.insert = "r".repeat(8).into();
     too_long.reinsert_after = Some(' ');
-    assert!(matches!(
-        ExpansionEngine::apply(&mut injector, &too_long),
-        crate::TransactionOutcome::NotApplied { ref source }
-            if source.message.contains("limited to 8 characters")
-    ));
-    assert!(injector.calls.is_empty());
+    assert!(ExpansionEngine::apply(&mut injector, &too_long).is_output_acknowledged());
+    assert_eq!(injector.calls.len(), 2);
+    injector.calls.clear();
     let mut fits = result;
     fits.insert = "r".repeat(7).into();
     fits.reinsert_after = Some(' ');
     assert!(ExpansionEngine::apply(&mut injector, &fits).is_output_acknowledged());
     assert_eq!(injector.calls.len(), 2);
+    crate::set_keystroke_max_chars(crate::DEFAULT_KEYSTROKE_MAX_CHARS);
 }
 
 struct UnknownRatePacedInjector {
