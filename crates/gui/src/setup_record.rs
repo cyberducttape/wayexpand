@@ -2,9 +2,9 @@
 //!
 //! `gui-prefs.toml` records only that the guide was finished or skipped, and
 //! the desktop-test confirmation lived only in memory. This separate file
-//! (`gui-setup.toml`, owner-only) records the outcome itself: whether the
-//! user confirmed an exact insertion in a real application, or skipped the
-//! guide. A verification keeps the application, typing route, configuration
+//! (`gui-setup.toml`, owner-only) records the outcome and evidence source:
+//! whether a controlled client observed exact output, the user confirmed it
+//! visually, or the guide was skipped. A verification keeps the application, typing route, configuration
 //! fingerprint, build, desktop session and date, so the GUI can trust it after
 //! a restart while the environment and tested snippet library are unchanged.
 //!
@@ -20,15 +20,27 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum SetupOutcome {
-    /// The user confirmed an exact insertion in a real application.
+    /// Exact insertion was observed or confirmed in a real application.
     Verified,
     /// The user dismissed the guide; nothing was verified.
     Skipped,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum VerificationMethod {
+    /// A controlled client read the exact resulting text without retaining it.
+    MachineObserved,
+    /// The user visually confirmed the exact result in an application.
+    UserConfirmed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub(crate) struct SetupRecord {
     pub outcome: SetupOutcome,
+    /// Old records predate evidence provenance and represent user confirmation.
+    #[serde(default)]
+    pub verification_method: Option<VerificationMethod>,
     /// The application type the user tested in ("Text editor", ...).
     #[serde(default)]
     pub application: Option<String>,
@@ -92,8 +104,21 @@ pub(crate) struct Scope<'a> {
 
 impl SetupRecord {
     pub(crate) fn verified(application: &str, scope: &Scope<'_>) -> Self {
+        Self::verified_with_method(application, scope, VerificationMethod::UserConfirmed)
+    }
+
+    pub(crate) fn machine_verified(application: &str, scope: &Scope<'_>) -> Self {
+        Self::verified_with_method(application, scope, VerificationMethod::MachineObserved)
+    }
+
+    fn verified_with_method(
+        application: &str,
+        scope: &Scope<'_>,
+        method: VerificationMethod,
+    ) -> Self {
         Self {
             outcome: SetupOutcome::Verified,
+            verification_method: Some(method),
             application: Some(application.to_owned()),
             route: scope.route.map(str::to_owned),
             route_instance: scope.route_instance.map(str::to_owned),
@@ -111,6 +136,7 @@ impl SetupRecord {
     pub(crate) fn skipped() -> Self {
         Self {
             outcome: SetupOutcome::Skipped,
+            verification_method: None,
             application: None,
             route: None,
             build: None,
@@ -174,7 +200,7 @@ impl SetupRecord {
         (scope.route_instance != Some(instance)).then_some(Staleness::RouteRestarted)
     }
 
-    /// A user-confirmed insertion that covers what is running now.
+    /// An insertion result that covers what is running now.
     #[cfg(test)]
     pub(crate) fn covers(&self, scope: &Scope<'_>) -> bool {
         self.outcome == SetupOutcome::Verified && self.staleness(scope).is_none()
@@ -272,6 +298,7 @@ mod tests {
     fn verified(route: &str, desktop: &str) -> SetupRecord {
         SetupRecord {
             outcome: SetupOutcome::Verified,
+            verification_method: Some(super::VerificationMethod::UserConfirmed),
             application: Some("Text editor".into()),
             route: Some(route.into()),
             build: Some("1.3.6 (abc)".into()),
@@ -412,5 +439,9 @@ mod tests {
         );
         let minimal: SetupRecord = toml_edit::de::from_str("outcome = \"skipped\"\n").unwrap();
         assert_eq!(minimal, SetupRecord::skipped());
+        let legacy_verified: SetupRecord =
+            toml_edit::de::from_str("outcome = \"verified\"\napplication = \"Text editor\"\n")
+                .unwrap();
+        assert_eq!(legacy_verified.verification_method, None);
     }
 }

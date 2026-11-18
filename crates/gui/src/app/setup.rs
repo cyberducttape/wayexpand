@@ -798,8 +798,10 @@ impl GuiApp {
             session: review.session.as_deref(),
             build: &review.build,
         };
-        let record =
-            crate::setup_record::SetupRecord::verified(&review.application_class, &tested_scope);
+        let record = crate::setup_record::SetupRecord::machine_verified(
+            &review.application_class,
+            &tested_scope,
+        );
         let route = self.current_route_label();
         let route_instance = self.current_route_instance();
         let desktop = crate::setup_record::current_desktop();

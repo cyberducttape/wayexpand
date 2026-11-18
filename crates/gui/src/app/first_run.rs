@@ -9,6 +9,7 @@ const DEFAULT_PICKER_SHORTCUT: &str = "Ctrl+Alt+Space";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FirstRunOutcome {
     WorkingInTestedApplication,
+    UserConfirmedInTestedApplication,
     ConfiguredAwaitingTest,
     SafeFallback,
     SetupIncomplete,
@@ -19,11 +20,16 @@ fn first_run_outcome(
     replacement_admitted: bool,
     test_snippet_available: bool,
     real_app_test_verified: bool,
+    machine_observed: bool,
 ) -> FirstRunOutcome {
     if !route_ready {
         FirstRunOutcome::SetupIncomplete
     } else if replacement_admitted && test_snippet_available && real_app_test_verified {
-        FirstRunOutcome::WorkingInTestedApplication
+        if machine_observed {
+            FirstRunOutcome::WorkingInTestedApplication
+        } else {
+            FirstRunOutcome::UserConfirmedInTestedApplication
+        }
     } else if replacement_admitted {
         FirstRunOutcome::ConfiguredAwaitingTest
     } else {
@@ -34,6 +40,7 @@ fn first_run_outcome(
 fn first_run_outcome_label(strings: &Strings, outcome: FirstRunOutcome) -> &'static str {
     match outcome {
         FirstRunOutcome::WorkingInTestedApplication => strings.outcome_working(),
+        FirstRunOutcome::UserConfirmedInTestedApplication => strings.outcome_user_confirmed(),
         FirstRunOutcome::ConfiguredAwaitingTest => strings.outcome_configured_awaiting_test(),
         FirstRunOutcome::SafeFallback => strings.outcome_safe_fallback(),
         FirstRunOutcome::SetupIncomplete => strings.outcome_setup_incomplete(),
@@ -557,6 +564,11 @@ impl GuiApp {
             replacement_test_admitted,
             test_snippet.is_some(),
             self.expansion_observed(),
+            self.verification_status().is_some_and(|(record, stale)| {
+                stale.is_none()
+                    && record.verification_method
+                        == Some(crate::setup_record::VerificationMethod::MachineObserved)
+            }),
         );
         let compatibility_replacement_active = compatibility_replacement_is_active(
             route_ready,
@@ -869,12 +881,20 @@ impl GuiApp {
                         palette,
                         3,
                         self.strings.step_test_title(),
-                        outcome == FirstRunOutcome::WorkingInTestedApplication,
+                        matches!(
+                            outcome,
+                            FirstRunOutcome::WorkingInTestedApplication
+                                | FirstRunOutcome::UserConfirmedInTestedApplication
+                        ),
                     );
                     ui.indent("first_run_test", |ui| {
                         let mut offer_picker =
                             self.config.expansion.iter().any(|entry| entry.enabled);
-                        if outcome == FirstRunOutcome::WorkingInTestedApplication {
+                        if matches!(
+                            outcome,
+                            FirstRunOutcome::WorkingInTestedApplication
+                                | FirstRunOutcome::UserConfirmedInTestedApplication
+                        ) {
                             offer_picker = false;
                             let saved_application = self
                                 .verification_status()
@@ -887,7 +907,11 @@ impl GuiApp {
                                 .unwrap_or(self.strings.the_tested_application());
                             ui.colored_label(
                                 palette.success,
-                                self.strings.confirmed_in_application(application),
+                                if outcome == FirstRunOutcome::WorkingInTestedApplication {
+                                    self.strings.machine_verified_in_application(application)
+                                } else {
+                                    self.strings.confirmed_in_application(application)
+                                },
                             );
                         } else if !route_ready {
                             ui.label(
@@ -1117,29 +1141,33 @@ mod guided_setup_tests {
     #[test]
     fn first_run_outcome_requires_a_ready_route_and_a_real_app_confirmation() {
         assert_eq!(
-            first_run_outcome(false, false, false, false),
+            first_run_outcome(false, false, false, false, false),
             FirstRunOutcome::SetupIncomplete
         );
         assert_eq!(
-            first_run_outcome(false, true, true, true),
+            first_run_outcome(false, true, true, true, true),
             FirstRunOutcome::SetupIncomplete,
             "a stale success cannot hide an unavailable route"
         );
         assert_eq!(
-            first_run_outcome(true, true, true, false),
+            first_run_outcome(true, true, true, false, false),
             FirstRunOutcome::ConfiguredAwaitingTest
         );
         assert_eq!(
-            first_run_outcome(true, true, true, true),
+            first_run_outcome(true, true, true, true, false),
+            FirstRunOutcome::UserConfirmedInTestedApplication
+        );
+        assert_eq!(
+            first_run_outcome(true, true, true, true, true),
             FirstRunOutcome::WorkingInTestedApplication
         );
         assert_eq!(
-            first_run_outcome(true, false, true, true),
+            first_run_outcome(true, false, true, true, true),
             FirstRunOutcome::SafeFallback,
             "a consent change invalidates the previous ready state"
         );
         assert_eq!(
-            first_run_outcome(true, true, false, true),
+            first_run_outcome(true, true, false, true, true),
             FirstRunOutcome::ConfiguredAwaitingTest,
             "removing the test snippet invalidates the previous ready state"
         );
@@ -1150,7 +1178,11 @@ mod guided_setup_tests {
         let strings = crate::lang::Strings::new(crate::lang::Language::English);
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::WorkingInTestedApplication),
-            "Working in tested application"
+            "Verified in the controlled test field"
+        );
+        assert_eq!(
+            first_run_outcome_label(&strings, FirstRunOutcome::UserConfirmedInTestedApplication),
+            "Confirmed by you in the tested application"
         );
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::ConfiguredAwaitingTest),

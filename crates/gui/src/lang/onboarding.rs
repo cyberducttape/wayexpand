@@ -4,9 +4,13 @@ use super::{Language, Strings};
 
 texts! {
     outcome_working =>
-        "Working in tested application",
-        "Funktioniert in der getesteten Anwendung",
-        "Berfungsi di aplikasi yang diuji";
+        "Verified in the controlled test field",
+        "Im kontrollierten Testfeld verifiziert",
+        "Terverifikasi di kolom uji terkontrol";
+    outcome_user_confirmed =>
+        "Confirmed by you in the tested application",
+        "Von Ihnen in der getesteten Anwendung bestätigt",
+        "Anda mengonfirmasi di aplikasi yang diuji";
     outcome_configured_awaiting_test =>
         "Configured, awaiting test",
         "Konfiguriert, Test ausstehend",
@@ -468,6 +472,20 @@ impl Strings {
             ),
             Language::Indonesian => format!(
                 "Anda mengonfirmasi penggantian uji yang tepat di {application}. Ini hanya memverifikasi aplikasi dan sesi tersebut."
+            ),
+        }
+    }
+
+    pub fn machine_verified_in_application(&self, application: &str) -> String {
+        match self.lang {
+            Language::English => format!(
+                "WayExpand observed the exact replacement in {application}. This verifies that controlled field and session only."
+            ),
+            Language::German => format!(
+                "WayExpand hat die exakte Ersetzung in {application} beobachtet. Dies verifiziert nur dieses kontrollierte Feld und diese Sitzung."
+            ),
+            Language::Indonesian => format!(
+                "WayExpand mengamati penggantian yang tepat di {application}. Ini hanya memverifikasi kolom terkontrol dan sesi tersebut."
             ),
         }
     }
