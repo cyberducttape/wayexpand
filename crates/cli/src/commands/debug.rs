@@ -592,6 +592,7 @@ enum ControlledClientResult {
     Verified,
     InputNotObserved,
     TriggerNotReplaced,
+    OutputWithoutTrigger,
     FieldMismatch,
     Closed,
     Unavailable,
@@ -664,6 +665,7 @@ fn controlled_client_result(output: &str) -> ControlledClientResult {
         Some("verified") => ControlledClientResult::Verified,
         Some("input_not_observed") => ControlledClientResult::InputNotObserved,
         Some("trigger_not_replaced") => ControlledClientResult::TriggerNotReplaced,
+        Some("output_without_trigger") => ControlledClientResult::OutputWithoutTrigger,
         Some("field_mismatch") => ControlledClientResult::FieldMismatch,
         Some("closed") => ControlledClientResult::Closed,
         Some("unavailable") => ControlledClientResult::Unavailable,
@@ -742,6 +744,10 @@ fn desktop_test_for(
                     ControlledClientResult::TriggerNotReplaced => (
                         "The trigger reached the controlled GTK field, but WayExpand did not replace it.",
                         "WX-TEST-REPLACE-001",
+                    ),
+                    ControlledClientResult::OutputWithoutTrigger => (
+                        "The expected text appeared, but the controlled field did not observe the configured trigger first. The result was not counted as a verified expansion.",
+                        "WX-TEST-CORRELATION-002",
                     ),
                     ControlledClientResult::FieldMismatch => (
                         "The controlled GTK field did not contain the exact expected result. Its contents were not recorded.",
