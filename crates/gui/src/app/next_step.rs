@@ -1461,4 +1461,39 @@ mod tests {
         };
         assert_eq!(next_step(&selected), None);
     }
+
+    #[test]
+    fn kde_repairs_unsafe_shared_ibus_registration_before_live_testing_a_crash_warning() {
+        let state = Situation {
+            ibus_route_expected: true,
+            ibus_engine_registered: IbusCheckState::Pass,
+            ibus_manifest_scope: IbusCheckState::Fail,
+            ibus_desktop_state: IbusCheckState::Warn,
+            ibus_desktop_problem_id: Some("WX-KWIN-IBUS-002"),
+            ibus_selection: IbusCheckState::Pass,
+            engine_state: IbusCheckState::Pass,
+            diagnostics_fresh: Some(true),
+            daemon_reachable: Some(true),
+            replacement_allowed: true,
+            ..Situation::default()
+        };
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::IbusManifestScopeInvalid, Action::RunSetup))
+        );
+
+        // Once the system-owned manifest is in place, the prior helper crash
+        // remains visible as a live test action instead of being discarded.
+        let registered = Situation {
+            ibus_manifest_scope: IbusCheckState::Pass,
+            ..state
+        };
+        assert_eq!(
+            next_step(&registered),
+            Some((
+                Problem::IbusDesktopRouteRecentlyCrashed,
+                Action::TestInApplication
+            ))
+        );
+    }
 }
