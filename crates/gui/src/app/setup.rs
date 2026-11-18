@@ -457,18 +457,25 @@ impl GuiApp {
             return Status::warning(self.strings.repair_result_unreadable());
         };
         let repairs = report.get("repairs").and_then(serde_json::Value::as_array);
-        let repaired = report.get("schema").and_then(serde_json::Value::as_u64) == Some(1)
+        let valid_apply_report = report.get("schema").and_then(serde_json::Value::as_u64)
+            == Some(1)
             && report.get("mode").and_then(serde_json::Value::as_str) == Some("apply")
             && repairs.is_some_and(|repairs| {
                 repairs.iter().all(|repair| {
                     repair.get("status").and_then(serde_json::Value::as_str) == Some("repaired")
                 })
             });
+        let repairs_applied =
+            valid_apply_report && repairs.is_some_and(|repairs| !repairs.is_empty());
+        let no_repairs_remained = valid_apply_report && repairs.is_some_and(Vec::is_empty);
         self.installation_repair_preview = None;
         self.installation_repair_dialog_open = false;
-        if repaired {
+        if repairs_applied {
             self.refresh_diagnostics(false);
             Status::info(self.strings.repair_completed())
+        } else if no_repairs_remained {
+            self.refresh_diagnostics(false);
+            Status::info(self.strings.repair_already_completed())
         } else {
             self.diagnostics_open = true;
             Status::warning(self.strings.repair_result_unreadable())
@@ -1472,7 +1479,9 @@ impl GuiApp {
             "!" => 1,
             _ => 2,
         });
-        attention.truncate(3);
+        // Put one prioritized action in the default view. The complete list
+        // remains available in the expandable checks below for support work.
+        attention.truncate(1);
         egui::Modal::new(egui::Id::new("ibus_replacement_consent")).show(ctx, |ui| {
             ui.set_width(430.0);
             ui.heading(self.strings.setup_title());
@@ -1492,7 +1501,12 @@ impl GuiApp {
                                 .small()
                                 .color(ui.visuals().weak_text_color()),
                         );
-                        if let Some(fix) = fix {
+                        if problem_id == "WX-IBUS-MULTIUSER-001" {
+                            ui.label(
+                                RichText::new(self.strings.setup_system_registration_action())
+                                    .small(),
+                            );
+                        } else if let Some(fix) = fix {
                             ui.label(
                                 RichText::new(format!(
                                     "{} {fix}",

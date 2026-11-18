@@ -270,6 +270,10 @@ texts! {
         "The keyboard integration is already registered. No administrator approval is needed for this step.",
         "Die Tastaturintegration ist bereits registriert. Für diesen Schritt ist keine Administratorfreigabe nötig.",
         "Integrasi papan ketik sudah terdaftar. Langkah ini tidak memerlukan persetujuan administrator.";
+    setup_system_registration_action =>
+        "Continue below to install a protected, system-owned IBus engine. WayExpand will ask before requesting administrator approval.",
+        "Fahren Sie unten fort, um eine geschützte, systemeigene IBus-Engine zu installieren. WayExpand fragt, bevor eine Administratorfreigabe angefordert wird.",
+        "Lanjutkan di bawah untuk memasang mesin IBus milik sistem yang terlindungi. WayExpand akan meminta persetujuan sebelum meminta akses administrator.";
     setup_consent_checkbox =>
         "I understand the interleaving and partial-write risk and want to enable tracked-focus replacement.",
         "Ich verstehe das Risiko vermischter und unvollständiger Eingaben und möchte die fokusverfolgte Ersetzung aktivieren.",
@@ -652,6 +656,10 @@ texts! {
         "The missing service links were restored. WayExpand is checking whether the desktop route is ready; text insertion still needs a real-app test.",
         "Die fehlenden Dienstverknüpfungen wurden wiederhergestellt. WayExpand prüft, ob die Desktop-Route bereit ist; das Einfügen von Text muss weiterhin in einer echten Anwendung getestet werden.",
         "Tautan layanan yang hilang telah dipulihkan. WayExpand sedang memeriksa kesiapan rute desktop; penyisipan teks tetap perlu diuji di aplikasi nyata.";
+    repair_already_completed =>
+        "No repair remained to apply. WayExpand is refreshing installation and desktop checks.",
+        "Es war keine Reparatur mehr nötig. WayExpand aktualisiert die Installations- und Desktopprüfungen.",
+        "Tidak ada perbaikan yang tersisa. WayExpand sedang memperbarui pemeriksaan instalasi dan desktop.";
     repair_check_unreadable =>
         "WayExpand could not verify the repair plan. Open Diagnostics and check the installation report.",
         "WayExpand konnte den Reparaturplan nicht prüfen. Öffnen Sie die Diagnose und prüfen Sie den Installationsbericht.",
