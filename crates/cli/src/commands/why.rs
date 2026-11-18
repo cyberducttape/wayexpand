@@ -27,6 +27,8 @@ struct DaemonRoute {
     backend: String,
     diagnosis: ExpansionDiagnosis,
     capture_app_scope_state: Option<String>,
+    raw_capture_fallback_enabled: bool,
+    raw_capture_app_count: Option<usize>,
     matching_unavailable_reason: Option<String>,
     window_process_identity_state: Option<String>,
     terminal_paste_last_failure: Option<String>,
@@ -61,6 +63,10 @@ fn daemon_route(status: &DaemonStatus) -> Option<DaemonRoute> {
         backend: status.field("backend").unwrap_or_default().to_owned(),
         diagnosis: ExpansionDiagnosis::from_status(status),
         capture_app_scope_state: status.field("capture_app_scope_state").map(str::to_owned),
+        raw_capture_fallback_enabled: status.field("raw_capture_fallback_enabled") == Some("true"),
+        raw_capture_app_count: status
+            .field("raw_capture_app_count")
+            .and_then(|count| count.parse::<usize>().ok()),
         matching_unavailable_reason: status
             .field("matching_unavailable_reason")
             .map(str::to_owned),
@@ -80,7 +86,7 @@ fn daemon_route(status: &DaemonStatus) -> Option<DaemonRoute> {
 /// Current focus-scope refusal for a terminal-only route. This is live route
 /// health, not a claim about the identity of an earlier target application.
 fn terminal_scope_guidance(route: &DaemonRoute) -> Option<InputMethodGuidance> {
-    if !route.diagnosis.terminal_apps_only {
+    if !route_is_limited_for_focused_app(route) {
         return None;
     }
     match route.matching_unavailable_reason.as_deref() {
@@ -100,11 +106,32 @@ fn terminal_scope_guidance(route: &DaemonRoute) -> Option<InputMethodGuidance> {
         }),
         Some("application_scope_denied") => Some(InputMethodGuidance {
             state: "terminal_app_not_allowed",
-            answer: "The currently focused application is outside the configured terminal-only allowlist, so this route will not match there.",
-            action: "If this is a terminal you intend to support, run `wayexpand debug --focused-app-id --json` while it is focused and add only its verified application ID to `[settings].terminal_apps`; then restart the selected service and retest. Browser and editor fields need another route or Quick Picker copy-and-paste.",
+            answer: if route.raw_capture_fallback_enabled {
+                "The focused application is outside the configured terminal and raw-capture app lists, so this evdev route will not match there."
+            } else {
+                "The currently focused application is outside the configured terminal-only allowlist, so this route will not match there."
+            },
+            action: if route.raw_capture_fallback_enabled {
+                "If you explicitly accept raw keyboard capture in this app, run `wayexpand debug --focused-app-id --json`, add only its verified application ID to `[settings].raw_capture_apps`, and retest. Otherwise use a supported IBus route or Quick Picker copy-and-paste."
+            } else {
+                "If this is a terminal you intend to support, run `wayexpand debug --focused-app-id --json` while it is focused and add only its verified application ID to `[settings].terminal_apps`; then restart the selected service and retest. Browser and editor fields need another route or Quick Picker copy-and-paste."
+            },
         }),
         _ => None,
     }
+}
+
+/// A terminal-scoped evdev service can also own explicitly allowlisted raw
+/// capture apps. When its live focus scope says the focused app is allowed,
+/// diagnose that route instead of presenting KDE's parallel IBus route as
+/// the one that should receive this app's input.
+fn route_is_limited_for_focused_app(route: &DaemonRoute) -> bool {
+    route.diagnosis.terminal_apps_only
+        && route.capture_app_scope_state.as_deref() != Some("allowed")
+}
+
+fn ibus_route_relevant(daemon: Option<&DaemonRoute>) -> bool {
+    daemon.is_none_or(|route| route.source == "stdin" || route_is_limited_for_focused_app(route))
 }
 
 pub(crate) fn why_command(args: Args) -> Result<()> {
@@ -204,9 +231,7 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
     // IBus evidence available in both cases; focused-field evidence determines
     // which route can explain the latest application input.
     let desktop = IbusDesktop::detect();
-    let ibus_route_relevant = daemon
-        .as_ref()
-        .is_none_or(|route| route.source == "stdin" || route.diagnosis.terminal_apps_only);
+    let ibus_route_relevant = ibus_route_relevant(daemon.as_ref());
     let input_method_route = (ibus_route_relevant
         && daemon_status_compatible != Some(false)
         && matches!(desktop, IbusDesktop::Gnome | IbusDesktop::KdeWayland))
@@ -605,6 +630,8 @@ fn report_json(
             "matching_block": scope_guidance.as_ref().map(|guidance| guidance.state).or_else(|| diagnosis.matching_block.map(MatchingBlock::code)),
             "matching_unavailable_reason": route.matching_unavailable_reason.as_deref(),
             "capture_app_scope_state": route.capture_app_scope_state.as_deref(),
+            "raw_capture_fallback_enabled": route.raw_capture_fallback_enabled,
+            "raw_capture_app_count": route.raw_capture_app_count,
             "window_process_identity_state": route.window_process_identity_state.as_deref(),
             "last_outcome": match verdict {
                 Verdict::LastStopped(kind) => Some(kind.code()),
@@ -919,7 +946,16 @@ fn print_report(
         let diagnosis = &route.diagnosis;
         print!("Keyboard route ({} → {}", route.source, route.backend);
         if diagnosis.terminal_apps_only {
-            print!(", terminal apps only");
+            if route.raw_capture_fallback_enabled
+                && route.raw_capture_app_count.is_some_and(|count| count > 0)
+            {
+                print!(
+                    ", terminal apps plus app-scoped raw capture ({} apps)",
+                    route.raw_capture_app_count.unwrap_or_default()
+                );
+            } else {
+                print!(", terminal apps only");
+            }
         }
         println!(")");
         if input_method.is_some() || scope_guidance.is_some() {
@@ -1396,6 +1432,38 @@ mod tests {
         ExpansionDiagnosis::from_status(&DaemonStatus::parse(&format!("running\n{body}")))
     }
 
+    fn scoped_daemon_route(capture_app_scope_state: Option<&str>) -> DaemonRoute {
+        DaemonRoute {
+            source: "evdev".into(),
+            backend: "libei".into(),
+            diagnosis: diagnosis("terminal_apps_only=true\n"),
+            capture_app_scope_state: capture_app_scope_state.map(str::to_owned),
+            raw_capture_fallback_enabled: true,
+            raw_capture_app_count: Some(15),
+            matching_unavailable_reason: None,
+            window_process_identity_state: Some("compositor-application-id".into()),
+            terminal_paste_last_failure: None,
+            enabled_expansions: Some(282),
+        }
+    }
+
+    #[test]
+    fn allowlisted_raw_capture_focus_is_diagnosed_as_the_active_route() {
+        let route = scoped_daemon_route(Some("allowed"));
+        assert!(!route_is_limited_for_focused_app(&route));
+        assert!(!ibus_route_relevant(Some(&route)));
+        assert!(terminal_scope_guidance(&route).is_none());
+    }
+
+    #[test]
+    fn unknown_or_denied_terminal_focus_keeps_ibus_as_a_possible_route() {
+        for scope in [None, Some("unknown"), Some("outside_allowlist")] {
+            let route = scoped_daemon_route(scope);
+            assert!(route_is_limited_for_focused_app(&route));
+            assert!(ibus_route_relevant(Some(&route)));
+        }
+    }
+
     #[test]
     fn every_verdict_has_an_answer_and_only_real_commands_as_fixes() {
         let bodies = [
@@ -1441,6 +1509,8 @@ mod tests {
                  recent_expansion_outcomes=[{\"at_unix\":4,\"completion\":\"input arrived before output\"}]\n",
             ),
             capture_app_scope_state: None,
+            raw_capture_fallback_enabled: false,
+            raw_capture_app_count: None,
             matching_unavailable_reason: None,
             window_process_identity_state: None,
             terminal_paste_last_failure: None,
