@@ -27,11 +27,22 @@ def main():
     try:
         contract = json.load(sys.stdin)
         trigger = contract["trigger"]
+        input_marker = contract["input_marker"]
         expected = contract["expected"]
-        if not isinstance(trigger, str) or not isinstance(expected, str):
+        if (
+            not isinstance(trigger, str)
+            or not isinstance(input_marker, str)
+            or not isinstance(expected, str)
+        ):
             report("invalid_contract")
             return 2
-        if not trigger or not expected or trigger == expected:
+        if (
+            not trigger
+            or not input_marker
+            or not expected
+            or trigger == expected
+            or input_marker == expected
+        ):
             report("invalid_contract")
             return 2
         if "\n" in expected or "\r" in expected:
@@ -62,7 +73,7 @@ def main():
     window.add(box)
 
     key_events = 0
-    trigger_observed = False
+    input_marker_observed = False
     finished = False
     started = GLib.get_monotonic_time()
 
@@ -71,16 +82,18 @@ def main():
         key_events += 1
         return False
 
-    def observe_trigger(_widget):
-        nonlocal trigger_observed
-        # The field starts empty. Seeing the exact configured trigger in this
+    def observe_input_marker(_widget):
+        nonlocal input_marker_observed
+        # The field starts empty. Seeing the expected typed input in this
         # field before its replacement rules out a pasted expected result as
-        # evidence that the desktop integration worked.
-        if entry.get_text() == trigger:
-            trigger_observed = True
+        # evidence that the desktop integration worked. Immediate IBus matches
+        # consume the final key, so input_marker may be the trigger prefix that
+        # the client actually receives.
+        if entry.get_text() == input_marker:
+            input_marker_observed = True
 
     entry.connect("key-press-event", count_key)
-    entry.connect("changed", observe_trigger)
+    entry.connect("changed", observe_input_marker)
 
     def finish(state):
         nonlocal finished
@@ -92,14 +105,14 @@ def main():
 
     def inspect_field():
         value = entry.get_text()
-        if value == expected and key_events > 0 and trigger_observed:
+        if value == expected and key_events > 0 and input_marker_observed:
             finish("verified")
             return GLib.SOURCE_REMOVE
         if GLib.get_monotonic_time() - started >= 45_000_000:
             if key_events == 0:
                 finish("input_not_observed")
-            elif value == expected and not trigger_observed:
-                finish("output_without_trigger")
+            elif value == expected and not input_marker_observed:
+                finish("output_without_input_marker")
             elif value == trigger:
                 finish("trigger_not_replaced")
             else:
@@ -118,7 +131,7 @@ def main():
         if finished
         and entry.get_text() == expected
         and key_events > 0
-        and trigger_observed
+        and input_marker_observed
         else 1
     )
 

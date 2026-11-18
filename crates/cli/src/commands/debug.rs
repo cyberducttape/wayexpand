@@ -592,16 +592,21 @@ enum ControlledClientResult {
     Verified,
     InputNotObserved,
     TriggerNotReplaced,
-    OutputWithoutTrigger,
+    OutputWithoutInputMarker,
     FieldMismatch,
     Closed,
+    CannotCorrelate,
     Unavailable,
 }
 
 /// Open a real GTK field and let it verify its own final text. Only the
 /// harmless test contract crosses the private stdin pipe; neither trigger
 /// nor replacement is printed, logged, or placed in process arguments.
-fn run_controlled_gtk_client(trigger: &str, expected: &str) -> ControlledClientResult {
+fn run_controlled_gtk_client(
+    trigger: &str,
+    input_marker: &str,
+    expected: &str,
+) -> ControlledClientResult {
     const CLIENT: &str =
         include_str!("../../../../scripts/certification-clients/gtk_wayexpand_desktop_test.py");
     let Ok(mut child) = Command::new("python3")
@@ -614,7 +619,11 @@ fn run_controlled_gtk_client(trigger: &str, expected: &str) -> ControlledClientR
     else {
         return ControlledClientResult::Unavailable;
     };
-    let payload = serde_json::json!({"trigger": trigger, "expected": expected});
+    let payload = serde_json::json!({
+        "trigger": trigger,
+        "input_marker": input_marker,
+        "expected": expected
+    });
     let Some(mut stdin) = child.stdin.take() else {
         let _ = child.kill();
         return ControlledClientResult::Unavailable;
@@ -665,7 +674,7 @@ fn controlled_client_result(output: &str) -> ControlledClientResult {
         Some("verified") => ControlledClientResult::Verified,
         Some("input_not_observed") => ControlledClientResult::InputNotObserved,
         Some("trigger_not_replaced") => ControlledClientResult::TriggerNotReplaced,
-        Some("output_without_trigger") => ControlledClientResult::OutputWithoutTrigger,
+        Some("output_without_input_marker") => ControlledClientResult::OutputWithoutInputMarker,
         Some("field_mismatch") => ControlledClientResult::FieldMismatch,
         Some("closed") => ControlledClientResult::Closed,
         Some("unavailable") => ControlledClientResult::Unavailable,
@@ -701,36 +710,62 @@ fn desktop_test_for(
     println!("Output [{test_id}]: pending — no Enter key will be sent");
     println!("Replacement [{test_id}]: pending — you will verify the final text in the target app");
     if options.controlled_client {
-        println!("\nOpening a small GTK test field. Type the trigger there once; the field will verify its final text without recording its contents.");
-        let baseline = snapshot();
-        match run_controlled_gtk_client(trigger, &expansion.replacement) {
-            ControlledClientResult::Verified => {
-                let after = snapshot();
-                let ibus_output_observed = after.4 > baseline.4;
-                let daemon_match_observed = status_counter(after.0.as_ref(), "matches_found_total")
-                    > status_counter(baseline.0.as_ref(), "matches_found_total");
-                let daemon_output_observed = status_counter_compat(
-                    after.0.as_ref(),
-                    "expansion_output_acknowledgements_total",
-                    "expansions_applied_total",
-                ) > status_counter_compat(
-                    baseline.0.as_ref(),
-                    "expansion_output_acknowledgements_total",
-                    "expansions_applied_total",
-                );
-                if !(ibus_output_observed || daemon_match_observed && daemon_output_observed) {
-                    println!("The controlled field observed the expected text, but WayExpand did not report a new matching output transaction during this test.");
-                    println!("Problem: WX-TEST-CORRELATION-001");
-                    println!("Next: refresh Diagnostics and repeat the test once. The text result was not recorded as a WayExpand verification.");
-                    println!("DESKTOP TEST RESULT: CONTROLLED GTK TEST FAILED");
-                    return Ok(DesktopTestResult::Failed);
+        let input_marker = if expansion.match_mode == wayexpand_core::MatchMode::Immediate {
+            trigger
+                .char_indices()
+                .last()
+                .map_or("", |(last_index, _)| &trigger[..last_index])
+        } else {
+            trigger
+        };
+        let input_marker = if input_marker == expansion.replacement.as_str() {
+            ""
+        } else {
+            input_marker
+        };
+        let controlled_result = if input_marker.is_empty() {
+            ControlledClientResult::CannotCorrelate
+        } else {
+            println!("\nOpening a small GTK test field. Type the trigger there once; the field will verify its final text without recording its contents.");
+            let baseline = snapshot();
+            let controlled =
+                run_controlled_gtk_client(trigger, input_marker, &expansion.replacement);
+            match controlled {
+                ControlledClientResult::Verified => {
+                    let after = snapshot();
+                    let ibus_output_observed = after.4 > baseline.4;
+                    let daemon_match_observed =
+                        status_counter(after.0.as_ref(), "matches_found_total")
+                            > status_counter(baseline.0.as_ref(), "matches_found_total");
+                    let daemon_output_observed = status_counter_compat(
+                        after.0.as_ref(),
+                        "expansion_output_acknowledgements_total",
+                        "expansions_applied_total",
+                    ) > status_counter_compat(
+                        baseline.0.as_ref(),
+                        "expansion_output_acknowledgements_total",
+                        "expansions_applied_total",
+                    );
+                    if !(ibus_output_observed || daemon_match_observed && daemon_output_observed) {
+                        println!("The controlled field observed the expected text, but WayExpand did not report a new matching output transaction during this test.");
+                        println!("Problem: WX-TEST-CORRELATION-001");
+                        println!("Next: refresh Diagnostics and repeat the test once. The text result was not recorded as a WayExpand verification.");
+                        println!("DESKTOP TEST RESULT: CONTROLLED GTK TEST FAILED");
+                        return Ok(DesktopTestResult::Failed);
+                    }
+                    println!("Capture: verified by key activity in the controlled GTK 3 field.");
+                    println!("Replacement: exact configured test output observed in the controlled GTK 3 field; WayExpand output counters also advanced during this test window.");
+                    println!("Correlation: the counters are aggregate and are not uniquely bound to this trigger. The test result is limited to this controlled field and session.");
+                    println!("Scope: GTK 3 text field in this desktop session only; other applications remain untested.");
+                    println!("DESKTOP TEST RESULT: VERIFIED IN CONTROLLED GTK 3 FIELD");
+                    return Ok(DesktopTestResult::Verified);
                 }
-                println!("Capture: verified by key activity in the controlled GTK 3 field.");
-                println!("Replacement: exact configured test output observed in the controlled GTK 3 field; WayExpand output counters also advanced during this test window.");
-                println!("Correlation: the counters are aggregate and are not uniquely bound to this trigger. The test result is limited to this controlled field and session.");
-                println!("Scope: GTK 3 text field in this desktop session only; other applications remain untested.");
-                println!("DESKTOP TEST RESULT: VERIFIED IN CONTROLLED GTK 3 FIELD");
-                return Ok(DesktopTestResult::Verified);
+                result => result,
+            }
+        };
+        match controlled_result {
+            ControlledClientResult::CannotCorrelate => {
+                println!("This trigger cannot be distinguished from its expected output in the controlled field. Continuing with visual confirmation in your selected application.");
             }
             ControlledClientResult::Unavailable => {
                 println!("Controlled GTK test client is unavailable (Python GTK 3 bindings or a graphical session are required). Continuing with the visual test in your selected application.");
@@ -745,8 +780,8 @@ fn desktop_test_for(
                         "The trigger reached the controlled GTK field, but WayExpand did not replace it.",
                         "WX-TEST-REPLACE-001",
                     ),
-                    ControlledClientResult::OutputWithoutTrigger => (
-                        "The expected text appeared, but the controlled field did not observe the configured trigger first. The result was not counted as a verified expansion.",
+                    ControlledClientResult::OutputWithoutInputMarker => (
+                        "The expected text appeared, but the controlled field did not observe the configured typed input first. The result was not counted as a verified expansion.",
                         "WX-TEST-CORRELATION-002",
                     ),
                     ControlledClientResult::FieldMismatch => (
@@ -757,7 +792,9 @@ fn desktop_test_for(
                         "The controlled GTK test field was closed before verification.",
                         "WX-TEST-CANCELLED-001",
                     ),
-                    ControlledClientResult::Verified | ControlledClientResult::Unavailable => {
+                    ControlledClientResult::Verified
+                    | ControlledClientResult::CannotCorrelate
+                    | ControlledClientResult::Unavailable => {
                         unreachable!("handled above")
                     }
                 };
