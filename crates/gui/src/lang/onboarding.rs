@@ -68,13 +68,13 @@ texts! {
         "Diese gespeicherte Fortsetzung ist abgelaufen oder gehört zu einer anderen Desktop-Sitzung. WayExpand setzt sie daher nicht automatisch fort. Brechen Sie sie ab, um den veralteten Marker zu entfernen; Snippets und Integrationseinstellungen bleiben unverändert.",
         "Kelanjutan tersimpan ini kedaluwarsa atau milik sesi desktop lain, jadi WayExpand tidak akan melanjutkannya otomatis. Batalkan untuk menghapus penanda lama; cuplikan dan pengaturan integrasi tidak berubah.";
     test_in_real_application =>
-        "Test in a real application",
-        "In einer echten Anwendung testen",
-        "Uji di aplikasi nyata";
+        "Test expansion",
+        "Textersetzung testen",
+        "Uji ekspansi teks";
     review_setup_and_consent =>
-        "Review setup and replacement consent",
-        "Einrichtung und Zustimmung zur Ersetzung prüfen",
-        "Tinjau penyiapan dan persetujuan penggantian";
+        "Allow text replacement…",
+        "Textersetzung erlauben…",
+        "Izinkan penggantian teks…";
     onboarding_set_up_recommended_ibus =>
         "Set up recommended desktop integration…",
         "Empfohlene Desktop-Integration einrichten…",
@@ -92,9 +92,9 @@ texts! {
         "Wählen Sie WayExpand im Tastatur- bzw. Eingabequellen-Menü von GNOME. Ihre bisherigen Tastaturbelegungen bleiben verfügbar.",
         "Pilih WayExpand dari menu papan ketik/sumber input GNOME. Tata letak papan ketik Anda tetap tersedia.";
     authorize_or_use_picker =>
-        "Before testing, review and allow compatibility replacement for this desktop, or keep using Quick Picker to paste snippets yourself.",
-        "Prüfen und erlauben Sie vor dem Test die Kompatibilitäts-Ersetzung für diesen Desktop, oder fügen Sie Snippets weiter selbst mit dem Schnellwähler ein.",
-        "Sebelum menguji, tinjau dan izinkan penggantian kompatibilitas untuk desktop ini, atau tetap tempel cuplikan sendiri dengan Quick Picker.";
+        "WayExpand needs permission to remove a typed trigger and replace it with your snippet. If typing or focus changes during that operation, the text can be left incomplete. Allow replacement for this desktop, or keep using Quick Picker to copy and paste.",
+        "WayExpand benötigt die Erlaubnis, ein getipptes Kürzel zu entfernen und durch Ihr Snippet zu ersetzen. Wenn währenddessen getippt wird oder sich der Fokus ändert, kann unvollständiger Text zurückbleiben. Erlauben Sie die Ersetzung für diesen Desktop oder verwenden Sie weiterhin den Schnellwähler zum Kopieren und Einfügen.",
+        "WayExpand memerlukan izin untuk menghapus pemicu yang diketik lalu menggantinya dengan cuplikan Anda. Jika ada pengetikan atau perubahan fokus selama proses, teks bisa tertinggal sebagian. Izinkan penggantian untuk desktop ini, atau tetap gunakan Quick Picker untuk menyalin dan menempel.";
     the_tested_application =>
         "the tested application",
         "der getesteten Anwendung",
