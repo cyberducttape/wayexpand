@@ -129,7 +129,7 @@ impl GuiApp {
             tags: vec!["tutorial".into()],
             category: self.strings.onboarding_sample_category().into(),
             app_filter: Vec::new(),
-            match_mode: MatchMode::WordBoundary,
+            match_mode: MatchMode::Immediate,
             command: None,
             enabled: true,
             propagate_case: false,

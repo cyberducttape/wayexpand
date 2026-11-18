@@ -120,6 +120,7 @@ fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     config.expansion.iter().find(|expansion| {
         desktop_testable(expansion)
             && expansion.replacement == ONBOARDING_REPLACEMENT
+            && expansion.match_mode == MatchMode::Immediate
             && expansion.tags.iter().any(|tag| tag == "tutorial")
     })
 }
