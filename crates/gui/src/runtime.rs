@@ -985,15 +985,28 @@ fn run_installation_audit(config_path: &std::path::Path) -> InstallationAudit {
     } else {
         None
     };
-    let Some(ready) = ready else {
+    let Some(mut ready) = ready else {
         return InstallationAudit::default();
     };
+    let identity_mismatch = report.get("installation_identity").is_some_and(|identity| {
+        identity
+            .get("path_shadow_detected")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+            || identity
+                .get("mixed_cli_daemon_installation")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+    });
+    if identity_mismatch {
+        ready = false;
+    }
     // `install-check` deliberately exits nonzero when required components are
     // missing. Accept that status only when the structured report agrees.
     if !status.success() && ready {
         return InstallationAudit::default();
     }
-    let failed_components = report
+    let mut failed_components: Vec<String> = report
         .get("checks")
         .and_then(serde_json::Value::as_array)
         .into_iter()
@@ -1009,6 +1022,9 @@ fn run_installation_audit(config_path: &std::path::Path) -> InstallationAudit {
         })
         .map(str::to_owned)
         .collect();
+    if identity_mismatch {
+        failed_components.push("installation_path_identity".to_owned());
+    }
     InstallationAudit {
         ready: Some(ready),
         failed_components,

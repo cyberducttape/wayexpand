@@ -193,13 +193,13 @@ impl Strings {
         use Language::{English as En, German as De, Indonesian as Id};
         match (problem, self.lang) {
             (Problem::InstallationIncomplete, En) => {
-                "Some installed WayExpand components are missing, so setup may not survive an update or restart."
+                "WayExpand found an installation or version mismatch that needs attention."
             }
             (Problem::InstallationIncomplete, De) => {
-                "Einige installierte WayExpand-Komponenten fehlen. Die Einrichtung übersteht möglicherweise kein Update oder keinen Neustart."
+                "WayExpand hat eine Installations- oder Versionsabweichung gefunden, die geprüft werden muss."
             }
             (Problem::InstallationIncomplete, Id) => {
-                "Beberapa komponen WayExpand yang terpasang hilang, jadi penyiapan mungkin tidak bertahan setelah pembaruan atau mulai ulang."
+                "WayExpand menemukan masalah instalasi atau ketidakcocokan versi yang perlu diperiksa."
             }
             (Problem::ServiceOff, En) => "WayExpand is off, so snippets do not expand.",
             (Problem::ServiceOff, De) => {
@@ -610,13 +610,13 @@ impl Strings {
         use Language::{English as En, German as De, Indonesian as Id};
         match (problem, self.lang) {
             (Problem::InstallationIncomplete, En) => {
-                "Run the read-only installation and version check. It lists the missing components and offers only repairs that match the active installation."
+                "Run the read-only installation and version check. It identifies missing components or a CLI/daemon mismatch before offering a repair."
             }
             (Problem::InstallationIncomplete, De) => {
-                "Führen Sie die schreibgeschützte Installations- und Versionsprüfung aus. Sie listet fehlende Komponenten auf und bietet nur Reparaturen für die aktive Installation an."
+                "Führen Sie die schreibgeschützte Installations- und Versionsprüfung aus. Sie erkennt fehlende Komponenten oder eine CLI/Dienst-Abweichung, bevor sie eine Reparatur anbietet."
             }
             (Problem::InstallationIncomplete, Id) => {
-                "Jalankan pemeriksaan instalasi dan versi yang hanya membaca. Laporan menunjukkan komponen yang hilang dan hanya menawarkan perbaikan untuk instalasi aktif."
+                "Jalankan pemeriksaan instalasi dan versi yang hanya membaca. Laporan menunjukkan komponen yang hilang atau ketidakcocokan CLI/daemon sebelum menawarkan perbaikan."
             }
             (Problem::RestartNeeded, En) => {
                 "Run the read-only version check first. It verifies which installation owns the daemon and only offers a restart when it identifies the matching user service."
