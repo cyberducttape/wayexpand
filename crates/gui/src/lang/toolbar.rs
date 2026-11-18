@@ -1290,7 +1290,10 @@ mod route_trust_tests {
             crate::BackendState::Implemented,
         );
         assert!(unknown.contains("not yet checked"), "{unknown}");
-        assert!(unknown.contains("refresh diagnostics"), "{unknown}");
+        assert!(
+            unknown.contains("wayexpand backend test --injection"),
+            "unknown injection support should point to the capability test: {unknown}"
+        );
         assert!(!unknown.contains("permission"), "{unknown}");
 
         let authorization = strings.onboarding_route_component_detail(
@@ -1313,7 +1316,7 @@ mod route_trust_tests {
             crate::BackendState::ActionRequired,
         );
         assert!(
-            ibus_consent.contains("compatibility replacement"),
+            ibus_consent.contains("explicitly review non-atomic replacement consent"),
             "{ibus_consent}"
         );
         assert!(!ibus_consent.contains("portal"), "{ibus_consent}");

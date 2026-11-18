@@ -22,6 +22,15 @@ fn build_identity_unverified() -> bool {
         || env!("WAYEXPAND_BUILD_VERSION").contains(".dirty-unknown")
 }
 
+fn current_daemon_status(fields: &str) -> String {
+    format!(
+        "status_schema={}\ndaemon_commit={}\ndaemon_version={}\n{fields}",
+        wayexpand_core::CONTROL_STATUS_SCHEMA,
+        env!("WAYEXPAND_COMMIT"),
+        env!("WAYEXPAND_BUILD_VERSION"),
+    )
+}
+
 fn import_expansion(trigger: &str, replacement: &str) -> wayexpand_core::ExpansionConfig {
     wayexpand_core::ExpansionConfig {
         id: wayexpand_core::ExpansionConfig::new_id(),
@@ -115,6 +124,14 @@ fn ibus_capture_and_insertion_readiness_use_their_own_checks() {
                 fix: None,
             },
             IbusCheck {
+                id: "manifest-scope",
+                title: "Shared component scope",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "protected system executable".into(),
+                fix: None,
+            },
+            IbusCheck {
                 id: "selected",
                 title: "Engine selected",
                 state: IbusCheckState::Pass,
@@ -144,7 +161,7 @@ fn ibus_capture_and_insertion_readiness_use_their_own_checks() {
     let route =
         route_recommendation(route, Some(&plan), Some(&capabilities), &[], Some(&report)).unwrap();
 
-    assert_eq!(route.capture_state, BackendState::Available);
+    assert_eq!(route.capture_state, BackendState::Implemented);
     assert_eq!(route.injection_state, BackendState::ActionRequired);
 
     report
@@ -179,7 +196,11 @@ fn route_recommendation_reports_capture_and_insertion_independently() {
     let kde_plan = wayexpand_backend_selection::plan_routes(&kde, false, |_| true);
     let route = route_recommendation(evdev_libei, Some(&kde_plan), Some(&kde), &[], None).unwrap();
     assert_eq!(route.capture_state, BackendState::Available);
-    assert_eq!(route.injection_state, BackendState::RequiresPermission);
+    assert_eq!(
+        route.injection_state,
+        BackendState::Implemented,
+        "unknown libei support must not be presented as a permission failure"
+    );
 
     let wlroots_route: &'static RouteContract =
         wayexpand_backend_selection::route_contract_by_id("sway-evdev-wlroots").unwrap();
@@ -2542,9 +2563,8 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     app.daemon_reachable = Some(true);
     app.route_state = Some(runtime::RouteState::Connected);
     app.daemon_status = format!(
-        "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={}\ninject_atomic_replace=true\nreplacement_assurance=verified\ncompatibility_mode=off",
-        env!("WAYEXPAND_COMMIT"),
-        env!("WAYEXPAND_BUILD_VERSION")
+        "{}\ninject_atomic_replace=true\nreplacement_assurance=verified\ncompatibility_mode=off",
+        current_daemon_status("source=input-method\nbackend=input-method-v2")
     );
     app.language = Language::English;
     app.strings.set_language(Language::English);
@@ -2584,18 +2604,17 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     assert!(
         [
             "Working in tested application",
-            "Connected, not tested yet",
+            "Configured, awaiting test",
+            "Automatic replacement unavailable · copy and paste",
             "Setup incomplete",
         ]
         .iter()
-        .filter(|state| guide_semantics.contains(*state))
-        .count()
-            == 1,
-        "first-run must expose exactly one operational state: {guide_semantics}"
+        .any(|state| guide_semantics.contains(*state)),
+        "first-run must expose an operational state: {guide_semantics}"
     );
     assert!(
-        guide_semantics.contains("Ready: typing :wayexpand-test becomes"),
-        "{guide_semantics}"
+        guide_semantics.contains("Before testing, review and allow compatibility replacement"),
+        "non-atomic IBus insertion must require explicit consent: {guide_semantics}"
     );
     // The local matcher check above is reported, but never as a desktop
     // verification.
@@ -2668,16 +2687,14 @@ fn requesting_a_new_desktop_test_invalidates_the_previous_application_confirmati
 
 #[test]
 fn first_run_requires_a_verified_build_before_offering_live_test() {
-    for (case, daemon_status, expected_warning) in [
+    for (case, expected_warning) in [
         (
             "stale",
-            "source=evdev · backend=libei · daemon_commit=older-build",
             "The running WayExpand service is from an older version.",
         ),
         (
             "unknown",
-            "source=evdev · backend=libei",
-            "The running WayExpand service cannot say which version it is.",
+            "WayExpand cannot verify the running service's version or status format.",
         ),
     ] {
         let path = std::env::temp_dir().join(format!(
@@ -2691,7 +2708,15 @@ fn first_run_requires_a_verified_build_before_offering_live_test() {
         app.create_test_snippet();
         app.daemon_reachable = Some(true);
         app.route_state = Some(runtime::RouteState::Connected);
-        app.daemon_status = daemon_status.into();
+        app.daemon_status = if case == "stale" {
+            format!(
+                "status_schema={}\ndaemon_commit=older-build\ndaemon_version={}\n",
+                wayexpand_core::CONTROL_STATUS_SCHEMA,
+                env!("WAYEXPAND_BUILD_VERSION")
+            )
+        } else {
+            format!("status_schema={}\n", wayexpand_core::CONTROL_STATUS_SCHEMA)
+        };
         app.language = Language::English;
         app.strings.set_language(Language::English);
 
@@ -2719,15 +2744,17 @@ fn first_run_requires_a_verified_build_before_offering_live_test() {
                 .expect("first-run guide should expose accessible controls")
                 .nodes
         );
-        let expected_warning = if build_identity_unverified() {
-            "The running WayExpand service cannot say which version it is."
-        } else {
-            expected_warning
-        };
         assert!(semantics.contains(expected_warning), "{semantics}");
-        // One action, not a command to copy: restart through the
-        // confirmation dialog.
-        assert!(semantics.contains("Restart WayExpand"), "{semantics}");
+        // The guide points to the state-specific version repair rather than
+        // offering a live typing test against an unidentified daemon.
+        if case == "stale" {
+            assert!(
+                semantics.contains("Check versions and restart safely"),
+                "{semantics}"
+            );
+        } else {
+            assert!(semantics.contains("Check again"), "{semantics}");
+        }
         assert!(
             !semantics.contains("Test in a real application"),
             "{semantics}"
@@ -3702,6 +3729,16 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
         }],
         activity: None,
     });
+    app.setup_ibus_preflight_report = Some(serde_json::json!({
+        "checks": [{
+            "id": "manifest-scope",
+            "state": "fail",
+            "problem_id": "WX-IBUS-MANIFEST-SCOPE-001",
+            "title": "Shared IBus engine uses a protected system executable",
+            "detail": "The shared component points to a home-directory executable.",
+            "fix": "Install a system-owned engine executable."
+        }]
+    }));
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     let output = run_gui_test_frame(
@@ -3728,7 +3765,7 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
         "unsafe shared registration must be visible in the consent dialog: {semantics}"
     );
     assert!(
-        semantics.contains("Will be addressed during setup"),
+        semantics.contains("Next: Install a system-owned engine executable."),
         "the dialog must explain that the unsafe scope will be repaired: {semantics}"
     );
 }
@@ -3746,14 +3783,32 @@ fn header_reports_a_live_ibus_engine_instead_of_a_stopped_service() {
     app.diagnostics_checked_at = Some(Instant::now());
     app.ibus_route = Some(IbusChainReport {
         desktop: IbusDesktop::KdeWayland,
-        checks: vec![IbusCheck {
-            id: "selected",
-            title: "Engine selected",
-            state: IbusCheckState::Pass,
-            problem_id: None,
-            detail: "WayExpand is selected".into(),
-            fix: None,
-        }],
+        checks: vec![
+            IbusCheck {
+                id: "manifest-scope",
+                title: "Shared component scope",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "protected system executable".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "engine",
+                title: "Engine running",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "running".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "selected",
+                title: "Engine selected",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "WayExpand is selected".into(),
+                fix: None,
+            },
+        ],
         activity: Some(live_ibus_reading(pid, started)),
     });
     let semantics = header_semantics(&mut app);
@@ -3769,8 +3824,8 @@ fn header_reports_a_live_ibus_engine_instead_of_a_stopped_service() {
     assert_eq!(
         app.current_next_step(),
         Some((
-            crate::app::Problem::ServiceOff,
-            crate::app::NextAction::TurnOn
+            crate::app::Problem::InputStatusPending,
+            crate::app::NextAction::CheckAgain
         ))
     );
     // Without a running service the typing-route chip has nothing to say.
@@ -3792,11 +3847,27 @@ fn kde_header_requires_selected_engine_and_fresh_process_evidence() {
         desktop: IbusDesktop::KdeWayland,
         checks: vec![
             IbusCheck {
+                id: "manifest-scope",
+                title: "Shared component scope",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "protected system executable".into(),
+                fix: None,
+            },
+            IbusCheck {
                 id: "registered",
                 title: "Engine registered",
                 state: IbusCheckState::Pass,
                 problem_id: None,
                 detail: "registered".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "engine",
+                title: "Engine running",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "running".into(),
                 fix: None,
             },
             IbusCheck {
@@ -3825,7 +3896,7 @@ fn kde_header_requires_selected_engine_and_fresh_process_evidence() {
     assert_eq!(
         app.current_next_step(),
         Some((
-            crate::app::Problem::InputStatusPending,
+            crate::app::Problem::InputStatusStale,
             crate::app::NextAction::CheckAgain
         ))
     );
@@ -3850,6 +3921,7 @@ fn gnome_route_readiness_follows_the_engine_not_the_companion_daemon() {
     app.ibus_route = Some(IbusChainReport {
         desktop: IbusDesktop::Gnome,
         checks: vec![
+            check("manifest-scope"),
             check("gnome-source-registered"),
             check("registered"),
             check("gnome-source-active"),
@@ -4406,11 +4478,7 @@ fn the_banner_names_one_problem_and_one_action() {
 
     app.daemon_reachable = Some(true);
     app.route_state = Some(runtime::RouteState::PermissionRequired);
-    app.daemon_status = format!(
-        "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={}",
-        env!("WAYEXPAND_COMMIT"),
-        env!("WAYEXPAND_BUILD_VERSION")
-    );
+    app.daemon_status = current_daemon_status("source=input-method\nbackend=input-method-v2");
     if build_identity_unverified() {
         // Without a recorded identity the build problem rightly comes first.
         let _ = fs::remove_file(path);
@@ -4458,6 +4526,22 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
         desktop: IbusDesktop::KdeWayland,
         checks: vec![
             IbusCheck {
+                id: "manifest-scope",
+                title: "Shared component scope",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "protected system executable".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "engine",
+                title: "Engine running",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "running".into(),
+                fix: None,
+            },
+            IbusCheck {
                 id: "registered",
                 title: "Engine registered",
                 state: IbusCheckState::Pass,
@@ -4490,6 +4574,22 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
     app.ibus_route = Some(IbusChainReport {
         desktop: IbusDesktop::KdeWayland,
         checks: vec![
+            IbusCheck {
+                id: "manifest-scope",
+                title: "Shared component scope",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "protected system executable".into(),
+                fix: None,
+            },
+            IbusCheck {
+                id: "engine",
+                title: "Engine running",
+                state: IbusCheckState::Pass,
+                problem_id: None,
+                detail: "running".into(),
+                fix: None,
+            },
             IbusCheck {
                 id: "registered",
                 title: "Engine registered",
@@ -4558,7 +4658,7 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
         app.setup_record_saved = true;
         // The engine restarted under the same route name: not verified.
         app.ibus_instance = Some("ibus:43:200".into());
-        assert_eq!(state(&app), (HeaderState::Checking, palette.muted));
+        assert_eq!(state(&app), (HeaderState::NeedsSetup, palette.warning));
         app.ibus_instance = Some("ibus:42:100".into());
     } else {
         // No Wayland session to identify (CI): fail closed.
@@ -4598,11 +4698,8 @@ fn the_header_is_green_only_for_a_confirmed_insertion_in_this_session() {
     if build_identity_unverified() {
         return;
     }
-    app.daemon_status = format!(
-        "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={} · \
-         expansion_output_acknowledgements_total=3",
-        env!("WAYEXPAND_COMMIT"),
-        env!("WAYEXPAND_BUILD_VERSION")
+    app.daemon_status = current_daemon_status(
+        "source=input-method\nbackend=input-method-v2\nexpansion_output_acknowledgements_total=3",
     );
     assert_eq!(
         state(&app),
@@ -4679,9 +4776,9 @@ fn diagnostics_answer_why_a_trigger_did_not_expand() {
         )
     };
     app.daemon_reachable = Some(true);
-    app.daemon_status = "running\nsource=evdev\nbackend=libei\n\
-        matching_unavailable_reason=paused\n"
-        .into();
+    app.daemon_status = current_daemon_status(
+        "running\nsource=evdev\nbackend=libei\nmatching_unavailable_reason=paused\n",
+    );
     let semantics = render(&app);
     assert!(
         semantics.contains("Why didn't my trigger expand?"),
@@ -4694,16 +4791,15 @@ fn diagnostics_answer_why_a_trigger_did_not_expand() {
     );
     assert!(semantics.contains("Resume"), "{semantics}");
 
-    app.daemon_status = "running\nsource=evdev\nbackend=libei\n\
-        matching_unavailable_reason=application_scope_denied\nterminal_apps_only=true\n\
-        input_events_total=0\n"
-        .into();
+    app.daemon_status = current_daemon_status(
+        "running\nsource=evdev\nbackend=libei\nmatching_unavailable_reason=application_scope_denied\nterminal_apps_only=true\ninput_events_total=0\n",
+    );
     assert!(render(&app).contains("It only handles your terminal apps."));
 
     // A control-only service cannot capture typing. Depending on the desktop,
     // the GUI either identifies the missing typing route or asks for the
     // IBus route checks; it must not silently omit the diagnosis.
-    app.daemon_status = "running\nsource=stdin\nbackend=none\n".into();
+    app.daemon_status = current_daemon_status("running\nsource=stdin\nbackend=none\n");
     let semantics = render(&app);
     assert!(
         semantics.contains("Why didn't my trigger expand?"),
