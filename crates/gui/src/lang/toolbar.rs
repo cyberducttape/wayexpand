@@ -808,9 +808,9 @@ impl Strings {
 
     pub fn onboarding_troubleshooting_steps(&self) -> &'static str {
         match self.lang {
-            Language::English => "1. Check that the daemon and route show Connected, then refresh session checks.\n2. If permission is required, approve the desktop input portal and refresh. Do not grant raw keyboard access just to make this test pass.\n3. Confirm the test snippet is enabled, then type :wayexpand-test followed by a space in an ordinary text field.\n4. If the matcher preview works but the real app does not, open diagnostics and check the active capture/injection route and focus support. Reload after changing the route.\n5. If text is partly deleted, duplicated, or inserted in the wrong place, pause WayExpand and do not repeat the test. Use a route with verified replacement before relying on it.",
-            Language::Indonesian => "1. Pastikan daemon dan rute berstatus Terhubung, lalu segarkan pemeriksaan sesi.\n2. Jika izin diperlukan, setujui portal masukan desktop lalu segarkan. Jangan memberi akses papan ketik mentah hanya agar tes ini berhasil.\n3. Pastikan cuplikan uji aktif, lalu ketik :wayexpand-test diikuti spasi pada kolom teks biasa.\n4. Jika pratinjau pencocok berhasil tetapi aplikasi nyata tidak, buka diagnostik dan periksa rute tangkapan/penyisipan serta dukungan fokus. Muat ulang setelah mengubah rute.\n5. Jika teks terhapus sebagian, berulang, atau masuk ke tempat yang salah, jeda WayExpand dan jangan ulangi tes. Gunakan rute dengan penggantian terverifikasi sebelum mengandalkannya.",
-            Language::German => "1. Prüfen Sie, ob Daemon und Route Verbunden anzeigen, und aktualisieren Sie die Sitzungsprüfung.\n2. Falls eine Freigabe nötig ist, bestätigen Sie das Desktop-Eingabeportal und aktualisieren Sie erneut. Gewähren Sie für diesen Test keinen Rohzugriff auf die Tastatur.\n3. Prüfen Sie, ob das Test-Snippet aktiv ist, und geben Sie :wayexpand-test plus Leerzeichen in ein normales Textfeld ein.\n4. Funktioniert die Matcher-Vorschau, aber nicht die App, öffnen Sie die Diagnose und prüfen Sie aktive Erfassungs-/Ausgaberoute sowie Fokusunterstützung. Laden Sie nach einem Routenwechsel neu.\n5. Werden Zeichen teilweise gelöscht, dupliziert oder falsch eingefügt, pausieren Sie WayExpand und wiederholen Sie den Test nicht. Verwenden Sie erst eine Route mit verifizierter Ersetzung.",
+            Language::English => "1. Check that the daemon and route show Connected, then refresh session checks.\n2. If permission is required, approve the desktop input portal and refresh. Do not grant raw keyboard access just to make this test pass.\n3. Confirm the test snippet is enabled, then type ;hello followed by a space in an ordinary text field.\n4. If the matcher preview works but the real app does not, open diagnostics and check the active capture/injection route and focus support. Reload after changing the route.\n5. If text is partly deleted, duplicated, or inserted in the wrong place, pause WayExpand and do not repeat the test. Use a route with verified replacement before relying on it.",
+            Language::Indonesian => "1. Pastikan daemon dan rute berstatus Terhubung, lalu segarkan pemeriksaan sesi.\n2. Jika izin diperlukan, setujui portal masukan desktop lalu segarkan. Jangan memberi akses papan ketik mentah hanya agar tes ini berhasil.\n3. Pastikan cuplikan uji aktif, lalu ketik ;hello diikuti spasi pada kolom teks biasa.\n4. Jika pratinjau pencocok berhasil tetapi aplikasi nyata tidak, buka diagnostik dan periksa rute tangkapan/penyisipan serta dukungan fokus. Muat ulang setelah mengubah rute.\n5. Jika teks terhapus sebagian, berulang, atau masuk ke tempat yang salah, jeda WayExpand dan jangan ulangi tes. Gunakan rute dengan penggantian terverifikasi sebelum mengandalkannya.",
+            Language::German => "1. Prüfen Sie, ob Daemon und Route Verbunden anzeigen, und aktualisieren Sie die Sitzungsprüfung.\n2. Falls eine Freigabe nötig ist, bestätigen Sie das Desktop-Eingabeportal und aktualisieren Sie erneut. Gewähren Sie für diesen Test keinen Rohzugriff auf die Tastatur.\n3. Prüfen Sie, ob das Test-Snippet aktiv ist, und geben Sie ;hello plus Leerzeichen in ein normales Textfeld ein.\n4. Funktioniert die Matcher-Vorschau, aber nicht die App, öffnen Sie die Diagnose und prüfen Sie aktive Erfassungs-/Ausgaberoute sowie Fokusunterstützung. Laden Sie nach einem Routenwechsel neu.\n5. Werden Zeichen teilweise gelöscht, dupliziert oder falsch eingefügt, pausieren Sie WayExpand und wiederholen Sie den Test nicht. Verwenden Sie erst eine Route mit verifizierter Ersetzung.",
         }
     }
 
@@ -890,6 +890,99 @@ impl Strings {
             }
             (Language::German, true) => format!("{desktop} · Wayland-Sitzung erkannt"),
             (Language::German, false) => format!("{desktop} · Keine Wayland-Sitzung erkannt"),
+        }
+    }
+
+    /// Plain-language route state for the primary first-run step. Detailed
+    /// backend and protocol evidence belongs in Diagnostics, not in the
+    /// first thing a desktop user sees.
+    pub fn onboarding_integration_state(
+        &self,
+        checking: bool,
+        route_ready: bool,
+        recommendation: Option<RouteRecommendation>,
+    ) -> &'static str {
+        use BackendState as S;
+
+        if checking {
+            return match self.lang {
+                Language::English => "Checking desktop integration…",
+                Language::German => "Desktop-Integration wird geprüft …",
+                Language::Indonesian => "Memeriksa integrasi desktop…",
+            };
+        }
+        if route_ready {
+            return match self.lang {
+                Language::English => "Integration connected",
+                Language::German => "Integration verbunden",
+                Language::Indonesian => "Integrasi terhubung",
+            };
+        }
+
+        let Some(recommendation) = recommendation else {
+            return match self.lang {
+                Language::English => "Desktop integration status is not known yet",
+                Language::German => "Der Status der Desktop-Integration ist noch unbekannt",
+                Language::Indonesian => "Status integrasi desktop belum diketahui",
+            };
+        };
+        if recommendation.blocked_by_policy {
+            return match self.lang {
+                Language::English => "The available integration is blocked by organization policy",
+                Language::German => {
+                    "Die verfügbare Integration wird durch die Organisationsrichtlinie blockiert"
+                }
+                Language::Indonesian => {
+                    "Integrasi yang tersedia diblokir oleh kebijakan organisasi"
+                }
+            };
+        }
+        if recommendation.capture_state == S::RequiresPermission
+            || recommendation.injection_state == S::RequiresPermission
+        {
+            return match self.lang {
+                Language::English => "Desktop permission is needed",
+                Language::German => "Eine Desktop-Berechtigung ist erforderlich",
+                Language::Indonesian => "Izin desktop diperlukan",
+            };
+        }
+        if matches!(
+            recommendation.capture_state,
+            S::Unavailable | S::NotImplemented
+        ) || matches!(
+            recommendation.injection_state,
+            S::Unavailable | S::NotImplemented
+        ) {
+            return match self.lang {
+                Language::English => "The recommended integration is not available in this session",
+                Language::German => {
+                    "Die empfohlene Integration ist in dieser Sitzung nicht verfügbar"
+                }
+                Language::Indonesian => "Integrasi yang disarankan tidak tersedia di sesi ini",
+            };
+        }
+        if recommendation.capture_state == S::ActionRequired
+            || recommendation.injection_state == S::ActionRequired
+        {
+            return match self.lang {
+                Language::English => "Integration setup is needed",
+                Language::German => "Die Integration muss eingerichtet werden",
+                Language::Indonesian => "Integrasi perlu disiapkan",
+            };
+        }
+        if recommendation.capture_state == S::Available
+            && recommendation.injection_state == S::Available
+        {
+            return match self.lang {
+                Language::English => "Integration is available to set up",
+                Language::German => "Die Integration kann eingerichtet werden",
+                Language::Indonesian => "Integrasi tersedia untuk disiapkan",
+            };
+        }
+        match self.lang {
+            Language::English => "Checking integration support",
+            Language::German => "Integrationsunterstützung wird geprüft",
+            Language::Indonesian => "Memeriksa dukungan integrasi",
         }
     }
 

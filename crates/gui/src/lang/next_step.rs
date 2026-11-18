@@ -291,13 +291,13 @@ impl Strings {
                 "IBus tidak menemukan mesin WayExpand, jadi metode input tidak dapat dimulai."
             }
             (Problem::IbusManifestScopeInvalid, En) => {
-                "The shared IBus registration points to a user-owned executable and is not safe for multi-user use."
+                "WayExpand's desktop integration points to a file in your personal folder. It needs a safe shared installation before the desktop can start it."
             }
             (Problem::IbusManifestScopeInvalid, De) => {
-                "Die gemeinsame IBus-Registrierung verweist auf ein benutzereigenes Programm und ist nicht für mehrere Benutzer sicher."
+                "Die WayExpand-Desktopintegration verweist auf eine Datei in Ihrem persönlichen Ordner. Sie muss sicher für das System installiert werden, bevor der Desktop sie starten kann."
             }
             (Problem::IbusManifestScopeInvalid, Id) => {
-                "Pendaftaran IBus bersama menunjuk ke executable milik pengguna dan tidak aman untuk banyak pengguna."
+                "Integrasi desktop WayExpand menunjuk ke berkas di folder pribadi Anda. Integrasi ini perlu dipasang dengan aman untuk sistem sebelum desktop dapat menjalankannya."
             }
             (Problem::IbusDesktopRouteUnavailable, En) => {
                 "KWin is not routing keyboard input through IBus, so WayExpand cannot receive typing on this route."
@@ -470,13 +470,13 @@ impl Strings {
                 "Rute khusus terminal ditutup dengan aman karena WayExpand tidak dapat mengenali aplikasi yang sedang aktif."
             }
             (Problem::TerminalCompositorIdentity, En) => {
-                "KWin's focus tracker is connected, but it reported KWin's own process ID instead of the focused terminal's application ID. The terminal-only route is blocking matching."
+                "WayExpand cannot verify this terminal, so automatic expansion is paused here."
             }
             (Problem::TerminalCompositorIdentity, De) => {
-                "KWin-Fokus-Tracking ist verbunden, meldet aber die Prozess-ID von KWin statt der Anwendung des fokussierten Terminals. Der nur für Terminals konfigurierte Eingabeweg blockiert den Abgleich."
+                "WayExpand kann dieses Terminal nicht verifizieren. Automatische Textersetzung ist hier pausiert."
             }
             (Problem::TerminalCompositorIdentity, Id) => {
-                "Pelacak fokus KWin terhubung, tetapi melaporkan ID proses KWin, bukan ID aplikasi terminal yang aktif. Rute khusus terminal memblokir pencocokan."
+                "WayExpand tidak dapat memverifikasi terminal ini, jadi ekspansi otomatis dijeda di sini."
             }
             (Problem::ApplicationDeliveryUnverified, En) => {
                 "The route is connected, but WayExpand has not verified that replacement text appears in an application."
@@ -553,9 +553,9 @@ impl Strings {
     pub fn action_label(&self, action: Action) -> &'static str {
         use Language::{English as En, German as De, Indonesian as Id};
         match (action, self.lang) {
-            (Action::CheckInstallation, En) => "Check installation",
-            (Action::CheckInstallation, De) => "Installation prüfen",
-            (Action::CheckInstallation, Id) => "Periksa instalasi",
+            (Action::RepairInstallation, En) => "Review safe repairs",
+            (Action::RepairInstallation, De) => "Installationsreparatur prüfen",
+            (Action::RepairInstallation, Id) => "Tinjau perbaikan instalasi",
             (Action::TurnOn, En) => "Turn on",
             (Action::TurnOn, De) => "Einschalten",
             (Action::TurnOn, Id) => "Aktifkan",
@@ -709,13 +709,13 @@ impl Strings {
                 "Solusi sementara: buka Quick Picker, salin cuplikan, lalu tempelkan di terminal. Pencocokan otomatis diblokir sampai WayExpand dapat mengenali aplikasi yang aktif. Untuk mendiagnosisnya, fokuskan terminal dan jalankan `wayexpand debug --focused-app-id --json`; jika `focused_app_id` bernilai null, ikuti ID masalah dan saran tindakannya. Jangan izinkan compositor atau judul jendela. Uji kembali setelah ID aplikasi terminal terverifikasi tersedia."
             }
             (Problem::TerminalCompositorIdentity, En) => {
-                "KWin returned its own process ID, so WayExpand blocked matching before attempting replacement. There is no allowlist setting that fixes this identity result. Use Quick Picker in copy-only mode and paste in the terminal. Retest automatic matching only after KWin reports a verified client application ID; do not allowlist `kwin_wayland` or a window title."
+                "Use Quick Picker to copy a snippet and paste it in this terminal. Open Diagnostics for the detailed explanation."
             }
             (Problem::TerminalCompositorIdentity, De) => {
-                "KWin hat seine eigene Prozess-ID zurückgegeben. Deshalb wurde der Abgleich vor einer Ersetzung blockiert. Keine Zulassungsliste kann dieses Identitätsergebnis beheben. Nutzen Sie den Schnellwähler im Nur-Kopieren-Modus und fügen Sie den Text im Terminal ein. Testen Sie den automatischen Abgleich erst erneut, wenn KWin eine verifizierte Client-Anwendungs-ID meldet. Nehmen Sie weder `kwin_wayland` noch einen Fenstertitel in die Zulassungsliste auf."
+                "Kopieren Sie das Snippet mit dem Schnellwähler und fügen Sie es in diesem Terminal ein. Die Diagnose enthält eine ausführliche Erklärung."
             }
             (Problem::TerminalCompositorIdentity, Id) => {
-                "KWin mengembalikan ID prosesnya sendiri, jadi pencocokan diblokir sebelum penggantian dicoba. Tidak ada pengaturan daftar izin yang dapat memperbaiki hasil identitas ini. Gunakan Quick Picker dalam mode salin saja lalu tempel di terminal. Uji pencocokan otomatis kembali hanya setelah KWin melaporkan ID aplikasi klien yang terverifikasi; jangan izinkan `kwin_wayland` atau judul jendela."
+                "Gunakan Quick Picker untuk menyalin cuplikan lalu tempel di terminal ini. Buka Diagnostik untuk penjelasan lengkap."
             }
             (Problem::FieldTextMismatch, En) => {
                 "Check the exact trigger in Matcher Preview, then place the cursor immediately after it with no selection or autocorrect change. Inspect the field before trying again; use Quick Picker to paste if the mismatch continues."
@@ -772,13 +772,13 @@ impl Strings {
                 "Jalankan `wayexpand ibus status --json` untuk memastikan pendaftaran mesin belum ada, lalu jalankan `wayexpand setup --backend ibus` dan periksa status lagi. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel manual."
             }
             (Problem::IbusManifestScopeInvalid, En) => {
-                "Run guided IBus setup to replace the shared registration with a system-owned engine, or install WayExpand from a distribution package. Setup may request administrator authorization. Then refresh Diagnostics → IBus and run a real-app typing test."
+                "Choose Fix in guided setup and approve the one-time system installation if requested, or install WayExpand from your distribution's package. Then retry the typing test in your text editor."
             }
             (Problem::IbusManifestScopeInvalid, De) => {
-                "Starten Sie die geführte IBus-Einrichtung, um die gemeinsame Registrierung durch eine systemeigene Engine zu ersetzen, oder installieren Sie WayExpand als Distributionspaket. Möglicherweise ist eine Administratorfreigabe nötig. Aktualisieren Sie danach Diagnose → IBus und testen Sie die Eingabe in einer echten Anwendung."
+                "Wählen Sie in der geführten Einrichtung „Reparieren“ und erlauben Sie bei Bedarf die einmalige Systeminstallation. Alternativ installieren Sie WayExpand über Ihr Distributionspaket. Testen Sie danach die Eingabe erneut in Ihrem Texteditor."
             }
             (Problem::IbusManifestScopeInvalid, Id) => {
-                "Jalankan penyiapan IBus terpandu untuk mengganti pendaftaran bersama dengan mesin milik sistem, atau pasang WayExpand dari paket distribusi. Penyiapan mungkin meminta izin administrator. Lalu perbarui Diagnostik → IBus dan uji pengetikan di aplikasi nyata."
+                "Pilih Perbaiki dalam penyiapan terpandu dan setujui pemasangan sistem satu kali jika diminta, atau pasang WayExpand dari paket distribusi Anda. Setelah itu, coba lagi mengetik di editor teks."
             }
             (Problem::IbusDesktopRouteUnavailable, En) => {
                 "Use guided setup to configure KWin's IBus Wayland route, then run a harmless live typing test. If setup cannot apply the change, select IBus Wayland in KDE System Settings → Keyboard → Virtual Keyboard and check again. Quick Picker can copy a snippet meanwhile."

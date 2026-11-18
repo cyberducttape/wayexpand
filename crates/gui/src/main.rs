@@ -495,6 +495,8 @@ struct GuiApp {
     config_backup_path: String,
     restore_preview: Option<serde_json::Value>,
     restore_confirmed: bool,
+    installation_repair_preview: Option<serde_json::Value>,
+    installation_repair_dialog_open: bool,
     cli_task_kind: Option<String>,
     last_cli_task_output: Option<String>,
     setup_failure_report: Option<String>,
@@ -945,6 +947,8 @@ impl GuiApp {
             config_backup_path: format!("{}.bak", path.display()),
             restore_preview: None,
             restore_confirmed: false,
+            installation_repair_preview: None,
+            installation_repair_dialog_open: false,
             cli_task_kind: None,
             last_cli_task_output: None,
             setup_failure_report: None,
@@ -1202,6 +1206,7 @@ impl eframe::App for GuiApp {
         self.render_pending_action(ctx, &palette);
         self.render_evdev_setup(ctx, &palette);
         self.render_setup_consent(ctx);
+        self.render_installation_repair_dialog(ctx, &palette);
         if self.any_dialog_open() {
             // Dim the window behind an open dialog so it reads as one.
             // Dialog windows are in the Foreground order, so a Middle layer

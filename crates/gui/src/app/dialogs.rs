@@ -105,6 +105,7 @@ impl GuiApp {
             || self.settings_open
             || self.evdev_setup_open
             || self.setup_consent_open
+            || self.installation_repair_dialog_open
     }
 
     /// Escape closes one dialog at a time, most recently opened first. The
@@ -126,6 +127,8 @@ impl GuiApp {
             self.setup_consent_open = false;
             self.setup_consent_acknowledged = false;
             self.setup_system_integration_acknowledged = false;
+        } else if self.installation_repair_dialog_open {
+            self.installation_repair_dialog_open = false;
         } else if self.evdev_setup_open {
             self.evdev_setup_open = false;
         } else if self.settings_open {

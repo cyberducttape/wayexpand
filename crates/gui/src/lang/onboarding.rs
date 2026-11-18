@@ -151,9 +151,9 @@ texts! {
         "Die GNOME-Shell-Integration ist verfügbar",
         "Integrasi GNOME Shell tersedia";
     setup_check_manifest_scope =>
-        "Shared IBus engine uses a protected system executable",
-        "Die gemeinsame IBus-Engine nutzt eine geschützte Systemdatei",
-        "Engine IBus bersama memakai executable sistem yang terlindungi";
+        "Shared IBus registration",
+        "Gemeinsame IBus-Registrierung",
+        "Registrasi IBus bersama";
     setup_check_action =>
         "Next:",
         "Nächster Schritt:",
@@ -270,6 +270,18 @@ texts! {
         "The keyboard integration is already registered. No administrator approval is needed for this step.",
         "Die Tastaturintegration ist bereits registriert. Für diesen Schritt ist keine Administratorfreigabe nötig.",
         "Integrasi papan ketik sudah terdaftar. Langkah ini tidak memerlukan persetujuan administrator.";
+    setup_system_registration_action =>
+        "Continue below to install a protected, system-owned IBus engine. WayExpand will ask before requesting administrator approval.",
+        "Fahren Sie unten fort, um eine geschützte, systemeigene IBus-Engine zu installieren. WayExpand fragt, bevor eine Administratorfreigabe angefordert wird.",
+        "Lanjutkan di bawah untuk memasang mesin IBus milik sistem yang terlindungi. WayExpand akan meminta persetujuan sebelum meminta akses administrator.";
+    setup_system_registration_reason =>
+        "The shared keyboard integration currently points to a program in your personal folder. WayExpand needs to install a protected system copy so the integration works safely for all accounts.",
+        "Die gemeinsame Tastaturintegration verweist derzeit auf ein Programm in Ihrem persönlichen Ordner. WayExpand muss eine geschützte Systemkopie installieren, damit die Integration für alle Konten sicher funktioniert.",
+        "Integrasi papan ketik bersama saat ini mengarah ke program di folder pribadi Anda. WayExpand perlu memasang salinan sistem yang terlindungi agar integrasi berfungsi dengan aman untuk semua akun.";
+    setup_system_registration_title =>
+        "Shared IBus registration needs a protected system copy",
+        "Die gemeinsame IBus-Registrierung benötigt eine geschützte Systemkopie",
+        "Registrasi IBus bersama memerlukan salinan sistem yang terlindungi";
     setup_consent_checkbox =>
         "I understand the interleaving and partial-write risk and want to enable tracked-focus replacement.",
         "Ich verstehe das Risiko vermischter und unvollständiger Eingaben und möchte die fokusverfolgte Ersetzung aktivieren.",
@@ -537,10 +549,22 @@ texts! {
         "Check again",
         "Erneut prüfen",
         "Periksa lagi";
-    first_run_snippet_ready =>
-        "Test snippet saved: {trigger} → “{replacement}”. Step 3 checks that it appears in a text field.",
-        "Testsnippet gespeichert: {trigger} → „{replacement}“. In Schritt 3 wird geprüft, ob der Text im Eingabefeld erscheint.",
-        "Cuplikan uji tersimpan: {trigger} → “{replacement}”. Langkah 3 memeriksa apakah teks muncul di kolom.";
+    first_run_test_trigger_label =>
+        "TEST TRIGGER",
+        "TESTKÜRZEL",
+        "PEMICU UJI";
+    first_run_copy_trigger =>
+        "Copy trigger",
+        "Kürzel kopieren",
+        "Salin pemicu";
+    first_run_trigger_copied =>
+        "Test trigger copied. Type it in the test field.",
+        "Testkürzel kopiert. Geben Sie es im Testfeld ein.",
+        "Pemicu uji disalin. Ketikkan di kolom uji.";
+    first_run_expected_output =>
+        "Expected output: {0}",
+        "Erwartete Ausgabe: {0}",
+        "Hasil yang diharapkan: {0}";
     first_run_test_needs_connection =>
         "Finish step 1 first. Until then you can copy snippets with Quick Picker and paste them yourself.",
         "Schließen Sie zuerst Schritt 1 ab. Bis dahin können Sie Snippets mit dem Schnellwähler kopieren und selbst einfügen.",
@@ -613,4 +637,55 @@ texts! {
         "Quick Picker shortcut set.",
         "Tastenkürzel für den Schnellwähler gesetzt.",
         "Pintasan Quick Picker diatur.";
+}
+
+texts! {
+    repair_check_running =>
+        "Checking for safe installation repairs…",
+        "Prüfe auf sichere Installationsreparaturen …",
+        "Memeriksa perbaikan instalasi yang aman…";
+    repair_title =>
+        "Review safe repairs",
+        "Installationsreparatur prüfen",
+        "Tinjau perbaikan instalasi";
+    repair_explainer =>
+        "WayExpand can restore these missing user-service links. Review the paths before applying. This will not grant keyboard access or change your snippets.",
+        "WayExpand kann diese fehlenden Verknüpfungen der Benutzerdienste wiederherstellen. Prüfen Sie die Pfade vor dem Anwenden. Dadurch wird kein Tastaturzugriff erteilt und Ihre Snippets werden nicht geändert.",
+        "WayExpand dapat memulihkan tautan layanan pengguna yang hilang ini. Periksa jalurnya sebelum menerapkan. Tindakan ini tidak memberikan akses papan ketik atau mengubah cuplikan Anda.";
+    repair_apply_button =>
+        "Apply safe repairs",
+        "Sichere Reparaturen anwenden",
+        "Terapkan perbaikan aman";
+    repair_not_now =>
+        "Not now",
+        "Später",
+        "Nanti saja";
+    repair_running =>
+        "Applying installation repairs…",
+        "Installationsreparaturen werden angewendet …",
+        "Menerapkan perbaikan instalasi…";
+    repair_review_ready =>
+        "Safe installation repairs are available for review.",
+        "Sichere Installationsreparaturen können geprüft werden.",
+        "Perbaikan instalasi yang aman tersedia untuk ditinjau.";
+    no_safe_repairs_available =>
+        "No automatic repair is available. Checking versions and installation details…",
+        "Keine automatische Reparatur verfügbar. Versionen und Installationsdetails werden geprüft …",
+        "Tidak ada perbaikan otomatis. Memeriksa versi dan detail instalasi…";
+    repair_completed =>
+        "The missing service links were restored. WayExpand is checking whether the desktop route is ready; text insertion still needs a real-app test.",
+        "Die fehlenden Dienstverknüpfungen wurden wiederhergestellt. WayExpand prüft, ob die Desktop-Route bereit ist; das Einfügen von Text muss weiterhin in einer echten Anwendung getestet werden.",
+        "Tautan layanan yang hilang telah dipulihkan. WayExpand sedang memeriksa kesiapan rute desktop; penyisipan teks tetap perlu diuji di aplikasi nyata.";
+    repair_already_completed =>
+        "No repair remained to apply. WayExpand is refreshing installation and desktop checks.",
+        "Es war keine Reparatur mehr nötig. WayExpand aktualisiert die Installations- und Desktopprüfungen.",
+        "Tidak ada perbaikan yang tersisa. WayExpand sedang memperbarui pemeriksaan instalasi dan desktop.";
+    repair_check_unreadable =>
+        "WayExpand could not verify the repair plan. Open Diagnostics and check the installation report.",
+        "WayExpand konnte den Reparaturplan nicht prüfen. Öffnen Sie die Diagnose und prüfen Sie den Installationsbericht.",
+        "WayExpand tidak dapat memverifikasi rencana perbaikan. Buka Diagnostik dan periksa laporan instalasi.";
+    repair_result_unreadable =>
+        "The repair result could not be verified. Open Diagnostics and inspect the installation report before retrying.",
+        "Das Reparaturergebnis konnte nicht verifiziert werden. Öffnen Sie die Diagnose und prüfen Sie den Installationsbericht, bevor Sie es erneut versuchen.",
+        "Hasil perbaikan tidak dapat diverifikasi. Buka Diagnostik dan periksa laporan instalasi sebelum mencoba lagi.";
 }

@@ -66,7 +66,7 @@ pub(crate) enum Problem {
 /// The one thing to do about it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
-    CheckInstallation,
+    RepairInstallation,
     TurnOn,
     Resume,
     RunSetup,
@@ -277,7 +277,7 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     use runtime::RouteState as R;
     use wayexpand_core::OutcomeKind as O;
     if s.installation_ready == Some(false) {
-        return Some((Problem::InstallationIncomplete, Action::CheckInstallation));
+        return Some((Problem::InstallationIncomplete, Action::RepairInstallation));
     }
     let field = || {
         // A transaction result is more specific than the most recent field's
@@ -410,6 +410,19 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             }
             IbusCheckState::Pass => {}
         }
+        // Fix a shared manifest that points into a user's home before asking
+        // them to exercise the desktop route. A recent KWin helper crash is
+        // useful evidence, but a live test cannot validate an engine whose
+        // system-wide registration is currently unsafe or invalid.
+        match s.ibus_manifest_scope {
+            IbusCheckState::Fail => {
+                return Some((Problem::IbusManifestScopeInvalid, Action::RunSetup));
+            }
+            IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
+                return Some((Problem::InputStatusPending, Action::CheckAgain));
+            }
+            IbusCheckState::Pass => {}
+        }
         match s.ibus_desktop_problem_id {
             Some("WX-KWIN-IBUS-001") if s.ibus_desktop_state == IbusCheckState::Fail => {
                 return Some((Problem::IbusDesktopRouteUnavailable, Action::RunSetup));
@@ -424,15 +437,6 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
                 ));
             }
             _ => {}
-        }
-        match s.ibus_manifest_scope {
-            IbusCheckState::Fail => {
-                return Some((Problem::IbusManifestScopeInvalid, Action::RunSetup));
-            }
-            IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
-                return Some((Problem::InputStatusPending, Action::CheckAgain));
-            }
-            IbusCheckState::Pass => {}
         }
         match s.ibus_selection {
             IbusCheckState::Fail | IbusCheckState::Warn => {
@@ -812,7 +816,7 @@ impl GuiApp {
     /// Run the concrete repair or verification associated with the finding.
     pub(crate) fn perform_next_step(&mut self, action: Action) {
         match action {
-            Action::CheckInstallation => self.check_upgrade_runtime(),
+            Action::RepairInstallation => self.check_installation_repairs(),
             Action::TurnOn | Action::RunSetup => self.start_guided_setup(),
             Action::ReviewConsent => self.review_replacement_consent(),
             Action::Resume => self.toggle_pause(),
@@ -969,6 +973,19 @@ mod tests {
         Situation,
     };
     use crate::runtime::{DaemonBuildState, RouteState};
+
+    #[test]
+    fn terminal_identity_problem_uses_plain_language_and_an_immediate_workaround() {
+        let strings = crate::lang::Strings::new(crate::lang::Language::English);
+        assert_eq!(
+            strings.problem_text(Problem::TerminalCompositorIdentity),
+            "WayExpand cannot verify this terminal, so automatic expansion is paused here."
+        );
+        assert_eq!(
+            strings.next_step_instruction(Problem::TerminalCompositorIdentity, false),
+            "Use Quick Picker to copy a snippet and paste it in this terminal. Open Diagnostics for the detailed explanation."
+        );
+    }
 
     fn running(route: RouteState) -> Situation {
         Situation {
@@ -1456,5 +1473,40 @@ mod tests {
             ..deselected
         };
         assert_eq!(next_step(&selected), None);
+    }
+
+    #[test]
+    fn kde_repairs_unsafe_shared_ibus_registration_before_live_testing_a_crash_warning() {
+        let state = Situation {
+            ibus_route_expected: true,
+            ibus_engine_registered: IbusCheckState::Pass,
+            ibus_manifest_scope: IbusCheckState::Fail,
+            ibus_desktop_state: IbusCheckState::Warn,
+            ibus_desktop_problem_id: Some("WX-KWIN-IBUS-002"),
+            ibus_selection: IbusCheckState::Pass,
+            engine_state: IbusCheckState::Pass,
+            diagnostics_fresh: Some(true),
+            daemon_reachable: Some(true),
+            replacement_allowed: true,
+            ..Situation::default()
+        };
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::IbusManifestScopeInvalid, Action::RunSetup))
+        );
+
+        // Once the system-owned manifest is in place, the prior helper crash
+        // remains visible as a live test action instead of being discarded.
+        let registered = Situation {
+            ibus_manifest_scope: IbusCheckState::Pass,
+            ..state
+        };
+        assert_eq!(
+            next_step(&registered),
+            Some((
+                Problem::IbusDesktopRouteRecentlyCrashed,
+                Action::TestInApplication
+            ))
+        );
     }
 }

@@ -2554,7 +2554,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         "guide must remain after snippet save"
     );
     assert_eq!(app.config.expansion.len(), 1, "{}", app.status.text());
-    assert_eq!(app.config.expansion[0].trigger, ":wayexpand-test");
+    assert_eq!(app.config.expansion[0].trigger, ";hello");
     assert_eq!(app.config.expansion[0].replacement, "WayExpand is working!");
     assert!(app.config.expansion[0]
         .tags
@@ -2568,9 +2568,9 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     );
     app.language = Language::English;
     app.strings.set_language(Language::English);
-    if let Some(rewrite) =
-        app.playground
-            .edit(&app.config, "", "input-method-v2", ":wayexpand-test ", true)
+    if let Some(rewrite) = app
+        .playground
+        .edit(&app.config, "", "input-method-v2", ";hello ", true)
     {
         app.playground.text = rewrite.text;
     }
@@ -2639,7 +2639,9 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     assert!(guide_semantics.contains("Troubleshooting details"));
     assert!(!guide_semantics.contains("Backend probes show"));
     assert!(!guide_semantics.contains("It expanded correctly"));
-    assert!(!guide_semantics.contains("Copy trigger"));
+    assert!(guide_semantics.contains("TEST TRIGGER"));
+    assert!(guide_semantics.contains("Copy trigger"));
+    assert!(guide_semantics.contains("Expected output: WayExpand is working!"));
 
     app.filter = "working".into();
     app.refresh_visible_indices_cache();
@@ -3734,7 +3736,7 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
             id: "manifest-scope",
             title: "",
             state: IbusCheckState::Fail,
-            problem_id: Some("WX-IBUS-MANIFEST-SCOPE-001"),
+            problem_id: Some("WX-IBUS-MULTIUSER-001"),
             detail: "shared manifest refers to a home-directory executable".into(),
             fix: None,
         }],
@@ -3744,8 +3746,8 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
         "checks": [{
             "id": "manifest-scope",
             "state": "fail",
-            "problem_id": "WX-IBUS-MANIFEST-SCOPE-001",
-            "title": "Shared IBus engine uses a protected system executable",
+            "problem_id": "WX-IBUS-MULTIUSER-001",
+            "title": "Shared IBus registration is multi-user safe",
             "detail": "The shared component points to a home-directory executable.",
             "fix": "Install a system-owned engine executable."
         }]
@@ -3772,12 +3774,22 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
             .nodes
     );
     assert!(
-        semantics.contains("Shared IBus engine uses a protected system executable"),
-        "unsafe shared registration must be visible in the consent dialog: {semantics}"
+        semantics.contains("Shared IBus registration needs a protected system copy"),
+        "the failing registration must have a title that describes a required repair: {semantics}"
     );
     assert!(
-        semantics.contains("Next: Install a system-owned engine executable."),
-        "the dialog must explain that the unsafe scope will be repaired: {semantics}"
+        semantics.contains(
+            "Continue below to install a protected, system-owned IBus engine. WayExpand will ask before requesting administrator approval."
+        ),
+        "the dialog must explain the repair and administrator approval step: {semantics}"
+    );
+    assert!(
+        semantics.contains("The shared keyboard integration currently points to a program in your personal folder."),
+        "the default view should explain the issue without exposing component paths: {semantics}"
+    );
+    assert!(
+        !semantics.contains("WX-IBUS-MULTIUSER-001"),
+        "the internal diagnostic ID belongs in detailed checks, not the setup summary: {semantics}"
     );
 }
 
@@ -4166,7 +4178,7 @@ fn creating_the_test_snippet_selects_it_and_leaves_the_desktop_test_enabled() {
     assert_eq!(app.selected_index(), Some(2), "the new snippet is last");
     assert_eq!(
         app.draft.as_ref().map(|draft| draft.trigger.as_str()),
-        Some(":wayexpand-test")
+        Some(";hello")
     );
     assert!(
         !app.desktop_test_blocked_by_draft(),
@@ -4402,10 +4414,7 @@ fn desktop_test_candidates_follow_library_changes_including_reloads() {
     app.create_test_snippet();
     let first_run = app.cached_desktop_tests(true);
     assert_eq!(first_run.len(), 2);
-    assert_eq!(
-        app.config.expansion[first_run[0]].trigger,
-        ":wayexpand-test"
-    );
+    assert_eq!(app.config.expansion[first_run[0]].trigger, ";hello");
 
     // Changed on disk and reloaded: the cache must not keep the old list.
     fs::write(

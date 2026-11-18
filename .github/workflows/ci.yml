@@ -1025,7 +1025,7 @@ jobs:
             -o Acquire::Retries=2 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
-            install -y build-essential debhelper devscripts dpkg-dev rpm cpio \
+            install -y build-essential debhelper dpkg-dev rpm cpio \
               libwayland-dev libxkbcommon-dev pkg-config
           rustc --version
           cargo --version

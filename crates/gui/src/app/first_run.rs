@@ -1,7 +1,7 @@
 use crate::app::setup::onboarding_step;
 use crate::*;
 
-const ONBOARDING_TRIGGER: &str = ":wayexpand-test";
+const ONBOARDING_TRIGGER: &str = ";hello";
 const ONBOARDING_REPLACEMENT: &str = "WayExpand is working!";
 /// What `wayexpand shortcut set` assigns without an argument.
 const DEFAULT_PICKER_SHORTCUT: &str = "Ctrl+Alt+Space";
@@ -677,6 +677,24 @@ impl GuiApp {
                         route_ready,
                     );
                     ui.indent("first_run_connect", |ui| {
+                        ui.label(
+                            RichText::new(self.strings.onboarding_desktop(&desktop, is_wayland))
+                                .small()
+                                .color(palette.muted),
+                        );
+                        ui.label(
+                            RichText::new(self.strings.onboarding_integration_state(
+                                checking,
+                                route_ready,
+                                recommendation,
+                            ))
+                            .strong()
+                            .color(if route_ready {
+                                palette.success
+                            } else {
+                                palette.muted
+                            }),
+                        );
                         if checking {
                             ui.horizontal(|ui| {
                                 ui.spinner();
@@ -830,13 +848,28 @@ impl GuiApp {
                     );
                     ui.indent("first_run_snippet", |ui| {
                         if let Some((trigger, replacement)) = &test_snippet {
-                            ui.colored_label(
-                                palette.success,
-                                crate::lang::fill(
-                                    self.strings.first_run_snippet_ready(),
-                                    &[&trigger, &replacement],
-                                ),
-                            );
+                            ui.label(self.strings.first_run_test_trigger_label());
+                            ui.horizontal_wrapped(|ui| {
+                                ui.colored_label(
+                                    palette.success,
+                                    RichText::new(trigger).strong().monospace(),
+                                );
+                                if theme::secondary_button(
+                                    ui,
+                                    palette,
+                                    self.strings.first_run_copy_trigger(),
+                                )
+                                .clicked()
+                                {
+                                    ui.ctx().copy_text(trigger.clone());
+                                    self.status =
+                                        Status::info(self.strings.first_run_trigger_copied());
+                                }
+                            });
+                            ui.label(crate::lang::fill(
+                                self.strings.first_run_expected_output(),
+                                &[replacement],
+                            ));
                         } else {
                             ui.label(
                                 RichText::new(self.strings.onboarding_snippet_help())
@@ -1340,7 +1373,7 @@ mod tests {
         let mut config = Config::parse("").unwrap();
         let mut tutorial = ExpansionConfig {
             id: ExpansionConfig::new_id(),
-            trigger: ":wayexpand-test".into(),
+            trigger: ";hello".into(),
             aliases: Vec::new(),
             replacement: "WayExpand is working!".into(),
             delivery: wayexpand_core::ExpansionDelivery::Insert,
@@ -1360,7 +1393,7 @@ mod tests {
         tutorial.app_filter.clear();
         config.expansion[0] = tutorial;
         let snippet = onboarding_test_snippet(&config).expect("global tutorial is testable");
-        assert_eq!(snippet.trigger, ":wayexpand-test");
+        assert_eq!(snippet.trigger, ";hello");
         assert_eq!(snippet.replacement, "WayExpand is working!");
 
         // With another testable snippet listed first, the tutorial still wins.
@@ -1369,16 +1402,13 @@ mod tests {
         )
         .unwrap();
         both.expansion.push(config.expansion[0].clone());
-        assert_eq!(
-            onboarding_test_snippet(&both).unwrap().trigger,
-            ":wayexpand-test"
-        );
+        assert_eq!(onboarding_test_snippet(&both).unwrap().trigger, ";hello");
     }
 
     #[test]
     fn invalid_tutorial_variants_are_not_selected_for_first_run() {
         let config = Config::parse(
-            "[[expansion]]\ntrigger = ':wayexpand-test'\nreplacement = 'WayExpand is working! {{field:review}}'\ntags = ['tutorial']\n",
+            "[[expansion]]\ntrigger = ';hello'\nreplacement = 'WayExpand is working! {{field:review}}'\ntags = ['tutorial']\n",
         )
         .unwrap();
         assert!(onboarding_test_snippet(&config).is_none());

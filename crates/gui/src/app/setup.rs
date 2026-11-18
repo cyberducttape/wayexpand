@@ -381,6 +381,107 @@ impl GuiApp {
         }
     }
 
+    /// Inspect the installation's explicitly safe repairs before changing
+    /// anything. The persistent next-step banner uses this path so users can
+    /// review and apply missing user-service links without opening a terminal.
+    pub(crate) fn check_installation_repairs(&mut self) {
+        if self.setup_task.is_some() {
+            return;
+        }
+        self.start_cli_task(
+            vec!["repair".into(), "--check".into(), "--json".into()],
+            self.strings.repair_check_running().into(),
+            self.strings.repair_check_running().into(),
+        );
+        if self.setup_task.is_some() {
+            self.cli_task_kind = Some("repair-check".into());
+        }
+    }
+
+    fn finish_installation_repair_check(&mut self, output: &str) -> Status {
+        let Ok(report) = serde_json::from_str::<serde_json::Value>(output) else {
+            self.diagnostics_open = true;
+            return Status::warning(self.strings.repair_check_unreadable());
+        };
+        let repairs = report.get("repairs").and_then(serde_json::Value::as_array);
+        if report.get("schema").and_then(serde_json::Value::as_u64) != Some(1)
+            || report.get("mode").and_then(serde_json::Value::as_str) != Some("check")
+            || repairs.is_none()
+        {
+            self.diagnostics_open = true;
+            return Status::warning(self.strings.repair_check_unreadable());
+        }
+        let repairs = repairs.expect("validated repair array");
+        if repairs.is_empty() {
+            self.check_upgrade_runtime();
+            return Status::info(self.strings.no_safe_repairs_available());
+        }
+        if repairs.iter().any(|repair| {
+            repair.get("status").and_then(serde_json::Value::as_str) != Some("available")
+                || repair
+                    .get("component")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(str::is_empty)
+                || repair
+                    .get("path")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(str::is_empty)
+        }) {
+            self.diagnostics_open = true;
+            return Status::warning(self.strings.repair_check_unreadable());
+        }
+        self.installation_repair_preview = Some(report);
+        self.installation_repair_dialog_open = true;
+        Status::info(self.strings.repair_review_ready())
+    }
+
+    pub(crate) fn apply_installation_repairs(&mut self) {
+        if self.setup_task.is_some() || self.installation_repair_preview.is_none() {
+            return;
+        }
+        self.start_cli_task(
+            vec!["repair".into(), "--apply".into(), "--json".into()],
+            self.strings.repair_running().into(),
+            self.strings.repair_running().into(),
+        );
+        if self.setup_task.is_some() {
+            self.cli_task_kind = Some("repair-apply".into());
+        }
+    }
+
+    fn finish_installation_repair_apply(&mut self, output: &str) -> Status {
+        let Ok(report) = serde_json::from_str::<serde_json::Value>(output) else {
+            self.installation_repair_preview = None;
+            self.installation_repair_dialog_open = false;
+            self.diagnostics_open = true;
+            return Status::warning(self.strings.repair_result_unreadable());
+        };
+        let repairs = report.get("repairs").and_then(serde_json::Value::as_array);
+        let valid_apply_report = report.get("schema").and_then(serde_json::Value::as_u64)
+            == Some(1)
+            && report.get("mode").and_then(serde_json::Value::as_str) == Some("apply")
+            && repairs.is_some_and(|repairs| {
+                repairs.iter().all(|repair| {
+                    repair.get("status").and_then(serde_json::Value::as_str) == Some("repaired")
+                })
+            });
+        let repairs_applied =
+            valid_apply_report && repairs.is_some_and(|repairs| !repairs.is_empty());
+        let no_repairs_remained = valid_apply_report && repairs.is_some_and(Vec::is_empty);
+        self.installation_repair_preview = None;
+        self.installation_repair_dialog_open = false;
+        if repairs_applied {
+            self.refresh_diagnostics(false);
+            Status::info(self.strings.repair_completed())
+        } else if no_repairs_remained {
+            self.refresh_diagnostics(false);
+            Status::info(self.strings.repair_already_completed())
+        } else {
+            self.diagnostics_open = true;
+            Status::warning(self.strings.repair_result_unreadable())
+        }
+    }
+
     fn finish_upgrade_check(&mut self, output: &str) -> Status {
         let Ok(report) = serde_json::from_str::<serde_json::Value>(output) else {
             self.diagnostics_open = true;
@@ -971,6 +1072,10 @@ impl GuiApp {
                             self.setup_preflight_result(&output)
                         } else if task_kind.as_deref() == Some("upgrade-check") {
                             self.finish_upgrade_check(&output)
+                        } else if task_kind.as_deref() == Some("repair-check") {
+                            self.finish_installation_repair_check(&output)
+                        } else if task_kind.as_deref() == Some("repair-apply") {
+                            self.finish_installation_repair_apply(&output)
                         } else if task_kind.as_deref() == Some("picker-shortcut") {
                             self.picker_shortcut_error = None;
                             Status::success(success_message)
@@ -1115,6 +1220,14 @@ impl GuiApp {
                         } else if task_kind.as_deref() == Some("upgrade-check") {
                             self.diagnostics_open = true;
                             Status::error(self.strings.upgrade_check_unreadable())
+                        } else if task_kind.as_deref() == Some("repair-check") {
+                            self.diagnostics_open = true;
+                            Status::warning(self.strings.repair_check_unreadable())
+                        } else if task_kind.as_deref() == Some("repair-apply") {
+                            self.installation_repair_preview = None;
+                            self.installation_repair_dialog_open = false;
+                            self.diagnostics_open = true;
+                            Status::warning(self.strings.repair_result_unreadable())
                         } else if task_kind.as_deref() == Some("gnome-source-repair") {
                             let report = setup_failure_report(
                                 &[],
@@ -1163,6 +1276,14 @@ impl GuiApp {
                 } else if task_kind.as_deref() == Some("upgrade-check") {
                     self.diagnostics_open = true;
                     self.status = Status::error(self.strings.upgrade_check_unreadable());
+                } else if task_kind.as_deref() == Some("repair-check") {
+                    self.diagnostics_open = true;
+                    self.status = Status::warning(self.strings.repair_check_unreadable());
+                } else if task_kind.as_deref() == Some("repair-apply") {
+                    self.installation_repair_preview = None;
+                    self.installation_repair_dialog_open = false;
+                    self.diagnostics_open = true;
+                    self.status = Status::warning(self.strings.repair_result_unreadable());
                 } else {
                     self.status = Status::error(self.strings.status_setup_failed("worker stopped"));
                 }
@@ -1358,7 +1479,9 @@ impl GuiApp {
             "!" => 1,
             _ => 2,
         });
-        attention.truncate(3);
+        // Put one prioritized action in the default view. The complete list
+        // remains available in the expandable checks below for support work.
+        attention.truncate(1);
         egui::Modal::new(egui::Id::new("ibus_replacement_consent")).show(ctx, |ui| {
             ui.set_width(430.0);
             ui.heading(self.strings.setup_title());
@@ -1367,25 +1490,42 @@ impl GuiApp {
                 ui.group(|ui| {
                     ui.label(RichText::new(self.strings.setup_review_stages()).strong());
                     for (symbol, problem_id, title, detail, fix) in &attention {
-                        let id = if problem_id.is_empty() {
+                        let title = if problem_id == "WX-IBUS-MULTIUSER-001" {
+                            self.strings.setup_system_registration_title()
+                        } else {
+                            title
+                        };
+                        let id = if problem_id.is_empty() || problem_id == "WX-IBUS-MULTIUSER-001" {
                             String::new()
                         } else {
                             format!(" [{problem_id}]")
                         };
                         ui.label(format!("{symbol} {title}{id}"));
-                        ui.label(
-                            RichText::new(detail)
-                                .small()
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                        if let Some(fix) = fix {
+                        if problem_id == "WX-IBUS-MULTIUSER-001" {
                             ui.label(
-                                RichText::new(format!(
-                                    "{} {fix}",
-                                    self.strings.setup_check_action()
-                                ))
-                                .small(),
+                                RichText::new(self.strings.setup_system_registration_reason())
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
                             );
+                            ui.label(
+                                RichText::new(self.strings.setup_system_registration_action())
+                                    .small(),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(detail)
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                            if let Some(fix) = fix {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} {fix}",
+                                        self.strings.setup_check_action()
+                                    ))
+                                    .small(),
+                                );
+                            }
                         }
                     }
                 });
@@ -1590,6 +1730,65 @@ impl GuiApp {
                 }
             });
         });
+    }
+
+    pub(crate) fn render_installation_repair_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        palette: &Palette,
+    ) {
+        if !self.installation_repair_dialog_open {
+            return;
+        }
+        let Some(report) = self.installation_repair_preview.as_ref() else {
+            self.installation_repair_dialog_open = false;
+            return;
+        };
+        let repairs = report
+            .get("repairs")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut open = self.installation_repair_dialog_open;
+        let mut close_requested = false;
+        egui::Window::new(self.strings.repair_title())
+            .id(egui::Id::new("installation_safe_repair"))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.set_width(430.0);
+                ui.label(self.strings.repair_explainer());
+                ui.add_space(8.0);
+                for repair in &repairs {
+                    let component = repair
+                        .get("component")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("user service");
+                    let path = repair
+                        .get("path")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("installation path unavailable");
+                    ui.label(RichText::new(component).strong());
+                    ui.label(RichText::new(path).small().color(palette.muted));
+                }
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            self.setup_task.is_none(),
+                            egui::Button::new(self.strings.repair_apply_button()),
+                        )
+                        .clicked()
+                    {
+                        self.apply_installation_repairs();
+                    }
+                    if ui.button(self.strings.repair_not_now()).clicked() {
+                        close_requested = true;
+                    }
+                });
+            });
+        self.installation_repair_dialog_open = open && !close_requested;
     }
 
     pub(crate) fn render_evdev_setup(&mut self, ctx: &egui::Context, palette: &Palette) {
