@@ -386,12 +386,23 @@ impl GuiApp {
             self.diagnostics_open = true;
             return Status::error(self.strings.upgrade_check_unreadable());
         };
-        if report
-            .get("installation_check")
+        let installation_check = report.get("installation_check");
+        let installation_check_schema = installation_check
+            .and_then(|check| check.get("schema"))
+            .and_then(serde_json::Value::as_u64);
+        let installation_ready = installation_check
             .and_then(|check| check.get("ready"))
-            .and_then(serde_json::Value::as_bool)
-            == Some(false)
+            .and_then(serde_json::Value::as_bool);
+        if installation_check_schema != Some(2)
+            || installation_check
+                .and_then(|check| check.get("level"))
+                .and_then(serde_json::Value::as_str)
+                != Some("installed")
         {
+            self.diagnostics_open = true;
+            return Status::error(self.strings.upgrade_check_unreadable());
+        }
+        if installation_ready != Some(true) {
             self.diagnostics_open = true;
             return Status::warning(self.strings.upgrade_installation_incomplete());
         }
