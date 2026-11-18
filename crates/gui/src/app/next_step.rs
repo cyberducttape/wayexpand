@@ -974,6 +974,19 @@ mod tests {
     };
     use crate::runtime::{DaemonBuildState, RouteState};
 
+    #[test]
+    fn terminal_identity_problem_uses_plain_language_and_an_immediate_workaround() {
+        let strings = crate::lang::Strings::new(crate::lang::Language::English);
+        assert_eq!(
+            strings.problem_text(Problem::TerminalCompositorIdentity),
+            "WayExpand cannot verify this terminal, so automatic expansion is paused here."
+        );
+        assert_eq!(
+            strings.next_step_instruction(Problem::TerminalCompositorIdentity, false),
+            "Use Quick Picker to copy a snippet and paste it in this terminal. Open Diagnostics for the detailed explanation."
+        );
+    }
+
     fn running(route: RouteState) -> Situation {
         Situation {
             daemon_reachable: Some(true),
