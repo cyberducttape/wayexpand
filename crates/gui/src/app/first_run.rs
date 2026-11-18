@@ -677,13 +677,31 @@ impl GuiApp {
                                 );
                             }
                         } else if route_ready {
-                            ui.colored_label(
-                                palette.success,
-                                crate::lang::fill(
-                                    self.strings.first_run_connected(),
-                                    &[&route_state_detail],
-                                ),
-                            );
+                            if self.installation_audit.ready == Some(false) {
+                                ui.colored_label(
+                                    palette.warning,
+                                    self.strings
+                                        .problem_text(super::Problem::InstallationIncomplete),
+                                );
+                                if theme::primary_button(
+                                    ui,
+                                    palette,
+                                    self.strings
+                                        .action_label(super::NextAction::CheckInstallation),
+                                )
+                                .clicked()
+                                {
+                                    self.perform_next_step(super::NextAction::CheckInstallation);
+                                }
+                            } else {
+                                ui.colored_label(
+                                    palette.success,
+                                    crate::lang::fill(
+                                        self.strings.first_run_connected(),
+                                        &[&route_state_detail],
+                                    ),
+                                );
+                            }
                         } else {
                             // One problem and one action: the same answer the
                             // banner under the header gives after first run.

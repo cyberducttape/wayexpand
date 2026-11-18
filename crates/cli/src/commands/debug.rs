@@ -734,7 +734,7 @@ fn desktop_test_for(
                 ControlledClientResult::Verified => {
                     let after = snapshot();
                     let ibus_transaction = (after.4 > baseline.4)
-                        .then(|| after.5.as_ref())
+                        .then_some(after.5.as_ref())
                         .flatten()
                         .filter(|transaction| baseline.5.as_ref() != Some(*transaction))
                         .cloned();

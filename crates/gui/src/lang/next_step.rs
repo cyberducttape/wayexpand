@@ -192,6 +192,15 @@ impl Strings {
     pub fn problem_text(&self, problem: Problem) -> &'static str {
         use Language::{English as En, German as De, Indonesian as Id};
         match (problem, self.lang) {
+            (Problem::InstallationIncomplete, En) => {
+                "Some installed WayExpand components are missing, so setup may not survive an update or restart."
+            }
+            (Problem::InstallationIncomplete, De) => {
+                "Einige installierte WayExpand-Komponenten fehlen. Die Einrichtung übersteht möglicherweise kein Update oder keinen Neustart."
+            }
+            (Problem::InstallationIncomplete, Id) => {
+                "Beberapa komponen WayExpand yang terpasang hilang, jadi penyiapan mungkin tidak bertahan setelah pembaruan atau mulai ulang."
+            }
             (Problem::ServiceOff, En) => "WayExpand is off, so snippets do not expand.",
             (Problem::ServiceOff, De) => {
                 "WayExpand ist aus, deshalb werden Snippets nicht ersetzt."
@@ -544,6 +553,9 @@ impl Strings {
     pub fn action_label(&self, action: Action) -> &'static str {
         use Language::{English as En, German as De, Indonesian as Id};
         match (action, self.lang) {
+            (Action::CheckInstallation, En) => "Check installation",
+            (Action::CheckInstallation, De) => "Installation prüfen",
+            (Action::CheckInstallation, Id) => "Periksa instalasi",
             (Action::TurnOn, En) => "Turn on",
             (Action::TurnOn, De) => "Einschalten",
             (Action::TurnOn, Id) => "Aktifkan",
@@ -597,6 +609,15 @@ impl Strings {
     pub fn next_step_instruction(&self, problem: Problem, gnome_ibus: bool) -> &'static str {
         use Language::{English as En, German as De, Indonesian as Id};
         match (problem, self.lang) {
+            (Problem::InstallationIncomplete, En) => {
+                "Run the read-only installation and version check. It lists the missing components and offers only repairs that match the active installation."
+            }
+            (Problem::InstallationIncomplete, De) => {
+                "Führen Sie die schreibgeschützte Installations- und Versionsprüfung aus. Sie listet fehlende Komponenten auf und bietet nur Reparaturen für die aktive Installation an."
+            }
+            (Problem::InstallationIncomplete, Id) => {
+                "Jalankan pemeriksaan instalasi dan versi yang hanya membaca. Laporan menunjukkan komponen yang hilang dan hanya menawarkan perbaikan untuk instalasi aktif."
+            }
             (Problem::RestartNeeded, En) => {
                 "Run the read-only version check first. It verifies which installation owns the daemon and only offers a restart when it identifies the matching user service."
             }

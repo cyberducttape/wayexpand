@@ -658,3 +658,13 @@ texts! {
         "CLI und Dienst stimmen überein",
         "CLI dan layanan cocok";
 }
+
+impl super::Strings {
+    pub(crate) fn dg_installation_components(&self, components: &str) -> String {
+        match self.lang {
+            super::Language::English => format!("Components needing attention: {components}"),
+            super::Language::German => format!("Zu prüfende Komponenten: {components}"),
+            super::Language::Indonesian => format!("Komponen yang perlu diperiksa: {components}"),
+        }
+    }
+}

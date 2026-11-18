@@ -14,6 +14,7 @@ use wayexpand_backend_ibus::chain::IbusCheckState;
 /// What is wrong, in the user's terms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Problem {
+    InstallationIncomplete,
     ServiceOff,
     /// Only the control service runs (Quick Picker, hotkeys): nothing
     /// captures typing, because the IBus engine it pairs with is not live.
@@ -65,6 +66,7 @@ pub(crate) enum Problem {
 /// The one thing to do about it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
+    CheckInstallation,
     TurnOn,
     Resume,
     RunSetup,
@@ -102,6 +104,9 @@ pub(crate) enum GnomeIbusReadiness {
 /// and diagnostics.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Situation {
+    /// Installed-component readiness from the versioned startup audit. Missing
+    /// report data stays unknown rather than appearing healthy.
+    pub installation_ready: Option<bool>,
     pub daemon_reachable: Option<bool>,
     /// The WayExpand IBus engine is live.
     pub ibus_active: bool,
@@ -271,6 +276,9 @@ pub(super) fn terminal_route_is_scoped(daemon_status: &str) -> bool {
 pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
     use runtime::RouteState as R;
     use wayexpand_core::OutcomeKind as O;
+    if s.installation_ready == Some(false) {
+        return Some((Problem::InstallationIncomplete, Action::CheckInstallation));
+    }
     let field = || {
         // A transaction result is more specific than the most recent field's
         // general capability state, and must not be hidden by it.
@@ -668,6 +676,7 @@ impl GuiApp {
             .then(|| self.recent_output_outcome())
             .flatten();
         Situation {
+            installation_ready: self.installation_audit.ready,
             daemon_reachable: self.daemon_reachable,
             ibus_active,
             ibus_selection: if self.ibus_diagnostics_fresh() == Some(true) {
@@ -796,6 +805,7 @@ impl GuiApp {
     /// Run the concrete repair or verification associated with the finding.
     pub(crate) fn perform_next_step(&mut self, action: Action) {
         match action {
+            Action::CheckInstallation => self.check_upgrade_runtime(),
             Action::TurnOn | Action::RunSetup => self.start_guided_setup(),
             Action::ReviewConsent => self.review_replacement_consent(),
             Action::Resume => self.toggle_pause(),

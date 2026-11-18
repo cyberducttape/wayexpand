@@ -1376,7 +1376,35 @@ impl GuiApp {
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 ui.strong(self.strings.dg_installation());
-                ui.colored_label(palette.muted, self.strings.dg_use_guided_setup_checks());
+                match self.installation_audit.ready {
+                    Some(true) => {
+                        ui.colored_label(palette.success, self.strings.dg_valid());
+                    }
+                    Some(false) => {
+                        ui.colored_label(palette.danger, self.strings.dg_needs_attention());
+                        if !self.installation_audit.failed_components.is_empty() {
+                            ui.label(
+                                RichText::new(self.strings.dg_installation_components(
+                                    &self.installation_audit.failed_components.join(", "),
+                                ))
+                                .small()
+                                .color(palette.muted),
+                            );
+                        }
+                        if ui
+                            .button(
+                                self.strings
+                                    .action_label(crate::app::NextAction::CheckInstallation),
+                            )
+                            .clicked()
+                        {
+                            self.perform_next_step(crate::app::NextAction::CheckInstallation);
+                        }
+                    }
+                    None => {
+                        ui.colored_label(palette.muted, self.strings.dg_use_guided_setup_checks());
+                    }
+                }
                 if ui.button(self.strings.dg_open_setup()).clicked() {
                     self.diagnostics_close_requested = true;
                     self.onboarding_visible = true;
