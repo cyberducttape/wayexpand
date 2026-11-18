@@ -50,6 +50,43 @@ EOF
     wait_until 30 sink_focused "$1"
 }
 
+# --- keyboard layout --------------------------------------------------
+
+# compositor_layouts_are LAYOUTS: KWin reports exactly these (comma
+# separated) layouts, in order.
+compositor_layouts_are() {
+    reported=$(gdbus call --session --dest org.kde.keyboard --object-path /Layouts \
+        --method org.kde.KeyboardLayouts.getLayoutsList 2>/dev/null |
+        grep -o "('[a-z]*'" | tr -d "('" | paste -sd, -)
+    [ "$reported" = "$1" ]
+}
+
+# With several layouts, tell the test typist which group KWin has active
+# (see wx-e2e-type); the daemon gets it from its own KWin layout provider.
+export_typist_layout() {
+    case "${E2E_LAYOUT:-}" in
+        *,*) ;;
+        *) unset WX_E2E_ACTIVE_LAYOUT; return 0 ;;
+    esac
+    group=$(gdbus call --session --dest org.kde.keyboard --object-path /Layouts \
+        --method org.kde.KeyboardLayouts.getLayout 2>/dev/null |
+        sed -n 's/^(uint32 \([0-9]*\),)$/\1/p')
+    [ -n "$group" ] || return 1
+    WX_E2E_ACTIVE_LAYOUT="$group:${E2E_LAYOUT%%:*}:${E2E_LAYOUT#*:}"
+    export WX_E2E_ACTIVE_LAYOUT
+}
+if [ -n "${E2E_LAYOUT:-}" ]; then
+    export_typist_layout || log 'could not read the active KWin layout'
+fi
+
+switch_layout() {
+    gdbus call --session --dest org.kde.keyboard --object-path /Layouts \
+        --method org.kde.KeyboardLayouts.switchToNextLayout >>"$case_dir/layout.log" 2>&1 ||
+        return 1
+    sleep 0.5
+    export_typist_layout
+}
+
 route_ready() {
     if [ "$e2e_input_source" = input-method ]; then
         case "$1" in
@@ -106,7 +143,18 @@ if ! wait_until 50 test -S "$LIBEI_SOCKET"; then
     exit 0
 fi
 
-if [ "$e2e_input_source" = input-method ]; then
+if [ -n "${E2E_LAYOUT:-}" ]; then
+    # A session started with --layout runs that layout's scenarios.
+    case "$E2E_LAYOUT" in
+        de) run_scenarios "layout-de-altgr-ascii layout-de-dead-key-only-ascii-is-refused
+layout-de-non-ascii-is-refused" ;;
+        fr) run_scenarios "layout-fr-azerty" ;;
+        us:altgr-intl) run_scenarios "layout-altgr-intl-dead-keys" ;;
+        ru) run_scenarios "layout-ru-reachable-ascii layout-ru-latin-is-refused" ;;
+        us,de:,) run_scenarios "layout-multi-layout-switch" ;;
+        *) run_scenarios "expansion-replaces-trigger" ;;
+    esac
+elif [ "$e2e_input_source" = input-method ]; then
     run_scenarios "input-method-expansion input-method-password-field form-returns-to-origin
 form-focus-moved-fails-closed"
 else

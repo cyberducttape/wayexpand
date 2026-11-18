@@ -640,6 +640,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dbus-daemon jq kwin-common kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config wl-clipboard
       - name: Test production output and KWin focus tracking
         run: bash scripts/test-kwin-e2e.sh --keep
+      - name: Test keyboard layouts (de, fr, us altgr-intl, ru, us+de switching)
+        run: |
+          # KWin applies its layout at start-up, so each layout gets its own
+          # private session. ASCII must be typed exactly; text a keystroke
+          # route cannot type exactly must be refused before erasing.
+          for layout in de fr us:altgr-intl ru us,de:,; do
+            bash scripts/test-kwin-e2e.sh --keep --layout "$layout"
+          done
       - name: Test terminal paste into Konsole
         run: |
           # qt6-wayland provides the xdg-shell integration Konsole needs.

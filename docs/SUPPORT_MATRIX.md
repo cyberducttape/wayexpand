@@ -159,10 +159,20 @@ Unicode direct-commit route when enabled and available. The original
 limitation was observed in private headless KWin sessions on 2026-10-27
 (commit `c8c27d86d632`, see
 [`evidence/kwin-real-client-c8c27d86d632.txt`](evidence/kwin-real-client-c8c27d86d632.txt)),
-not yet confirmed in a live Plasma session. The new provider-to-EIS keymap
-agreement path has unit coverage but still needs repeatable live layout-switch
-and physical-keyboard certification before this combination is certified.
-Single-layout `us`, `de`, `fr`, and `us(altgr-intl)` sessions type correctly.
+not yet confirmed in a live Plasma session. The provider-to-EIS keymap
+agreement path now has repeatable headless evidence: with `us,de` configured,
+`scripts/test-kwin-e2e.sh --layout us,de:,` types correctly in `us` and again
+after a runtime switch to `de` (KWin 6.6.6, 2026-11-18). That run found and
+fixed a bug that refused every expansion after the first layout switch. Live
+layout-switch and physical-keyboard certification are still required before
+this combination is certified.
+Single-layout `us`, `de`, `fr`, `us(altgr-intl)`, and `ru` sessions type the
+ASCII each layout can reach exactly, including AltGr symbols on `de` and
+characters that are also dead keys on `us(altgr-intl)` (headless, CI job
+`kwin-e2e`). Keystroke routes type only ASCII, so non-ASCII text is refused
+even on a layout that has the key (for example `ü` on `de`). ASCII that a
+layout offers only as a dead key (`^` and `` ` `` on `de`) is refused rather
+than composed, and Latin letters are refused on `ru`.
 
 The integration procedure is in
 [`docs/INTEGRATION_TESTING.md`](INTEGRATION_TESTING.md). A passing unit test,

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Headless KWin end-to-end tests.
 #
-#   scripts/test-kwin-e2e.sh [--keep] [--allow-unverified-unicode] [SCENARIO...]
+#   scripts/test-kwin-e2e.sh [--keep] [--allow-unverified-unicode]
+#       [--layout LAYOUTS[:VARIANTS]] [SCENARIO...]
 #
 # Starts a private KWin (kwin_wayland --virtual) with its own D-Bus session,
 # runtime directory, home and configuration, then runs the scenarios in
@@ -21,13 +22,15 @@ set -euo pipefail
 keep=false
 allow_unicode_unverified=false
 input_source=stdin
+layout=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --keep) keep=true; shift ;;
         --allow-unverified-unicode) allow_unicode_unverified=true; shift ;;
         --help|-h)
             cat <<'EOF'
-usage: scripts/test-kwin-e2e.sh [--keep] [--allow-unverified-unicode] [--source stdin|input-method] [SCENARIO...]
+usage: scripts/test-kwin-e2e.sh [--keep] [--allow-unverified-unicode] [--source stdin|input-method]
+       [--layout LAYOUTS[:VARIANTS]] [SCENARIO...]
 
 Runs selected scenarios in a private headless KWin session. Keyboard capture
 is simulated; this does not certify physical keyboard behavior or a desktop
@@ -37,6 +40,9 @@ Options:
   --keep                       Preserve the temporary session and logs
   --allow-unverified-unicode   Continue when Unicode keysym support is absent
   --source stdin|input-method  Select the test capture source
+  --layout LAYOUTS[:VARIANTS]  Start KWin with these XKB layouts, for example
+                               de, us:altgr-intl or us,de:, and run that
+                               layout's scenarios by default
   -h, --help                   Show this help without starting KWin
 EOF
             exit 0
@@ -53,9 +59,26 @@ EOF
             }
             shift 2
             ;;
+        --layout=*)
+            layout=${1#--layout=}
+            shift
+            ;;
+        --layout)
+            layout=${2:?missing value for --layout}
+            shift 2
+            ;;
         *) break ;;
     esac
 done
+case "$layout" in
+    *[!a-z,:_-]*)
+        printf '%s\n' 'error: --layout takes XKB names such as de, us:altgr-intl or us,de:,' >&2
+        exit 2
+        ;;
+esac
+layout_names=${layout%%:*}
+layout_variants=
+case "$layout" in *:*) layout_variants=${layout#*:} ;; esac
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 # shellcheck source=scripts/kwin-e2e-report.sh
@@ -158,6 +181,13 @@ cleanup() {
 trap cleanup EXIT
 chmod 700 "$work" "$runtime"
 mkdir -m 700 "$work/home"
+if [ -n "$layout" ]; then
+    # KWin applies [Layout] from kxkbrc at start-up; it does not reapply a
+    # changed file in this headless session, so each layout gets a session.
+    mkdir -m 700 "$work/home/.config"
+    printf '[Layout]\nUse=true\nLayoutList=%s\nVariantList=%s\n' \
+        "$layout_names" "$layout_variants" >"$work/home/.config/kxkbrc"
+fi
 results="$work/results.txt"
 : >"$results"
 
@@ -202,6 +232,7 @@ env -i \
     E2E_CONFIG="$runtime/expansions.toml" \
     E2E_RESULTS="$results" \
     E2E_INPUT_SOURCE="$input_source" \
+    E2E_LAYOUT="$layout" \
     E2E_SCENARIOS="$*" \
     timeout 900 dbus-run-session -- \
     kwin_wayland --virtual --no-lockscreen --no-global-shortcuts \
@@ -242,9 +273,9 @@ if [ -s "$work/runtime-status" ]; then
     printf 'route backend-mode %s\n' "$(status_field backend_mode)"
     printf 'route sensitive-field-detection %s\n' "$(status_field capture_sensitive_focus)"
 fi
-printf '\n%s passed, %s failed, %s unverified (KWin %s, headless, capture %s)\n' \
+printf '\n%s passed, %s failed, %s unverified (KWin %s, headless, capture %s%s)\n' \
     "$pass" "$fail" "$unverified" "$(kwin_wayland --version 2>/dev/null | awk '{print $2}')" \
-    "$capture_label"
+    "$capture_label" "${layout:+, layout $layout}"
 [ "$fail" -eq 0 ] && {
     [ "$unverified" -eq 0 ] || {
         [ "$allow_unicode_unverified" = true ] && [ "$required_unverified" -eq 0 ]

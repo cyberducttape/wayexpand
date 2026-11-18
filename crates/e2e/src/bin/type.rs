@@ -8,9 +8,14 @@
 //! - `wlroots` (for Sway) creates its own virtual keyboard on
 //!   `WAYLAND_DISPLAY`, separate from the daemon's. Only `text` is
 //!   supported there, because that injector has no named-key output.
+//!
+//! With several layouts configured, the libei typist refuses (as the
+//! product does) unless `WX_E2E_ACTIVE_LAYOUT=GROUP:LAYOUTS:VARIANTS`
+//! names the active group, for example `1:us,de:,`. The harness reads it
+//! from the compositor; this helper never guesses.
 
 use anyhow::{bail, Context, Result};
-use wayexpand_backend_libei::{LibeiInjector, LibeiOptions};
+use wayexpand_backend_libei::{ActiveKeyboardLayout, LibeiInjector, LibeiOptions};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::TextInjector;
 
@@ -75,6 +80,28 @@ fn ascii_key_code(character: char) -> Option<u32> {
     })
 }
 
+/// Parse `GROUP:LAYOUTS:VARIANTS` from `WX_E2E_ACTIVE_LAYOUT`.
+fn active_layout_from_env() -> Result<Option<ActiveKeyboardLayout>> {
+    let Ok(value) = std::env::var("WX_E2E_ACTIVE_LAYOUT") else {
+        return Ok(None);
+    };
+    let mut parts = value.splitn(3, ':');
+    let (Some(group), Some(layout), Some(variant)) = (parts.next(), parts.next(), parts.next())
+    else {
+        bail!("WX_E2E_ACTIVE_LAYOUT must be GROUP:LAYOUTS:VARIANTS");
+    };
+    Ok(Some(ActiveKeyboardLayout {
+        generation: 1,
+        group: group.parse().context("WX_E2E_ACTIVE_LAYOUT group")?,
+        rules: None,
+        // Only the ordered layout names are compared with the EIS keymap.
+        model: Some("pc105".to_owned()),
+        layout: Some(layout.to_owned()),
+        variant: Some(variant.to_owned()),
+        options: None,
+    }))
+}
+
 fn connect() -> Result<Box<dyn TextInjector>> {
     match std::env::var("WX_E2E_TYPIST").as_deref() {
         Ok("libei") | Err(std::env::VarError::NotPresent) => Ok(Box::new(
@@ -82,7 +109,10 @@ fn connect() -> Result<Box<dyn TextInjector>> {
                 persist_portal_token: false,
                 fcitx5_direct_commit: false,
                 portal_token_path: None,
-                active_layout_provider: None,
+                active_layout_provider: active_layout_from_env()?.map(|layout| {
+                    Box::new(move || Some(layout.clone()))
+                        as wayexpand_backend_libei::ActiveLayoutProvider
+                }),
             })
             .context("connecting to EIS through LIBEI_SOCKET")?,
         )),

@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed: with several keyboard layouts configured on KDE, the libei keystroke
+  route refused every expansion after the first layout switch until the
+  daemon restarted. It now follows KWin's active layout after a switch, and
+  still refuses when the compositor's own report disagrees.
+- The headless KWin harness gained `--layout`, and CI now checks German,
+  French, US AltGr-International, Russian, and runtime US/German switching.
 - First-run now visibly labels active compatibility-mode replacement as non-atomic, limits a real-app test claim to that app and session, and points to Quick Picker copy/paste as the safer fallback.
 - IBus diagnostics now retain recent normal-field input evidence after the field loses focus or closes. This reports historical input delivery without identifying the application or claiming the current field is working.
 - The first-run Quick Picker shortcut instructions now distinguish direct insertion from copy-and-paste: direct insertion requires a verified destination and an atomic route; otherwise, copying is offered only when policy allows.

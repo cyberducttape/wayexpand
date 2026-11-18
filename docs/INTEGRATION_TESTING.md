@@ -27,7 +27,7 @@ backend behavior.
 
 ## Headless KWin end-to-end harness
 
-`scripts/test-kwin-e2e.sh [--keep] [--allow-unverified-unicode] [SCENARIO...]`
+`scripts/test-kwin-e2e.sh [--keep] [--allow-unverified-unicode] [--layout LAYOUTS[:VARIANTS]] [SCENARIO...]`
 runs WayExpand against a real KWin without touching the desktop: it starts a
 private `kwin_wayland --virtual` with its own D-Bus session, runtime directory,
 home, and configuration, and stops every process it started (including the
@@ -64,6 +64,26 @@ The JSON report includes the WayExpand build version, commit, and Unix run
 timestamp so an archived result can be tied to the tested binary. Its scope
 and limitations are included in the report; a private headless result is not
 evidence of physical keyboard capture or certification on the active desktop.
+
+### Keyboard layouts
+
+`scripts/test-kwin-e2e.sh --layout LAYOUTS[:VARIANTS]` starts the private KWin
+with those XKB layouts in its `kxkbrc` and runs that layout's scenarios. KWin
+applies the layout at start-up and does not reapply a changed `kxkbrc` in this
+headless session, so each layout needs its own run. CI runs:
+
+| `--layout` | Checks |
+|---|---|
+| `de` | QWERTZ letters and AltGr-only ASCII (`@{}[]\|~\`) are typed exactly; `^` and `` ` `` (dead keys only) and non-ASCII text are refused with the trigger intact |
+| `fr` | AZERTY letters and shifted digits are typed exactly |
+| `us:altgr-intl` | ASCII that is also a dead key on this layout (`` ' " ` ~ ^ ``) is typed exactly |
+| `ru` | Reachable digits and punctuation are typed exactly; Latin letters are refused |
+| `us,de:,` | With two layouts configured, the daemon takes the active group from KWin's layout provider, types correctly, and follows a switch to `de` while it runs |
+
+Keystroke routes type only ASCII (see `docs/COMPATIBILITY.md`), so the German
+case expects a refusal for `grüße` even though the layout has those keys. With
+several layouts configured, `wx-e2e-type` refuses like the product unless the
+session passes it KWin's active group in `WX_E2E_ACTIVE_LAYOUT`.
 
 An experimental input-method capture path is available with
 `scripts/test-kwin-e2e.sh --source=input-method`. It uses the daemon's
