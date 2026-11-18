@@ -97,9 +97,16 @@ prepare_upgrade_configuration() {
     if [ ! -f "$smoke_config" ]; then
         install -o wxsmoke -g wxsmoke -m 0600 /etc/wayexpand/expansions.toml.example "$smoke_config"
     fi
-    # Keep a user-owned edit across package upgrades and rollback. A TOML
-    # comment exercises preservation without changing the active snippets.
+    # Keep a user-owned snippet and comment across package upgrades and rollback.
     printf '\n# package-upgrade-user-customization=preserve\n' >> "$smoke_config"
+    cat >> "$smoke_config" <<'TOML'
+
+[[expansion]]
+trigger = ";package-smoke-user"
+replacement = "User-owned package upgrade check."
+description = "Verifies package lifecycle preservation"
+enabled = true
+TOML
     chown wxsmoke:wxsmoke "$smoke_config"
     smoke_config_hash=$(sha256sum "$smoke_config" | cut -d ' ' -f 1)
 }
@@ -114,6 +121,33 @@ check_upgrade_configuration_preserved() {
     fi
     # shellcheck disable=SC2016
     su wxsmoke -s /bin/sh -c 'wayexpand config validate "$1"' wayexpand "$smoke_config"
+    python3 - "$smoke_config" <<'PY'
+import pathlib
+import sys
+import tomllib
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+config = tomllib.loads(text)
+expansions = config.get("expansion", [])
+expected = {
+    ";;hello": "Hello from Wayland!",
+    ";package-smoke-user": "User-owned package upgrade check.",
+}
+for trigger, replacement in expected.items():
+    if not any(
+        expansion.get("trigger") == trigger
+        and expansion.get("replacement") == replacement
+        for expansion in expansions
+    ):
+        raise SystemExit(f"user configuration lost snippet {trigger!r}")
+if "# package-upgrade-user-customization=preserve" not in text:
+    raise SystemExit("user configuration lost its customization marker")
+PY
+    # The first validation may migrate the 1.3.2 fixture by adding stable
+    # snippet IDs. The semantic checks above permit that deliberate rewrite;
+    # later package operations must preserve the migrated file byte-for-byte.
+    smoke_config_hash=$(sha256sum "$smoke_config" | cut -d ' ' -f 1)
 }
 
 check_installed() {

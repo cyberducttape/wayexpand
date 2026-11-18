@@ -28,7 +28,7 @@ Fedora Copr published: False; Arch AUR submitted: False. Package CI targets: Ubu
 | Upgrade scenario | Scope | Status | Expected behavior |
 |---|---|---|---|
 | previous-release-to-current | package-manager | ci-pending | Candidate package installs over previous release; user configuration and snippets remain valid. |
-| user-customization-preserved | package-manager | ci-pending | User-owned configuration bytes remain unchanged across upgrade, rollback, reinstall, and uninstall/reinstall. |
+| user-customization-preserved | package-manager | ci-pending | User-owned snippets and custom fields survive schema migration; after migration, configuration bytes remain unchanged across rollback, re-upgrade, reinstall, and uninstall/reinstall. |
 | uninstall-reinstall | package-manager | ci-pending | Package-owned executables are removed and reinstall restores package components without replacing user configuration. |
 | running-daemon-activated | live-user-session | not-tested | Affected process is restarted and reports the candidate build; no stale daemon remains. |
 | gnome-ibus-upgrade | physical-gnome-session | not-tested | IBus registration and GNOME source remain usable or setup presents a precise recovery step. |
@@ -40,8 +40,11 @@ The release payload is built on Ubuntu 24.04. The package lifecycle job uses a
 removal on Ubuntu 24.04, Ubuntu 26.04, and Fedora 45. It now preserves and
 validates a user-customized configuration through those package operations.
 The exact current scenario status is shown in the generated matrix below. This
-container test cannot establish behavior with a running desktop daemon or an
-active GNOME IBus source; those remain separate desktop-session checks. GitHub
+container test accepts the supported stable-ID migration when validating the
+older fixture, checks that its built-in and user-owned snippets survive, then
+requires byte-for-byte preservation through later package operations. It
+cannot establish behavior with a running desktop daemon or an active GNOME
+IBus source; those remain separate desktop-session checks. GitHub
 release artifacts receive build-provenance attestations and checksums;
 repositories must use their distribution signing infrastructure before they
 are advertised as official channels. CI does not yet compare independently

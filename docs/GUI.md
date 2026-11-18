@@ -260,8 +260,8 @@ most routes expand triggers while the picker can only copy.
 
 | State | Meaning |
 |---|---|
-| `Working` | An exact insertion was confirmed in a real application in this login session, with this build, typing route and route instance. A confirmation that could not be saved shows `Working (this session only)`. |
-| `Needs verification` | Connected with nothing wrong, but no insertion has been confirmed for what is running now. |
+| `Working` | An exact insertion was observed by the controlled test field or confirmed by the user in a real application in this login session, with this build, typing route and route instance. A result that could not be saved shows `Working (this session only)`. |
+| `Needs verification` | Connected with nothing wrong, but no insertion has been observed or confirmed for what is running now. |
 | `Needs permission` | An operating-system, device, or desktop-portal permission is explicitly required. |
 | `Needs setup` | A setup step remains, such as IBus registration/source selection, a service restart, or explicit replacement consent. This does not imply an administrator permission is missing. |
 | `Limited` | Some protection is unavailable, or the last app's field refused replacement. |
@@ -270,9 +270,9 @@ most routes expand triggers while the picker can only copy.
 | `Paused`, `Off`, `Not set up`, `Starting…`, `Reconnecting…`, `Stopped`, `Checking…` | As named. |
 
 A running process alone is never shown as `Working`, and backend
-acknowledgements do not count: only a user-confirmed insertion does. The
-confirmation is saved in `gui-setup.toml` with the application, route, build,
-desktop session and date, and stops counting after a new login, an update, a
+acknowledgements do not count. The evidence source (controlled observation or
+user confirmation) is saved in `gui-setup.toml` with the application, route,
+build, desktop session and date, and stops counting after a new login, an update, a
 route change or a restart of the input engine or service; the chip's tooltip
 then shows when it was last confirmed and what changed. The tooltip, and the
 accessible label for screen readers, lead with the current problem and its

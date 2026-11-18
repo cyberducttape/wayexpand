@@ -52,7 +52,7 @@
       "status": "ci-pending",
       "scope": "package-manager",
       "evidence": "scripts/test-package-smoke.sh",
-      "expected": "User-owned configuration bytes remain unchanged across upgrade, rollback, reinstall, and uninstall/reinstall."
+      "expected": "User-owned snippets and custom fields survive schema migration; after migration, configuration bytes remain unchanged across rollback, re-upgrade, reinstall, and uninstall/reinstall."
     },
     {
       "scenario": "uninstall-reinstall",

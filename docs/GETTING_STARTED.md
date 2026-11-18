@@ -37,11 +37,15 @@ trigger.
 ### 3. Verify in a real application
 
 Choose **Test in a real application** and follow the prompt in a disposable,
-non-sensitive text field. Inspect the result and confirm only if it exactly
+non-sensitive text field. Where the controlled test field is available and
+the output transaction can be correlated, WayExpand reads back the exact
+result without retaining its contents. In other applications or when the
+route cannot correlate the result, inspect it and confirm only if it exactly
 matches the expected replacement. WayExpand never presses Enter or retries an
-insertion whose outcome is uncertain. Until you confirm an exact result, the
-GUI reports **Configured, untested**; afterward it reports **Working in the
-tested application**. That result applies only to the tested app and session.
+insertion whose outcome is uncertain. The guide distinguishes **Configured,
+awaiting test**, **Verified in the controlled test field**, and **Confirmed by
+you in the tested application**. Each result applies only to the tested field
+and session.
 
 If no automatic route is available, Quick Picker remains available in
 copy-only mode: choose a snippet, switch to the target application, and paste
@@ -179,8 +183,9 @@ When the visual fallback is used, follow its prompt, type the trigger once,
 inspect the resulting text, and confirm only if it exactly matches the expected
 replacement. WayExpand never presses Enter or retries uncertain output. The GUI
 offers this as **Test Expansion** during setup. A passing controlled field is
-reported as **Working in the tested application**; a visual result requires your
-confirmation. Both apply only to the tested field and session, and do not
+reported as **Verified in the controlled test field**. A visual result is
+reported as **Confirmed by you in the tested application**. Both apply only to
+the tested field and session, and do not
 certify other applications or the compositor. If the
 matcher check instead prints `no expansion matched`, inspect the trigger with
 `wayexpand list` and `wayexpand validate` before debugging the backend.
