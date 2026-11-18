@@ -4312,7 +4312,7 @@ fn writing_a_first_snippet_returns_to_the_guide() {
 }
 
 #[test]
-fn first_run_offers_a_picker_shortcut_until_one_is_set() {
+fn first_run_keeps_picker_shortcut_optional_and_collapsed() {
     assert_eq!(
         runtime::parse_picker_shortcut(
             br#"{"command":"wayexpand-gui --picker","desktop":"GNOME","shortcut":"Ctrl+Alt+Space","supported":true}"#
@@ -4370,35 +4370,14 @@ fn first_run_offers_a_picker_shortcut_until_one_is_set() {
         unset.contains("Open snippets from any app (optional)"),
         "{unset}"
     );
+    assert!(unset.contains("Prepare your desktop"), "{unset}");
+    assert!(unset.contains("Create a snippet"), "{unset}");
+    assert!(unset.contains("Test it"), "{unset}");
     assert!(
-        unset.contains("insert directly only when the destination is verified"),
-        "the picker shortcut must explain its insertion preconditions: {unset}"
+        !unset.contains("Use Ctrl+Alt+Space")
+            && !unset.contains("insert directly only when the destination is verified"),
+        "picker setup details should stay hidden until the optional section is opened: {unset}"
     );
-    assert!(
-        unset.contains("copies the snippet so you can paste it yourself"),
-        "the picker shortcut must explain its copy fallback: {unset}"
-    );
-    assert!(unset.contains("Use Ctrl+Alt+Space"), "{unset}");
-
-    app.picker_shortcut_error = Some("Ctrl+Alt+Space is already used by “Terminal”.".into());
-    let conflict = render(&mut app);
-    assert!(conflict.contains("already used by"), "{conflict}");
-
-    app.picker_shortcut = Some(runtime::PickerShortcut {
-        supported: true,
-        keys: Some("Ctrl+Alt+Period".into()),
-    });
-    let set = render(&mut app);
-    assert!(set.contains("Press Ctrl+Alt+Period in any app"), "{set}");
-    assert!(!set.contains("Use Ctrl+Alt+Space"), "{set}");
-
-    app.picker_shortcut = Some(runtime::PickerShortcut {
-        supported: false,
-        keys: None,
-    });
-    let manual = render(&mut app);
-    assert!(manual.contains("wayexpand-gui --picker"), "{manual}");
-    assert!(!manual.contains("Use Ctrl+Alt+Space"), "{manual}");
     let _ = fs::remove_file(path);
 }
 
