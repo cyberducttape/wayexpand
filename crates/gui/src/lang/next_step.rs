@@ -291,13 +291,13 @@ impl Strings {
                 "IBus tidak menemukan mesin WayExpand, jadi metode input tidak dapat dimulai."
             }
             (Problem::IbusManifestScopeInvalid, En) => {
-                "The shared IBus registration points to a user-owned executable and is not safe for multi-user use."
+                "WayExpand's desktop integration points to a file in your personal folder. It needs a safe shared installation before the desktop can start it."
             }
             (Problem::IbusManifestScopeInvalid, De) => {
-                "Die gemeinsame IBus-Registrierung verweist auf ein benutzereigenes Programm und ist nicht für mehrere Benutzer sicher."
+                "Die WayExpand-Desktopintegration verweist auf eine Datei in Ihrem persönlichen Ordner. Sie muss sicher für das System installiert werden, bevor der Desktop sie starten kann."
             }
             (Problem::IbusManifestScopeInvalid, Id) => {
-                "Pendaftaran IBus bersama menunjuk ke executable milik pengguna dan tidak aman untuk banyak pengguna."
+                "Integrasi desktop WayExpand menunjuk ke berkas di folder pribadi Anda. Integrasi ini perlu dipasang dengan aman untuk sistem sebelum desktop dapat menjalankannya."
             }
             (Problem::IbusDesktopRouteUnavailable, En) => {
                 "KWin is not routing keyboard input through IBus, so WayExpand cannot receive typing on this route."
@@ -772,13 +772,13 @@ impl Strings {
                 "Jalankan `wayexpand ibus status --json` untuk memastikan pendaftaran mesin belum ada, lalu jalankan `wayexpand setup --backend ibus` dan periksa status lagi. Sementara itu, Quick Picker dapat menyalin cuplikan untuk ditempel manual."
             }
             (Problem::IbusManifestScopeInvalid, En) => {
-                "Run guided IBus setup to replace the shared registration with a system-owned engine, or install WayExpand from a distribution package. Setup may request administrator authorization. Then refresh Diagnostics → IBus and run a real-app typing test."
+                "Choose Fix in guided setup and approve the one-time system installation if requested, or install WayExpand from your distribution's package. Then retry the typing test in your text editor."
             }
             (Problem::IbusManifestScopeInvalid, De) => {
-                "Starten Sie die geführte IBus-Einrichtung, um die gemeinsame Registrierung durch eine systemeigene Engine zu ersetzen, oder installieren Sie WayExpand als Distributionspaket. Möglicherweise ist eine Administratorfreigabe nötig. Aktualisieren Sie danach Diagnose → IBus und testen Sie die Eingabe in einer echten Anwendung."
+                "Wählen Sie in der geführten Einrichtung „Reparieren“ und erlauben Sie bei Bedarf die einmalige Systeminstallation. Alternativ installieren Sie WayExpand über Ihr Distributionspaket. Testen Sie danach die Eingabe erneut in Ihrem Texteditor."
             }
             (Problem::IbusManifestScopeInvalid, Id) => {
-                "Jalankan penyiapan IBus terpandu untuk mengganti pendaftaran bersama dengan mesin milik sistem, atau pasang WayExpand dari paket distribusi. Penyiapan mungkin meminta izin administrator. Lalu perbarui Diagnostik → IBus dan uji pengetikan di aplikasi nyata."
+                "Pilih Perbaiki dalam penyiapan terpandu dan setujui pemasangan sistem satu kali jika diminta, atau pasang WayExpand dari paket distribusi Anda. Setelah itu, coba lagi mengetik di editor teks."
             }
             (Problem::IbusDesktopRouteUnavailable, En) => {
                 "Use guided setup to configure KWin's IBus Wayland route, then run a harmless live typing test. If setup cannot apply the change, select IBus Wayland in KDE System Settings → Keyboard → Virtual Keyboard and check again. Quick Picker can copy a snippet meanwhile."
