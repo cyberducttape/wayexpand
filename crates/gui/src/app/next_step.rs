@@ -529,6 +529,13 @@ fn terminal_route_has_no_input(s: &Situation) -> bool {
 }
 
 impl GuiApp {
+    /// The daemon may keep a terminal-scoped evdev companion running while
+    /// IBus owns typing in other applications. Report and test the effective
+    /// capture route, not merely the presence of that companion.
+    pub(crate) fn active_route_is_terminal_scoped(&self) -> bool {
+        terminal_route_is_scoped(&self.daemon_status) && !self.ibus_route_active()
+    }
+
     /// Offer an explicit alternative when terminal-scoped evdev cannot
     /// establish the focused client identity and setup recommends IBus. The
     /// guided setup begins with a read-only preflight; switching still
