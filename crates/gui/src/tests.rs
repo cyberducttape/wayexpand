@@ -3747,7 +3747,7 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
             "id": "manifest-scope",
             "state": "fail",
             "problem_id": "WX-IBUS-MULTIUSER-001",
-            "title": "Shared IBus engine uses a protected system executable",
+            "title": "Shared IBus registration is multi-user safe",
             "detail": "The shared component points to a home-directory executable.",
             "fix": "Install a system-owned engine executable."
         }]
@@ -3774,8 +3774,8 @@ fn ibus_setup_consent_exposes_unsafe_shared_manifest_scope() {
             .nodes
     );
     assert!(
-        semantics.contains("Shared IBus engine uses a protected system executable"),
-        "unsafe shared registration must be visible in the consent dialog: {semantics}"
+        semantics.contains("Shared IBus registration needs a protected system copy"),
+        "the failing registration must have a title that describes a required repair: {semantics}"
     );
     assert!(
         semantics.contains(

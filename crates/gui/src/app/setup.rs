@@ -1490,6 +1490,11 @@ impl GuiApp {
                 ui.group(|ui| {
                     ui.label(RichText::new(self.strings.setup_review_stages()).strong());
                     for (symbol, problem_id, title, detail, fix) in &attention {
+                        let title = if problem_id == "WX-IBUS-MULTIUSER-001" {
+                            self.strings.setup_system_registration_title()
+                        } else {
+                            title
+                        };
                         let id = if problem_id.is_empty() {
                             String::new()
                         } else {

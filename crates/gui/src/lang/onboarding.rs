@@ -151,9 +151,9 @@ texts! {
         "Die GNOME-Shell-Integration ist verfügbar",
         "Integrasi GNOME Shell tersedia";
     setup_check_manifest_scope =>
-        "Shared IBus engine uses a protected system executable",
-        "Die gemeinsame IBus-Engine nutzt eine geschützte Systemdatei",
-        "Engine IBus bersama memakai executable sistem yang terlindungi";
+        "Shared IBus registration",
+        "Gemeinsame IBus-Registrierung",
+        "Registrasi IBus bersama";
     setup_check_action =>
         "Next:",
         "Nächster Schritt:",
@@ -278,6 +278,10 @@ texts! {
         "The shared keyboard integration currently points to a program in your personal folder. WayExpand needs to install a protected system copy so the integration works safely for all accounts.",
         "Die gemeinsame Tastaturintegration verweist derzeit auf ein Programm in Ihrem persönlichen Ordner. WayExpand muss eine geschützte Systemkopie installieren, damit die Integration für alle Konten sicher funktioniert.",
         "Integrasi papan ketik bersama saat ini mengarah ke program di folder pribadi Anda. WayExpand perlu memasang salinan sistem yang terlindungi agar integrasi berfungsi dengan aman untuk semua akun.";
+    setup_system_registration_title =>
+        "Shared IBus registration needs a protected system copy",
+        "Die gemeinsame IBus-Registrierung benötigt eine geschützte Systemkopie",
+        "Registrasi IBus bersama memerlukan salinan sistem yang terlindungi";
     setup_consent_checkbox =>
         "I understand the interleaving and partial-write risk and want to enable tracked-focus replacement.",
         "Ich verstehe das Risiko vermischter und unvollständiger Eingaben und möchte die fokusverfolgte Ersetzung aktivieren.",
