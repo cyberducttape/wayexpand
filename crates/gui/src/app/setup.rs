@@ -889,7 +889,7 @@ impl GuiApp {
         }
         self.desktop_test_verified = false;
         self.desktop_test_verified_application = None;
-        let arguments = vec![
+        let mut arguments = vec![
             "debug".into(),
             "--test".into(),
             trigger.clone(),
@@ -897,8 +897,14 @@ impl GuiApp {
             application_class.clone(),
             "--focus-confirmed".into(),
             "--observe-only".into(),
-            "--controlled-client".into(),
         ];
+        // First-run uses the dedicated GTK field, whose contents can be
+        // checked exactly without recording them. Diagnostics lets the user
+        // choose a browser, terminal, or other application; that test must
+        // observe the selected application instead of silently opening GTK.
+        if self.desktop_test_dialog_required {
+            arguments.push("--controlled-client".into());
+        }
         self.pending_desktop_test = Some(DesktopTestReview {
             trigger,
             replacement,
