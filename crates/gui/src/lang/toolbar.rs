@@ -699,17 +699,17 @@ impl Strings {
             ("waiting", Language::English) => "checking desktop typing",
             ("waiting", Language::Indonesian) => "memeriksa pengetikan desktop",
             ("waiting", Language::German) => "Texteingabe am Desktop wird geprüft",
-            ("typing_ready", Language::English) => "desktop typing is ready",
-            ("typing_ready", Language::Indonesian) => "pengetikan desktop siap",
-            ("typing_ready", Language::German) => "Texteingabe am Desktop ist bereit",
+            ("typing_ready", Language::English) => "integration is configured",
+            ("typing_ready", Language::Indonesian) => "integrasi telah dikonfigurasi",
+            ("typing_ready", Language::German) => "Integration ist eingerichtet",
             ("terminal_only_ready", Language::English) => {
-                "typing is ready in configured terminal apps only"
+                "configured for the selected terminal apps only"
             }
             ("terminal_only_ready", Language::Indonesian) => {
-                "pengetikan hanya siap di aplikasi terminal yang dikonfigurasi"
+                "hanya untuk aplikasi terminal yang dipilih"
             }
             ("terminal_only_ready", Language::German) => {
-                "Texteingabe ist nur in den konfigurierten Terminal-Apps bereit"
+                "nur für die ausgewählten Terminal-Apps eingerichtet"
             }
             _ => "",
         }

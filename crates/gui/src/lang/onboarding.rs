@@ -512,9 +512,9 @@ texts! {
         "Dieser Desktop wird geprüft …",
         "Memeriksa desktop ini…";
     first_run_connected =>
-        "Desktop typing: {detail}",
-        "Texteingabe am Desktop: {detail}",
-        "Pengetikan desktop: {detail}";
+        "Desktop setup: {detail}",
+        "Desktop-Einrichtung: {detail}",
+        "Penyiapan desktop: {detail}";
     first_run_check_again =>
         "Check again",
         "Erneut prüfen",
