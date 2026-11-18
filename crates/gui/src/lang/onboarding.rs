@@ -76,17 +76,17 @@ texts! {
         "Einrichtung und Zustimmung zur Ersetzung prüfen",
         "Tinjau penyiapan dan persetujuan penggantian";
     onboarding_set_up_recommended_ibus =>
-        "Set up recommended IBus route…",
-        "Empfohlene IBus-Route einrichten…",
-        "Siapkan rute IBus yang disarankan…";
+        "Set up recommended desktop integration…",
+        "Empfohlene Desktop-Integration einrichten…",
+        "Siapkan integrasi desktop yang disarankan…";
     open_quick_picker_copy =>
         "Open Quick Picker (copy and paste)",
         "Schnellwähler öffnen (kopieren und einfügen)",
         "Buka Quick Picker (salin dan tempel)";
     gnome_register_help =>
-        "Continue guided setup to check dependencies, register the engine, and explain any required administrator authorization.",
-        "Setzen Sie die geführte Einrichtung fort, um Abhängigkeiten zu prüfen, die Engine zu registrieren und eine nötige Administrator-Freigabe zu erklären.",
-        "Lanjutkan penyiapan terpandu untuk memeriksa dependensi, mendaftarkan engine, dan menjelaskan otorisasi administrator yang diperlukan.";
+        "Continue guided setup to check what is missing and explain any administrator approval it needs.",
+        "Setzen Sie die geführte Einrichtung fort, um fehlende Voraussetzungen zu prüfen und nötige Administratorfreigaben zu erklären.",
+        "Lanjutkan penyiapan terpandu untuk memeriksa kebutuhan yang belum terpenuhi dan menjelaskan persetujuan administrator yang diperlukan.";
     gnome_select_help =>
         "Choose WayExpand from GNOME’s keyboard/input-source menu. Your existing keyboard layouts remain available.",
         "Wählen Sie WayExpand im Tastatur- bzw. Eingabequellen-Menü von GNOME. Ihre bisherigen Tastaturbelegungen bleiben verfügbar.",
@@ -358,9 +358,9 @@ texts! {
         "Prüfen Sie die Einrichtungsschritte und nötige Zustimmungen, um fortzufahren.",
         "Tinjau tahap penyiapan dan persetujuan yang diperlukan untuk melanjutkan.";
     setup_desktop_test_running =>
-        "Desktop test running: switch to your test text field now and type the trigger once within 30 seconds. Do not press Enter.",
-        "Desktop-Test läuft: Wechseln Sie jetzt in Ihr Testfeld und tippen Sie das Kürzel innerhalb von 30 Sekunden einmal. Drücken Sie nicht die Eingabetaste.",
-        "Uji desktop berjalan: pindah ke kolom teks uji sekarang dan ketik pemicu sekali dalam 30 detik. Jangan tekan Enter.";
+        "A test field will open. Type the trigger there once; do not press Enter. If automatic checking is unavailable, WayExpand will ask you to confirm what appeared.",
+        "Ein Testfeld wird geöffnet. Tippen Sie dort einmal das Kürzel und drücken Sie nicht die Eingabetaste. Wenn die automatische Prüfung nicht verfügbar ist, fragt WayExpand, was angezeigt wurde.",
+        "Kolom uji akan terbuka. Ketik pemicu sekali di sana; jangan tekan Enter. Jika pemeriksaan otomatis tidak tersedia, WayExpand akan meminta Anda mengonfirmasi hasilnya.";
     setup_desktop_test_finished =>
         "Desktop test finished.",
         "Desktop-Test beendet.",
@@ -496,9 +496,9 @@ impl Strings {
 // The three-step first-run guide: connect, create, test.
 texts! {
     step_connect_title =>
-        "Connect your desktop",
-        "Desktop verbinden",
-        "Hubungkan desktop Anda";
+        "Prepare your desktop",
+        "Desktop vorbereiten",
+        "Siapkan desktop Anda";
     step_create_title =>
         "Create a snippet",
         "Snippet anlegen",
@@ -512,17 +512,17 @@ texts! {
         "Dieser Desktop wird geprüft …",
         "Memeriksa desktop ini…";
     first_run_connected =>
-        "Connected: {detail}",
-        "Verbunden: {detail}",
-        "Terhubung: {detail}";
+        "Desktop typing: {detail}",
+        "Texteingabe am Desktop: {detail}",
+        "Pengetikan desktop: {detail}";
     first_run_check_again =>
         "Check again",
         "Erneut prüfen",
         "Periksa lagi";
     first_run_snippet_ready =>
-        "Saved matcher rule: {trigger} → “{replacement}”. Desktop insertion is checked in step 3.",
-        "Gespeicherte Matcher-Regel: {trigger} → „{replacement}“. Das Einfügen am Desktop wird in Schritt 3 geprüft.",
-        "Aturan matcher tersimpan: {trigger} → “{replacement}”. Penyisipan desktop diperiksa pada langkah 3.";
+        "Test snippet saved: {trigger} → “{replacement}”. Step 3 checks that it appears in a text field.",
+        "Testsnippet gespeichert: {trigger} → „{replacement}“. In Schritt 3 wird geprüft, ob der Text im Eingabefeld erscheint.",
+        "Cuplikan uji tersimpan: {trigger} → “{replacement}”. Langkah 3 memeriksa apakah teks muncul di kolom.";
     first_run_test_needs_connection =>
         "Finish step 1 first. Until then you can copy snippets with Quick Picker and paste them yourself.",
         "Schließen Sie zuerst Schritt 1 ab. Bis dahin können Sie Snippets mit dem Schnellwähler kopieren und selbst einfügen.",
@@ -532,9 +532,9 @@ texts! {
         "Legen Sie zuerst in Schritt 2 ein Snippet an.",
         "Buat cuplikan di langkah 2 dulu.";
     first_run_test_help =>
-        "Open a plain, non-sensitive text field in another app, such as a new text editor document. Press the button below, switch to that field and type the trigger once within 30 seconds. WayExpand then asks whether the text appeared correctly.",
-        "Öffnen Sie ein normales, unkritisches Textfeld in einer anderen App, etwa ein neues Texteditor-Dokument. Klicken Sie unten, wechseln Sie innerhalb von 30 Sekunden in dieses Feld und geben Sie den Auslöser einmal ein. WayExpand fragt danach, ob der Text richtig erschienen ist.",
-        "Buka kolom teks biasa yang tidak sensitif di aplikasi lain, misalnya dokumen baru di editor teks. Tekan tombol di bawah, pindah ke kolom itu, lalu ketik pemicu sekali dalam 30 detik. WayExpand lalu menanyakan apakah teks muncul dengan benar.";
+        "A harmless test field opens. Type the trigger once. WayExpand checks the text there when possible; otherwise it asks you to confirm the result. This verifies only the tested field and desktop session.",
+        "Ein harmloses Testfeld wird geöffnet. Tippen Sie dort einmal das Kürzel. WayExpand prüft den Text nach Möglichkeit automatisch und fragt sonst nach Ihrer Bestätigung. Geprüft werden nur dieses Feld und diese Sitzung.",
+        "Kolom uji yang aman akan terbuka. Ketik pemicu sekali. WayExpand memeriksa teks jika memungkinkan; jika tidak, WayExpand meminta konfirmasi Anda. Pemeriksaan hanya berlaku untuk kolom dan sesi ini.";
     first_run_try_inside =>
         "Try the trigger inside WayExpand first",
         "Auslöser zuerst in WayExpand ausprobieren",

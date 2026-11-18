@@ -666,44 +666,42 @@ impl Strings {
             ("portal_revoked", Language::English) => "desktop permission was revoked",
             ("portal_revoked", Language::Indonesian) => "izin desktop dicabut",
             ("portal_revoked", Language::German) => "Desktop-Berechtigung wurde widerrufen",
-            ("unsupported", Language::English) => "no supported route is active",
-            ("unsupported", Language::Indonesian) => "tidak ada jalur yang didukung aktif",
-            ("unsupported", Language::German) => "kein unterstützter Weg ist aktiv",
-            ("failed", Language::English) => "route failed to start",
-            ("failed", Language::Indonesian) => "jalur gagal dimulai",
-            ("failed", Language::German) => "Weg konnte nicht starten",
-            ("reconnecting", Language::English) => "route is reconnecting",
-            ("reconnecting", Language::Indonesian) => "jalur sedang menyambung ulang",
-            ("reconnecting", Language::German) => "Weg verbindet neu",
-            ("starting", Language::English) => "route is starting",
-            ("starting", Language::Indonesian) => "jalur sedang dimulai",
-            ("starting", Language::German) => "Weg startet",
-            ("degraded", Language::English) => "route is degraded",
-            ("degraded", Language::Indonesian) => "jalur terganggu",
-            ("degraded", Language::German) => "Weg ist beeinträchtigt",
-            ("stopped", Language::English) => "route is stopped",
-            ("stopped", Language::Indonesian) => "jalur berhenti",
-            ("stopped", Language::German) => "Weg ist gestoppt",
+            ("unsupported", Language::English) => "no supported desktop typing option is available",
+            ("unsupported", Language::Indonesian) => {
+                "opsi pengetikan desktop yang didukung tidak tersedia"
+            }
+            ("unsupported", Language::German) => {
+                "keine unterstützte Texteingabe am Desktop verfügbar"
+            }
+            ("failed", Language::English) => "WayExpand could not start desktop typing",
+            ("failed", Language::Indonesian) => "WayExpand tidak dapat memulai pengetikan desktop",
+            ("failed", Language::German) => {
+                "WayExpand konnte die Texteingabe am Desktop nicht starten"
+            }
+            ("reconnecting", Language::English) => "reconnecting to desktop typing",
+            ("reconnecting", Language::Indonesian) => "menyambungkan kembali pengetikan desktop",
+            ("reconnecting", Language::German) => "Texteingabe am Desktop wird neu verbunden",
+            ("starting", Language::English) => "starting desktop typing",
+            ("starting", Language::Indonesian) => "memulai pengetikan desktop",
+            ("starting", Language::German) => "Texteingabe am Desktop wird gestartet",
+            ("degraded", Language::English) => "desktop typing is not working correctly",
+            ("degraded", Language::Indonesian) => "pengetikan desktop tidak berfungsi dengan benar",
+            ("degraded", Language::German) => "Texteingabe am Desktop funktioniert nicht richtig",
+            ("stopped", Language::English) => "desktop typing is stopped",
+            ("stopped", Language::Indonesian) => "pengetikan desktop dihentikan",
+            ("stopped", Language::German) => "Texteingabe am Desktop ist gestoppt",
             ("paused", Language::English) => "WayExpand is paused",
             ("paused", Language::Indonesian) => "WayExpand dijeda",
             ("paused", Language::German) => "WayExpand ist pausiert",
-            ("service_not_running", Language::English) => "the background service is not running",
-            ("service_not_running", Language::Indonesian) => {
-                "layanan latar belakang tidak berjalan"
-            }
-            ("service_not_running", Language::German) => "der Hintergrunddienst läuft nicht",
-            ("waiting", Language::English) => "waiting for live route status",
-            ("waiting", Language::Indonesian) => "menunggu status jalur langsung",
-            ("waiting", Language::German) => "warte auf den Live-Status",
-            ("ibus", Language::English) => {
-                "the WayExpand IBus engine is active (no background service needed)"
-            }
-            ("ibus", Language::Indonesian) => {
-                "mesin IBus WayExpand aktif (tidak perlu layanan latar belakang)"
-            }
-            ("ibus", Language::German) => {
-                "die WayExpand-IBus-Engine ist aktiv (kein Hintergrunddienst nötig)"
-            }
+            ("service_not_running", Language::English) => "WayExpand is not running yet",
+            ("service_not_running", Language::Indonesian) => "WayExpand belum berjalan",
+            ("service_not_running", Language::German) => "WayExpand läuft noch nicht",
+            ("waiting", Language::English) => "checking desktop typing",
+            ("waiting", Language::Indonesian) => "memeriksa pengetikan desktop",
+            ("waiting", Language::German) => "Texteingabe am Desktop wird geprüft",
+            ("typing_ready", Language::English) => "desktop typing is ready",
+            ("typing_ready", Language::Indonesian) => "pengetikan desktop siap",
+            ("typing_ready", Language::German) => "Texteingabe am Desktop ist bereit",
             _ => "",
         }
     }
@@ -910,9 +908,9 @@ impl Strings {
 
     pub fn onboarding_ibus_field_limitation(&self) -> &'static str {
         match self.lang {
-            Language::English => "IBus may cover more text fields than the current route, but fields that do not expose surrounding text still require Quick Picker copy and paste. Setup will ask before enabling non-atomic replacement.",
-            Language::Indonesian => "IBus mungkin mendukung lebih banyak kolom teks daripada rute saat ini, tetapi kolom yang tidak menyediakan teks sekitar tetap memerlukan salin-tempel melalui Quick Picker. Penyiapan akan meminta persetujuan sebelum mengaktifkan penggantian non-atomik.",
-            Language::German => "IBus kann mehr Textfelder als der aktuelle Weg unterstützen. Felder ohne Umgebungstext benötigen weiterhin Kopieren und Einfügen über den Schnellwähler. Die Einrichtung fragt vor dem Aktivieren der nicht-atomaren Ersetzung nach Ihrer Zustimmung.",
+            Language::English => "The recommended desktop integration can support more text fields than the current setup. Some browser and terminal fields still do not provide enough information for safe replacement; use Quick Picker to copy and paste there. Setup explains the replacement tradeoff before asking for consent.",
+            Language::Indonesian => "Integrasi desktop yang disarankan dapat mendukung lebih banyak kolom daripada penyiapan saat ini. Beberapa kolom browser dan terminal tetap tidak memberikan cukup informasi untuk penggantian yang aman; gunakan Quick Picker untuk menyalin dan menempel di sana. Penyiapan menjelaskan risikonya sebelum meminta persetujuan.",
+            Language::German => "Die empfohlene Desktop-Integration kann mehr Textfelder unterstützen als die aktuelle Einrichtung. Manche Browser- und Terminalfelder liefern trotzdem nicht genug Informationen für einen sicheren Austausch. Verwenden Sie dort den Schnellwähler zum Kopieren und Einfügen. Vor einer Zustimmung erklärt die Einrichtung den Kompromiss.",
         }
     }
 

@@ -468,19 +468,11 @@ impl GuiApp {
         };
         let restart_command = restart_unit.map(|unit| format!("systemctl --user restart {unit}"));
         let restart_command = restart_command.as_deref();
-        let injection = self
-            .daemon_capabilities
-            .as_ref()
-            .and_then(|capabilities| capabilities.injection_mode)
-            .map(str::to_owned)
-            .or_else(|| status_value("backend"))
-            .unwrap_or_else(|| "unknown injection".into());
-        let active_route = format!("{source} → {injection}");
         let detail = |key: &str| self.strings.onboarding_route_detail(key).to_owned();
         let route_state_detail = match self.route_state {
             _ if self.paused => detail("paused"),
             // A companion's own route state says nothing about the IBus route.
-            _ if ibus_only || (gnome_ibus || kde_ibus) && route_ready => detail("ibus"),
+            _ if ibus_only || (gnome_ibus || kde_ibus) && route_ready => detail("typing_ready"),
             Some(runtime::RouteState::PermissionRequired) => detail("permission_required"),
             Some(runtime::RouteState::PortalRevoked) => detail("portal_revoked"),
             Some(runtime::RouteState::Unsupported) => detail("unsupported"),
@@ -499,7 +491,7 @@ impl GuiApp {
             {
                 self.strings.onboarding_unverified_daemon_state().into()
             }
-            Some(runtime::RouteState::Connected) => active_route.clone(),
+            Some(runtime::RouteState::Connected) => detail("typing_ready"),
             None if !daemon_running => detail("service_not_running"),
             None => detail("waiting"),
         };
