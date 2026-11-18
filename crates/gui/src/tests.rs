@@ -2598,7 +2598,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
             .nodes
     );
     // Three steps, each with a plain-language title.
-    for step in ["Connect your desktop", "Create a snippet", "Test it"] {
+    for step in ["Prepare your desktop", "Create a snippet", "Test it"] {
         assert!(guide_semantics.contains(step), "{step}: {guide_semantics}");
     }
     assert!(
