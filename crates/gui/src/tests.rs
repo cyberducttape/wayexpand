@@ -2568,9 +2568,9 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     );
     app.language = Language::English;
     app.strings.set_language(Language::English);
-    if let Some(rewrite) =
-        app.playground
-            .edit(&app.config, "", "input-method-v2", ";hello ", true)
+    if let Some(rewrite) = app
+        .playground
+        .edit(&app.config, "", "input-method-v2", ";hello ", true)
     {
         app.playground.text = rewrite.text;
     }
@@ -4402,10 +4402,7 @@ fn desktop_test_candidates_follow_library_changes_including_reloads() {
     app.create_test_snippet();
     let first_run = app.cached_desktop_tests(true);
     assert_eq!(first_run.len(), 2);
-    assert_eq!(
-        app.config.expansion[first_run[0]].trigger,
-        ";hello"
-    );
+    assert_eq!(app.config.expansion[first_run[0]].trigger, ";hello");
 
     // Changed on disk and reloaded: the cache must not keep the old list.
     fs::write(

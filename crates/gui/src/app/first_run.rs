@@ -1369,10 +1369,7 @@ mod tests {
         )
         .unwrap();
         both.expansion.push(config.expansion[0].clone());
-        assert_eq!(
-            onboarding_test_snippet(&both).unwrap().trigger,
-            ";hello"
-        );
+        assert_eq!(onboarding_test_snippet(&both).unwrap().trigger, ";hello");
     }
 
     #[test]
