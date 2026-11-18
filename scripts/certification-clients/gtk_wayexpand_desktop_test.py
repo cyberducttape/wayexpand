@@ -60,14 +60,18 @@ def main():
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
     prompt = Gtk.Label(label=f"Type this trigger once: {trigger}")
     prompt.set_xalign(0)
+    expected_output = Gtk.Label(label=f"Expected output: {expected}")
+    expected_output.set_xalign(0)
+    expected_output.set_line_wrap(True)
     entry = Gtk.Entry()
     entry.set_activates_default(False)
     entry.set_placeholder_text("Click here, then type the trigger")
     explanation = Gtk.Label(
-        label="WayExpand will check this field directly. No Enter key is sent."
+        label="WayExpand checks this field directly. It does not save what you type or press Enter."
     )
     explanation.set_xalign(0)
     box.pack_start(prompt, False, False, 0)
+    box.pack_start(expected_output, False, False, 0)
     box.pack_start(entry, False, False, 0)
     box.pack_start(explanation, False, False, 0)
     window.add(box)
