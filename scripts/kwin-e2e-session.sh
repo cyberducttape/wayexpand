@@ -111,14 +111,14 @@ if [ "$e2e_input_source" = input-method ]; then
 form-focus-moved-fails-closed"
 else
     # Physical overlap remains a separate, not-yet-certified production case.
-    # The headless regressions below check that the hard non-atomic length
-    # ceiling refuses output before deletion, even if a larger configured
-    # limit is requested, and that later input remains intact.
+    # The headless regressions below check that the default short output limit
+    # refuses before deletion, while an explicitly raised configured limit
+    # can deliver a longer replacement to the test client.
     run_scenarios "expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
 multiline-replacement unreachable-character-is-refused app-filter-follows-focus
 command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart
 clipboard-variable clipboard-empty-fails-closed output-latency paced-output-over-limit-refuses-before-erasing
-paced-output-raised-limit-still-refuses paced-refusal-preserves-follow-up-input
+paced-output-raised-limit-applies paced-refusal-preserves-follow-up-input
 batched-stdin-lines-are-not-quarantined
 keystroke-route-refuses-without-consent"
 fi

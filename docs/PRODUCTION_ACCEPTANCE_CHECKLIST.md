@@ -43,9 +43,9 @@ session evidence; unit tests alone do not satisfy them.
       otherwise native text commit only under explicit compatibility consent,
       paced keystrokes only within the configured `keystroke_max_chars` limit
       (8 characters, about 100 ms, by default), and clipboard/manual paste
-      when the active route cannot meet those conditions. The setting can
-      raise the keysym protocol ceiling for insert-only workflows, but a hard
-      eight-character ceiling applies to paced synthetic-key replacement.
+      when the active route cannot meet those conditions. A user can raise
+      this limit after reviewing the non-atomic interruption and partial-write
+      risks; the setting is an explicit tradeoff, not certification evidence.
       A configured terminal clipboard-paste route can submit a longer payload
       as one paste operation, but trigger deletion remains non-atomic and
       requires the same compatibility consent and focus checks. Longer

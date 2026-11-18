@@ -299,12 +299,11 @@ All notable changes to WayExpand are documented here.
   imports, and a **Developer / administrator** workspace for packs and
   diagnostics. The matcher test is open by default after onboarding, and the
   Quick Picker shortcut is available from the main actions menu.
-- Automatic non-atomic replacements now have a hard eight-character output
-  ceiling that cannot be raised by compatibility consent or
-  `keystroke_max_chars`. Longer replacements are refused before deletion and
-  remain available through Quick Picker clipboard/manual paste or an atomic
-  replacement route. Partial and uncertain output remains quarantined and is
-  never automatically replayed.
+- Automatic non-atomic replacements now default to an eight-character output
+  limit. An explicitly raised `keystroke_max_chars` applies only after the
+  existing compatibility and focus checks; longer output can still be
+  interrupted and is not covered by physical-desktop certification. Partial
+  and uncertain output remains quarantined and is never automatically replayed.
 - The first-run route summary reports capture and insertion readiness
   independently. Unsupported protocols, unchecked capability evidence,
   IBus replacement consent, raw-device access, and portal authorization now

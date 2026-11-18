@@ -170,13 +170,12 @@ under Settings > Engine in the GUI):
 keystroke_max_chars = 1000   # explicit opt-in to longer paced output
 ```
 
-Automatic non-atomic trigger replacement has an additional hard ceiling of
-eight output characters, regardless of compatibility consent or this setting.
-The runtime refuses longer replacements before erasing the trigger, and the
-insertion planner recommends clipboard/manual paste. This limit applies to
-IBus and synthetic-key routes because output cannot be rolled back once the
-target receives it. The planner previews a route-native, manual-paste, or short
-paced-key strategy from active daemon capabilities and compatibility consent.
+Automatic non-atomic trigger replacement requires compatibility consent and is
+bounded by `keystroke_max_chars` (8 characters by default). Raising this value
+allows longer replacement output on routes that support it, but does not make
+that output atomic or reversible. The planner previews a route-native,
+manual-paste, or paced-key strategy from active daemon capabilities and
+compatibility consent.
 The GUI estimates the whole transaction, including trigger erasure,
 replacement text, delimiter handling, and a conservative cursor-travel bound.
 These estimates use advertised throughput; they are not certified latency
@@ -210,8 +209,9 @@ pressed. A shell with bracketed paste then holds a multi-line replacement until
 you press Enter. Pasted text is not limited by `keystroke_max_chars` or the
 keyboard layout. Your previous clipboard text is restored afterwards. If the
 clipboard holds something that is not text, or the compositor lacks
-`ext-data-control-v1`, only replacements within the hard non-atomic limit can
-fall back to typing; longer ones are refused before the trigger is erased. A
+`ext-data-control-v1`, only replacements within the configured
+`keystroke_max_chars` limit can fall back to typing; longer ones are refused
+before the trigger is erased. A
 terminal whose paste shortcut is not Ctrl+Shift+V reports an uncertain outcome
 instead.
 

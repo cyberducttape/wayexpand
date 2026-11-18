@@ -1168,15 +1168,13 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   surrounding text but deletes and inserts in two steps, so it also needs a
   mode other than `off`; `wayexpand setup --backend ibus` asks for it.
 - `Settings::keystroke_max_chars` (integer 1–5000, default 8, omitted from
-  saved TOML at the default) — the longest insert-only payload a keystroke-
-  typed route (the libei keysym fallback) accepts. Automatic trigger
-  paced synthetic-key trigger replacement has a separate hard eight-character
-  output ceiling that cannot be raised by this setting or compatibility
-  consent; longer output is refused before the trigger is erased. A configured
-  terminal clipboard-paste route may carry a longer payload as one paste
-  operation, but trigger deletion remains non-atomic and still requires the
-  same compatibility consent and focus checks. It is reported as
-  `inject_max_text_chars`. Older
+  saved TOML at the default) — the longest output payload a keystroke or
+  non-atomic replacement route may send. Automatic replacement still requires
+  compatibility consent and focus admission; raising the limit does not make
+  output atomic or reversible. Terminal clipboard paste can carry a longer
+  payload in one paste operation, but trigger deletion remains non-atomic and
+  requires the same consent and focus checks. The active route limit is
+  reported as `inject_max_text_chars`. Older
   readers that reject unknown fields will not load a config that sets it.
 - `Settings::terminal_apps` (array of scope filters, default empty, omitted
   from saved TOML when empty) — terminal apps may use `app_id_exact:` (the
