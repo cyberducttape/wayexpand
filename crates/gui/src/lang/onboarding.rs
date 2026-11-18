@@ -535,6 +535,10 @@ texts! {
         "A harmless test field opens. Type the trigger once. WayExpand checks the text there when possible; otherwise it asks you to confirm the result. This verifies only the tested field and desktop session.",
         "Ein harmloses Testfeld wird geöffnet. Tippen Sie dort einmal das Kürzel. WayExpand prüft den Text nach Möglichkeit automatisch und fragt sonst nach Ihrer Bestätigung. Geprüft werden nur dieses Feld und diese Sitzung.",
         "Kolom uji yang aman akan terbuka. Ketik pemicu sekali. WayExpand memeriksa teks jika memungkinkan; jika tidak, WayExpand meminta konfirmasi Anda. Pemeriksaan hanya berlaku untuk kolom dan sesi ini.";
+    first_run_terminal_test_help =>
+        "This setup captures only configured terminal apps. Start the test, switch to one of those terminals, and type the trigger once. WayExpand will observe activity and ask you to confirm the exact result.",
+        "Diese Einrichtung erfasst nur konfigurierte Terminal-Apps. Starten Sie den Test, wechseln Sie zu einem dieser Terminals und geben Sie das Kürzel einmal ein. WayExpand beobachtet die Aktivität und bittet Sie, das genaue Ergebnis zu bestätigen.",
+        "Penyiapan ini hanya menangkap aplikasi terminal yang dikonfigurasi. Mulai tes, pindah ke salah satu terminal tersebut, lalu ketik pemicu sekali. WayExpand akan mengamati aktivitas dan meminta Anda mengonfirmasi hasil yang tepat.";
     first_run_try_inside =>
         "Try the trigger inside WayExpand first",
         "Auslöser zuerst in WayExpand ausprobieren",

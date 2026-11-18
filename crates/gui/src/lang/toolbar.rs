@@ -702,6 +702,15 @@ impl Strings {
             ("typing_ready", Language::English) => "desktop typing is ready",
             ("typing_ready", Language::Indonesian) => "pengetikan desktop siap",
             ("typing_ready", Language::German) => "Texteingabe am Desktop ist bereit",
+            ("terminal_only_ready", Language::English) => {
+                "typing is ready in configured terminal apps only"
+            }
+            ("terminal_only_ready", Language::Indonesian) => {
+                "pengetikan hanya siap di aplikasi terminal yang dikonfigurasi"
+            }
+            ("terminal_only_ready", Language::German) => {
+                "Texteingabe ist nur in den konfigurierten Terminal-Apps bereit"
+            }
             _ => "",
         }
     }

@@ -902,7 +902,7 @@ impl GuiApp {
         // checked exactly without recording them. Diagnostics lets the user
         // choose a browser, terminal, or other application; that test must
         // observe the selected application instead of silently opening GTK.
-        if self.desktop_test_dialog_required {
+        if self.desktop_test_dialog_required && !self.situation().terminal_apps_only {
             arguments.push("--controlled-client".into());
         }
         self.pending_desktop_test = Some(DesktopTestReview {

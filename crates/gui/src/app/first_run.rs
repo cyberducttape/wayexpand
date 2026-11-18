@@ -183,6 +183,12 @@ impl GuiApp {
     }
 
     pub(super) fn start_onboarding_desktop_test(&mut self) {
+        if self.situation().terminal_apps_only {
+            // This route cannot capture the controlled GTK field. Default the
+            // test dialog to a terminal, where the active route can actually
+            // receive the test trigger.
+            self.desktop_test_application_class = "Terminal".into();
+        }
         self.open_desktop_test(true);
     }
 
@@ -493,6 +499,7 @@ impl GuiApp {
         let route_state_detail = match self.route_state {
             _ if self.paused => detail("paused"),
             // A companion's own route state says nothing about the IBus route.
+            _ if route_ready && terminal_only_daemon => detail("terminal_only_ready"),
             _ if ibus_only || (gnome_ibus || kde_ibus) && route_ready => detail("typing_ready"),
             Some(runtime::RouteState::PermissionRequired) => detail("permission_required"),
             Some(runtime::RouteState::PortalRevoked) => detail("portal_revoked"),
@@ -906,8 +913,12 @@ impl GuiApp {
                             }
                         } else {
                             ui.label(
-                                RichText::new(self.strings.first_run_test_help())
-                                    .color(palette.muted),
+                                RichText::new(if terminal_only_daemon {
+                                    self.strings.first_run_terminal_test_help()
+                                } else {
+                                    self.strings.first_run_test_help()
+                                })
+                                .color(palette.muted),
                             );
                             if theme::primary_button(
                                 ui,
