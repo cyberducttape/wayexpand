@@ -667,4 +667,27 @@ impl super::Strings {
             super::Language::Indonesian => format!("Komponen yang perlu diperiksa: {components}"),
         }
     }
+
+    pub(crate) fn dg_installation_identity_issue(&self, issue: &str) -> &'static str {
+        match (self.lang, issue) {
+            (super::Language::English, "path") => {
+                "PATH starts a different WayExpand version than this application."
+            }
+            (super::Language::German, "path") => {
+                "PATH startet eine andere WayExpand-Version als diese Anwendung."
+            }
+            (super::Language::Indonesian, "path") => {
+                "PATH menjalankan versi WayExpand yang berbeda dari aplikasi ini."
+            }
+            (super::Language::English, _) => {
+                "The running WayExpand service belongs to a different installation."
+            }
+            (super::Language::German, _) => {
+                "Der laufende WayExpand-Dienst gehört zu einer anderen Installation."
+            }
+            (super::Language::Indonesian, _) => {
+                "Layanan WayExpand yang berjalan berasal dari instalasi yang berbeda."
+            }
+        }
+    }
 }

@@ -1382,6 +1382,20 @@ impl GuiApp {
                     }
                     Some(false) => {
                         ui.colored_label(palette.danger, self.strings.dg_needs_attention());
+                        if self.installation_audit.path_shadow_detected {
+                            ui.label(
+                                RichText::new(self.strings.dg_installation_identity_issue("path"))
+                                    .small()
+                                    .color(palette.muted),
+                            );
+                        }
+                        if self.installation_audit.mixed_installation {
+                            ui.label(
+                                RichText::new(self.strings.dg_installation_identity_issue("mixed"))
+                                    .small()
+                                    .color(palette.muted),
+                            );
+                        }
                         if !self.installation_audit.failed_components.is_empty() {
                             ui.label(
                                 RichText::new(self.strings.dg_installation_components(

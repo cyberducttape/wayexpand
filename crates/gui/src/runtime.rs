@@ -111,6 +111,8 @@ pub(crate) struct DiagnosticsSnapshot {
 pub(crate) struct InstallationAudit {
     pub ready: Option<bool>,
     pub failed_components: Vec<String>,
+    pub path_shadow_detected: bool,
+    pub mixed_installation: bool,
 }
 
 /// The Quick Picker's global shortcut, as `wayexpand shortcut --json`
@@ -988,16 +990,20 @@ fn run_installation_audit(config_path: &std::path::Path) -> InstallationAudit {
     let Some(mut ready) = ready else {
         return InstallationAudit::default();
     };
-    let identity_mismatch = report.get("installation_identity").is_some_and(|identity| {
+    let identity = report.get("installation_identity");
+    let path_shadow_detected = identity.is_some_and(|identity| {
         identity
             .get("path_shadow_detected")
             .and_then(serde_json::Value::as_bool)
             == Some(true)
-            || identity
-                .get("mixed_cli_daemon_installation")
-                .and_then(serde_json::Value::as_bool)
-                == Some(true)
     });
+    let mixed_installation = identity.is_some_and(|identity| {
+        identity
+            .get("mixed_cli_daemon_installation")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    });
+    let identity_mismatch = path_shadow_detected || mixed_installation;
     if identity_mismatch {
         ready = false;
     }
@@ -1006,7 +1012,7 @@ fn run_installation_audit(config_path: &std::path::Path) -> InstallationAudit {
     if !status.success() && ready {
         return InstallationAudit::default();
     }
-    let mut failed_components: Vec<String> = report
+    let failed_components: Vec<String> = report
         .get("checks")
         .and_then(serde_json::Value::as_array)
         .into_iter()
@@ -1022,12 +1028,11 @@ fn run_installation_audit(config_path: &std::path::Path) -> InstallationAudit {
         })
         .map(str::to_owned)
         .collect();
-    if identity_mismatch {
-        failed_components.push("installation_path_identity".to_owned());
-    }
     InstallationAudit {
         ready: Some(ready),
         failed_components,
+        path_shadow_detected,
+        mixed_installation,
     }
 }
 
