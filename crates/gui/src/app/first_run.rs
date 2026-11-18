@@ -986,20 +986,20 @@ impl GuiApp {
                     });
                     ui.add_space(12.0);
 
-                    // 4. Optional: a shortcut for the Quick Picker, the way
-                    // to insert where typing a trigger cannot expand.
+                    // The picker shortcut is useful, but it is not required
+                    // to install or verify ordinary expansions. Keep it out
+                    // of the three-step first-run path and let users opt into
+                    // it after they have seen the core workflow.
                     let shortcut_keys = self
                         .picker_shortcut
                         .as_ref()
                         .and_then(|shortcut| shortcut.keys.clone());
-                    onboarding_step(
-                        ui,
-                        palette,
-                        4,
-                        self.strings.step_shortcut_title(),
-                        shortcut_keys.is_some(),
-                    );
-                    ui.indent("first_run_shortcut", |ui| {
+                    egui::CollapsingHeader::new(
+                        RichText::new(self.strings.step_shortcut_title()).color(palette.muted),
+                    )
+                    .id_salt("first_run_optional_picker_shortcut")
+                    .default_open(false)
+                    .show(ui, |ui| {
                         match (&self.picker_shortcut, &shortcut_keys) {
                             (_, Some(keys)) => {
                                 ui.colored_label(
