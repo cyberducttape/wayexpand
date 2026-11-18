@@ -2613,7 +2613,9 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         "first-run must expose an operational state: {guide_semantics}"
     );
     assert!(
-        guide_semantics.contains("Before testing, review and allow compatibility replacement"),
+        guide_semantics.contains(
+            "WayExpand needs permission to remove a typed trigger and replace it with your snippet.",
+        ),
         "non-atomic IBus insertion must require explicit consent: {guide_semantics}"
     );
     // The local matcher check above is reported, but never as a desktop

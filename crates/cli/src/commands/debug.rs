@@ -733,32 +733,31 @@ fn desktop_test_for(
             match controlled {
                 ControlledClientResult::Verified => {
                     let after = snapshot();
-                    let ibus_output_observed = after.4 > baseline.4;
-                    let daemon_match_observed =
-                        status_counter(after.0.as_ref(), "matches_found_total")
-                            > status_counter(baseline.0.as_ref(), "matches_found_total");
-                    let daemon_output_observed = status_counter_compat(
-                        after.0.as_ref(),
-                        "expansion_output_acknowledgements_total",
-                        "expansions_applied_total",
-                    ) > status_counter_compat(
-                        baseline.0.as_ref(),
-                        "expansion_output_acknowledgements_total",
-                        "expansions_applied_total",
-                    );
-                    if !(ibus_output_observed || daemon_match_observed && daemon_output_observed) {
-                        println!("The controlled field observed the expected text, but WayExpand did not report a new matching output transaction during this test.");
-                        println!("Problem: WX-TEST-CORRELATION-001");
-                        println!("Next: refresh Diagnostics and repeat the test once. The text result was not recorded as a WayExpand verification.");
-                        println!("DESKTOP TEST RESULT: CONTROLLED GTK TEST FAILED");
-                        return Ok(DesktopTestResult::Failed);
+                    let ibus_transaction = (after.4 > baseline.4)
+                        .then(|| after.5.as_ref())
+                        .flatten()
+                        .filter(|transaction| baseline.5.as_ref() != Some(*transaction))
+                        .cloned();
+                    let daemon_transaction =
+                        new_applied_transaction_id(baseline.0.as_ref(), after.0.as_ref());
+                    let transaction = ibus_transaction.or(daemon_transaction);
+                    println!("Test field [{test_id}]: GTK 3 controlled test field.");
+                    println!("Capture: key activity and the expected input sequence reached the controlled GTK 3 field.");
+                    println!("Replacement: exact configured test output observed in the controlled GTK 3 field.");
+                    if let Some(transaction) = transaction {
+                        println!("Output activity: a new transaction ID was reported during this test window ({transaction}). The route does not bind it directly to the trigger.");
+                        println!("Correlation: the field observed the expected input and exact output, and a new transaction was reported in this test window. The result is limited to this controlled field and session.");
+                        println!("Scope: GTK 3 text field in this desktop session only; other applications remain untested.");
+                        println!("DESKTOP TEST RESULT: VERIFIED IN CONTROLLED GTK 3 FIELD");
+                        return Ok(DesktopTestResult::Verified);
                     }
-                    println!("Capture: verified by key activity in the controlled GTK 3 field.");
-                    println!("Replacement: exact configured test output observed in the controlled GTK 3 field; WayExpand output counters also advanced during this test window.");
-                    println!("Correlation: the counters are aggregate and are not uniquely bound to this trigger. The test result is limited to this controlled field and session.");
-                    println!("Scope: GTK 3 text field in this desktop session only; other applications remain untested.");
-                    println!("DESKTOP TEST RESULT: VERIFIED IN CONTROLLED GTK 3 FIELD");
-                    return Ok(DesktopTestResult::Verified);
+                    println!("Capture [{test_id}]: ACTIVITY OBSERVED — the configured input marker and key activity reached this field.");
+                    println!("Output activity [{test_id}]: exact expected text observed, but no unique transaction ID was available.");
+                    println!("Output activity: no uniquely new transaction ID was available; aggregate counters are not enough to verify this test.");
+                    println!("Correlation: the field observed the expected input and exact output, but the route could not bind an output transaction to this test window.");
+                    println!("DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW");
+                    println!("Confirm the exact target text visually before recording a pass.");
+                    return Ok(DesktopTestResult::AwaitingReview);
                 }
                 result => result,
             }
@@ -1406,6 +1405,37 @@ fn status_counter(status: Option<&serde_json::Value>, key: &str) -> u64 {
                 .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
         })
         .unwrap_or(0)
+}
+
+fn new_applied_transaction_id(
+    before: Option<&serde_json::Value>,
+    after: Option<&serde_json::Value>,
+) -> Option<String> {
+    let previous: HashSet<String> = before
+        .and_then(|status| status.get("recent_expansion_outcomes"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|record| {
+            record
+                .get("transaction_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    after
+        .and_then(|status| status.get("recent_expansion_outcomes"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .find_map(|record| {
+            let transaction_id = record
+                .get("transaction_id")
+                .and_then(serde_json::Value::as_str)?;
+            let applied =
+                record.get("completion").and_then(serde_json::Value::as_str) == Some("applied");
+            (applied && !previous.contains(transaction_id)).then(|| transaction_id.to_owned())
+        })
 }
 
 fn status_counter_compat(status: Option<&serde_json::Value>, current: &str, legacy: &str) -> u64 {

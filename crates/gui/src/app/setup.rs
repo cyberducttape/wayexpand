@@ -1001,6 +1001,13 @@ impl GuiApp {
                                 }) {
                                     self.desktop_test_review = self.pending_desktop_test.take();
                                     if let Some(review) = &mut self.desktop_test_review {
+                                        if output.lines().any(|line| {
+                                            line.contains("Test field [")
+                                                && line.contains("GTK 3 controlled test field")
+                                        }) {
+                                            review.application_class =
+                                                "GTK 3 controlled test field".into();
+                                        }
                                         review.capture_activity_observed =
                                             output.lines().any(|line| {
                                                 line.trim_start().starts_with("Capture [")
