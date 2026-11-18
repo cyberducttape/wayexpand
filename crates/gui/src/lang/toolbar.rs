@@ -921,9 +921,9 @@ impl Strings {
 
         let Some(recommendation) = recommendation else {
             return match self.lang {
-                Language::English => "No supported integration was detected",
-                Language::German => "Keine unterstützte Integration erkannt",
-                Language::Indonesian => "Tidak ada integrasi yang didukung",
+                Language::English => "Desktop integration status is not known yet",
+                Language::German => "Der Status der Desktop-Integration ist noch unbekannt",
+                Language::Indonesian => "Status integrasi desktop belum diketahui",
             };
         };
         if recommendation.blocked_by_policy {
