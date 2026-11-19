@@ -72,7 +72,7 @@ pub use engine::{
     CommandErrorKind, CommandMetrics, CompletionNotifier, ExpansionEngine, ExpansionError,
     ExpansionResult, ExplainCheck, Explanation, HotkeyError, HotkeyResult, InputEvent, InsertError,
     PendingExpansionDispatch, PendingExpansionResult, ProcessWaitFailure, ProcessWaitOperation,
-    RouteLimit, SensitiveText, TransactionOutcome, TransactionPhase, TransactionReport,
+    RouteFit, RouteLimit, SensitiveText, TransactionOutcome, TransactionPhase, TransactionReport,
     WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 pub use expansion_diagnosis::{

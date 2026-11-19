@@ -14,6 +14,7 @@ mod next_step;
 pub(crate) use next_step::{Action as NextAction, Problem};
 mod pack;
 mod profile;
+pub(crate) mod route_fit;
 mod runtime_events;
 mod saving;
 mod settings;

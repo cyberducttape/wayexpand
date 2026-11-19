@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The GUI snippet list now marks snippets the current typing route will refuse
+  ("too long", "won't type", "no cursor") or types only on some keyboard
+  layouts ("layout"), with an explanation on hover and in the editor preview.
+  It uses the same check as the service and `wayexpand explain`. Daemon status
+  reports the new `inject_layout_checked_text` field.
 - Keystroke output now types non-ASCII text the active keyboard layout
   produces directly, such as umlauts, accented letters, `ß`, `€` and Cyrillic,
   instead of refusing everything outside ASCII. A character the layout cannot

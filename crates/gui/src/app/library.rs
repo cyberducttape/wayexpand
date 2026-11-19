@@ -243,6 +243,8 @@ impl GuiApp {
                     }
                 }
                 let scroll_target = self.list_scroll_target.take();
+                // Verdicts are cached per saved config and route.
+                let route_fits = self.route_fits().map(<[_]>::to_vec);
                 let visible_indices = self.visible_indices();
                 let nothing_visible = visible_indices.is_empty();
                 // Only the rows in view are laid out and painted
@@ -320,7 +322,17 @@ impl GuiApp {
                                     } else {
                                         expansion.description.as_str()
                                     };
-                                    let response = theme::snippet_row_scaled(
+                                    let route_fit = route_fits
+                                        .as_ref()
+                                        .and_then(|fits| fits.get(index).copied())
+                                        .filter(|_| {
+                                            expansion.enabled
+                                                && expansion.delivery
+                                                    != wayexpand_core::ExpansionDelivery::GenerateOnly
+                                        });
+                                    let route_badge =
+                                        route_fit.and_then(|fit| self.route_badge(fit));
+                                    let mut response = theme::snippet_row_scaled(
                                         ui,
                                         palette,
                                         theme::SnippetRow {
@@ -338,9 +350,15 @@ impl GuiApp {
                                             } else {
                                                 self.strings.click_to_enable()
                                             },
+                                            route_badge,
                                         },
                                         font_scale,
                                     );
+                                    if let Some(hint) =
+                                        route_fit.and_then(|fit| self.route_fit_hint(fit))
+                                    {
+                                        response.row = response.row.on_hover_text(hint);
+                                    }
                                     if response.toggle.clicked() {
                                         toggle_index = Some(index);
                                     } else if response.row.clicked() {

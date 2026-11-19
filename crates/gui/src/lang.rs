@@ -117,6 +117,7 @@ mod next_step;
 mod onboarding;
 mod picker;
 mod recovery;
+mod route_fit;
 mod sidebar;
 mod status_messages;
 mod toolbar;

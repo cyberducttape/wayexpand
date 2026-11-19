@@ -42,6 +42,7 @@
     "window_identity_exact": "boolean",
     "inject_atomic_replace": "boolean",
     "inject_full_unicode": "boolean",
+    "inject_layout_checked_text": "boolean",
     "inject_cursor_reposition": "boolean",
     "inject_key_passthrough": "boolean",
     "inject_insertion_mode": "string",

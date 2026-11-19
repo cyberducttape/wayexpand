@@ -157,6 +157,24 @@ hover, while there is nothing for them to act on.
 The preview input is editable, allowing a trigger to be tested inside larger
 text and making word-boundary behavior visible before saving.
 
+### Will this snippet type on my setup?
+
+Once the running service reports its typing route, the snippet list marks
+snippets that route will not type as written, using the same check the
+service makes before typing (and `wayexpand explain` reports):
+
+- **too long**: more characters than the route accepts (the keystroke limit
+  is `keystroke_max_chars` in Settings);
+- **won't type**: a character the route cannot produce;
+- **no cursor**: a `{{cursor}}` move the route cannot make;
+- **layout** (muted): characters typed only if the active keyboard layout has
+  them; otherwise the snippet is refused before anything is erased.
+
+Hovering a marked row explains it without repeating the snippet text, and the
+editor preview shows the same note while you edit. Snippets that work, and
+command or form snippets (whose text is only known when they run), carry no
+mark. Nothing is marked while the route is unknown.
+
 ### Basic and advanced editing
 
 The snippet editor opens in basic mode: trigger, replacement, description, and
