@@ -18,22 +18,6 @@ impl Strings {
         }
     }
 
-    pub(crate) fn why_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Why didn't my trigger expand?",
-            Language::German => "Warum wurde mein Trigger nicht ersetzt?",
-            Language::Indonesian => "Mengapa pemicu saya tidak diperluas?",
-        }
-    }
-
-    pub(crate) fn why_intro(&self) -> &'static str {
-        match self.lang {
-            Language::English => "A matcher preview only checks whether a rule matches; it does not prove text reached an application. Only a real typing test can verify delivery. Typed text is never recorded.",
-            Language::German => "Die Matcher-Vorschau prüft nur, ob eine Regel passt; sie beweist nicht, dass Text eine Anwendung erreicht hat. Nur ein echter Tipptest kann die Ausgabe bestätigen. Getippter Text wird niemals gespeichert.",
-            Language::Indonesian => "Pratinjau matcher hanya memeriksa kecocokan aturan; itu tidak membuktikan teks sampai ke aplikasi. Hanya tes mengetik sungguhan yang dapat memverifikasi pengiriman. Teks yang diketik tidak pernah dicatat.",
-        }
-    }
-
     /// The answer, and what to do about it if anything.
     pub(crate) fn why_verdict(
         &self,

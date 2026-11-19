@@ -65,6 +65,11 @@ impl Strings {
     }
 }
 
+// Plain translated strings live in crates/gui/locales/{en,de,id}.toml;
+// build.rs turns each key into a `&'static str` method on `Strings` and
+// fails the build when the languages disagree.
+include!(concat!(env!("OUT_DIR"), "/locale_strings.rs"));
+
 /// One `&'static str` method per entry: English, German, Indonesian.
 #[macro_export]
 macro_rules! texts {

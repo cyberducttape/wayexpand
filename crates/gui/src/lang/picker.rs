@@ -58,32 +58,6 @@ impl Strings {
         }
     }
 
-    /// Names what the main status chip is about, now that the Quick Picker
-    /// has its own.
-    pub(crate) fn typed_triggers_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typed triggers",
-            Language::German => "Getippte Trigger",
-            Language::Indonesian => "Pemicu yang diketik",
-        }
-    }
-
-    pub(crate) fn picker_show_unavailable(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Show snippets that can't be used here",
-            Language::German => "Snippets anzeigen, die hier nicht nutzbar sind",
-            Language::Indonesian => "Tampilkan cuplikan yang tidak bisa dipakai di sini",
-        }
-    }
-
-    pub(crate) fn picker_too_late_to_cancel(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Too late to cancel: WayExpand already has this insert. The picker shows the result when it arrives.",
-            Language::German => "Abbrechen ist nicht mehr möglich: WayExpand hat diese Einfügung bereits. Der Schnellwähler zeigt das Ergebnis, sobald es vorliegt.",
-            Language::Indonesian => "Terlambat untuk membatalkan: WayExpand sudah menerima penyisipan ini. Picker menampilkan hasilnya begitu tersedia.",
-        }
-    }
-
     pub(crate) fn picker_message(&self, message: &M) -> String {
         use Language::{English as En, German as De, Indonesian as Id};
         match (message, self.lang) {
