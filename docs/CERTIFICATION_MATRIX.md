@@ -1,8 +1,8 @@
 # WayExpand Compositor Certification Matrix
 
 **WayExpand version scope:** 1.3.6 release line
-**Matrix revision:** 2026-11-02.1
-**Last Updated:** 2026-11-02
+**Matrix revision:** 2026-11-19.1
+**Last Updated:** 2026-11-19
 **Status:** No compositor route is production-certified
 
 ## Overview
@@ -35,7 +35,7 @@ availability claims, and no target is certified without reviewed evidence.
 | `hyprland` | Hyprland / wlroots (wayland) | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
 
-## Release certification record — revision 2026-11-02.1
+## Release certification record — revision 2026-11-19.1
 
 This is the published release-facing record for KDE, GNOME, Sway, and
 Hyprland. Update the revision and retain its previous version in Git whenever
@@ -60,7 +60,7 @@ machine-prove hardware use. Headless Wayland session evidence is rejected.
 
 | Desktop | Session evidence on record | Physical keyboard capture | Focused client and focus changes | Screen lock/unlock | Active layout changes | Suspend/resume | Portal revocation | Long-session soak | Release status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| KDE Plasma / KWin | Private headless KWin 6.6.6 reports; capture was simulated | Not tested | Headless clients only; not physical-session evidence | Not tested | Headless `us,de` active-group limitation observed; physical switching not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
+| KDE Plasma / KWin | Private headless KWin 6.6.6 reports; capture was simulated. Separate live tracker smoke checks passed on Ubuntu 26.04.1 / Plasma 6.6.6 / KWin 6.6.6 | Not tested | Live focused-window identity and tracker unload checked; no physical typing or focus-change matrix | Not tested | Headless `us,de` active-group limitation observed; physical switching not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
 | GNOME Shell / Mutter | No qualifying physical-session report recorded | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
 | Sway / wlroots | Headless CI coverage only; no qualifying physical-session report recorded | Not tested | Headless coverage only; not physical-session evidence | Not tested | Not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
 | Hyprland / wlroots | No qualifying physical-session report recorded | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
@@ -73,6 +73,28 @@ reviewed report tied to the exact WayExpand commit, compositor and version,
 route, physical keyboard, focused client, and test date. Failures, unavailable
 capabilities, and untested cases remain visible; they are not converted into
 passes by a green CI run.
+
+### Narrow live KDE tracker observation — 2026-11-19
+
+On Ubuntu 26.04.1 LTS with KDE Plasma 6.6.6, KWin 6.6.6, and a Wayland
+session, the following live-session checks passed against source commit
+`86883722`:
+
+```sh
+cargo test --locked -p wayexpand-backend-kwin-window \
+  live_kwin_tracker_requires_trustworthy_application_identity -- --ignored
+cargo test --locked -p wayexpand-backend-kwin-window \
+  live_kwin_tracker_health_probe_detects_script_unload -- --ignored
+```
+
+The first check verified that KWin supplied a trustworthy identity for the
+currently focused window. The second verified that the tracker detected the
+test script being unloaded. Both tests briefly loaded a uniquely named KWin
+script and removed it during the test. No physical keyboard input, trigger
+capture, text insertion, application focus switching, layout switching,
+suspend/resume, or long-session behavior was tested. This is useful live
+tracker evidence only; it does not satisfy any production-certification gate
+or establish that KDE text expansion works in a target application.
 
 ### GNOME IBus install and application coverage
 
