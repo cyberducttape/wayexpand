@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keystroke output now types non-ASCII text the active keyboard layout
+  produces directly, such as umlauts, accented letters, `ß`, `€` and Cyrillic,
+  instead of refusing everything outside ASCII. A character the layout cannot
+  type exactly (for example one available only through a dead key) is still
+  refused before the trigger is erased. The wlroots virtual-keyboard route,
+  which uploads its own keymap, now types any non-control character.
 - Fixed: with several keyboard layouts configured on KDE, the libei keystroke
   route refused every expansion after the first layout switch until the
   daemon restarted. It now follows KWin's active layout after a switch, and

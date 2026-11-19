@@ -43,6 +43,10 @@ impl LibeiSession {
             // Backspaces are sent without seeing the target's text.
             replacement_guarantee: wayexpand_core::ReplacementGuarantee::BestEffort,
             full_unicode: direct_commit || matches!(self.mode, TextMode::Text(_)),
+            // The keysym fallback's preflight (`ensure_representable`) refuses
+            // any character the active EIS keymap cannot produce directly, so
+            // it may type every character that keymap reaches.
+            layout_checked_text: matches!(self.mode, TextMode::Keysym(_)),
             cursor_reposition: true,
             key_passthrough: true,
         }

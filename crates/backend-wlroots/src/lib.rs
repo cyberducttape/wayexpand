@@ -471,7 +471,11 @@ impl TextInjector for WlrootsInjector {
             atomic_replace: false,
             // Backspaces are sent without seeing the target's text.
             replacement_guarantee: wayexpand_core::ReplacementGuarantee::BestEffort,
-            full_unicode: false,
+            // Each output builds and uploads its own keymap with a Unicode
+            // keysym per character, so any non-control character is typed
+            // independently of the user's keyboard layout.
+            full_unicode: true,
+            layout_checked_text: false,
             cursor_reposition: true,
             key_passthrough: false,
         }

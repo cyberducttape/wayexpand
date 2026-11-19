@@ -74,14 +74,14 @@ headless session, so each layout needs its own run. CI runs:
 
 | `--layout` | Checks |
 |---|---|
-| `de` | QWERTZ letters and AltGr-only ASCII (`@{}[]\|~\`) are typed exactly; `^` and `` ` `` (dead keys only) and non-ASCII text are refused with the trigger intact |
-| `fr` | AZERTY letters and shifted digits are typed exactly |
-| `us:altgr-intl` | ASCII that is also a dead key on this layout (`` ' " ` ~ ^ ``) is typed exactly |
-| `ru` | Reachable digits and punctuation are typed exactly; Latin letters are refused |
+| `de` | QWERTZ letters, AltGr symbols (`@{}[]\|~\ €`) and `Grüße ÄÖÜ ß` are typed exactly; `^`, `` ` `` and `ê` (dead keys only) are refused with the trigger intact |
+| `fr` | AZERTY letters, shifted digits and `éèàçù` are typed exactly |
+| `us:altgr-intl` | `` ' " ` ~ ^ `` (also dead keys here) and AltGr accents `äéñßøå ¡¿` are typed exactly |
+| `ru` | Cyrillic, digits and punctuation are typed exactly; Latin letters are refused |
 | `us,de:,` | With two layouts configured, the daemon takes the active group from KWin's layout provider, types correctly, and follows a switch to `de` while it runs |
 
-Keystroke routes type only ASCII (see `docs/COMPATIBILITY.md`), so the German
-case expects a refusal for `grüße` even though the layout has those keys. With
+The libei keystroke fallback types any character the active layout produces
+directly and refuses the rest before erasing anything. With
 several layouts configured, `wx-e2e-type` refuses like the product unless the
 session passes it KWin's active group in `WX_E2E_ACTIVE_LAYOUT`.
 

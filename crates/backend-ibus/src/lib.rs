@@ -80,6 +80,7 @@ pub fn injector_capabilities() -> InjectorCapabilities {
         // trigger before the cursor.
         replacement_guarantee: wayexpand_core::ReplacementGuarantee::VerifiedSurroundingText,
         full_unicode: true,
+        layout_checked_text: false,
         cursor_reposition: false,
         key_passthrough: true,
     }

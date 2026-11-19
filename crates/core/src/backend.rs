@@ -656,6 +656,12 @@ pub struct InjectorCapabilities {
     /// Every valid Unicode replacement can be represented without depending
     /// on the active keyboard layout.
     pub full_unicode: bool,
+    /// Without `full_unicode`, the backend's `preflight_text` checks every
+    /// character against the active keyboard layout and refuses, before any
+    /// output, a character it cannot produce exactly. Such a route may type
+    /// any character the current layout reaches (umlauts, Cyrillic, ...);
+    /// a non-`full_unicode` route without this check is limited to ASCII.
+    pub layout_checked_text: bool,
     /// The backend can reposition the insertion cursor after committing text.
     pub cursor_reposition: bool,
     /// The backend can preserve unsupported physical key press/release events.

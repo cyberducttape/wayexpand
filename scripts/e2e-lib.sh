@@ -713,10 +713,10 @@ EOF
 }
 
 scenario_unreachable_character_is_refused() {
-    # Neither headless route can guarantee "é": KWin's EIS offers no
-    # ei_text on its default US layout, and the wlroots route refuses text
-    # outside its guarantee. WayExpand must refuse before it erases anything
-    # rather than type something else.
+    # KWin's EIS offers no ei_text, and its default US layout has no key for
+    # "é". WayExpand must refuse before it erases anything rather than type
+    # something else. (The wlroots route types it through its own keymap, so
+    # Sway runs unicode-insertion instead.)
     write_config <<'EOF'
 [[expansion]]
 trigger = ";cafe"
@@ -840,15 +840,21 @@ scenario_layout_de_dead_key_only_ascii_is_refused() {
     layout_refusal_case de 'a^b`c'
 }
 
-# Keystroke routes type only ASCII (docs/COMPATIBILITY.md), even when the
-# active layout has a key for the character; refuse before erasing.
-scenario_layout_de_non_ascii_is_refused() {
-    layout_refusal_case de "grüße"
+# Non-ASCII letters and symbols the active layout reaches directly, including
+# through AltGr (€), are typed exactly on a layout-checked keystroke route.
+scenario_layout_de_umlauts() {
+    layout_case de "Grüße, äöü ÄÖÜ ß €"
+}
+
+# "ê" is reachable only through a dead key on the German layout; the route
+# refuses it rather than composing.
+scenario_layout_de_dead_key_letter_is_refused() {
+    layout_refusal_case de "rêve"
 }
 
 # AZERTY moves letters and puts digits on the shifted level.
 scenario_layout_fr_azerty() {
-    layout_case fr "azqwm AZQWM 1234 !?;:"
+    layout_case fr "azqwm AZQWM 1234 !?;: éèàçù"
 }
 
 # us(altgr-intl) makes ' " ` ~ and ^ dead keys on the base level.
@@ -856,10 +862,15 @@ scenario_layout_altgr_intl_dead_keys() {
     layout_case us:altgr-intl 'don'"'"'t "say" ~^`'
 }
 
-# A non-Latin layout types the punctuation and digits it has. The trigger
-# avoids Latin letters, which this layout cannot type.
-scenario_layout_ru_reachable_ascii() {
-    layout_case ru "1,2;3" ";12"
+# us(altgr-intl) reaches accented letters through AltGr.
+scenario_layout_altgr_intl_accents() {
+    layout_case us:altgr-intl "äéñßøå ¡¿"
+}
+
+# A non-Latin layout types its own script and the punctuation and digits it
+# has. The trigger avoids Latin letters, which this layout cannot type.
+scenario_layout_ru_cyrillic() {
+    layout_case ru "Привет, мир 1;2" ";12"
 }
 
 # ...and refuses Latin letters instead of typing whatever shares the key.

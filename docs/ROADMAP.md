@@ -74,10 +74,10 @@ safe to recommend for everyday desktop use.
 - [x] Headless layout regressions (`scripts/test-kwin-e2e.sh --layout`, run
       by CI): `de`, `fr`, `us(altgr-intl)`, `ru`, and a runtime `us,de`
       switch. Remaining for this item: Compose, physical keyboards, and live
-      sessions. Keystroke routes still refuse non-ASCII even when the active
-      layout has the key, and refuse ASCII available only as a dead key
-      (`^` and `` ` `` on German); typing those from the active keymap would
-      need an explicit change to the ASCII-only contract.
+      sessions. Keystroke routes type every character the active layout
+      produces directly (umlauts, accents, Cyrillic) and still refuse
+      characters available only through a dead key (`^`, `` ` ``, `ê` on
+      German); composing dead keys is not supported.
 - [x] Multi-layout and unrepresentable-text refusals are checked during
       transaction preflight, before a non-atomic route erases the trigger;
       these failures are classified as "not applied". The fallback still
