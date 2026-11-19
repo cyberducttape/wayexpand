@@ -1069,6 +1069,160 @@ EOF
     return "$result"
 }
 
+# --- lifecycle soak -----------------------------------------------------
+# Repeats lifecycle events against the real output route for
+# E2E_SOAK_SECONDS (default 90) and checks the exact target text after each
+# one: no lost or extra output, no stale expansion replayed after a
+# disconnect, and no stuck modifier (an ordinary key typed after every
+# expansion must arrive unchanged). Output revocation needs a session
+# driver that defines revoke_output and restore_output.
+
+status_field() {
+    printf '%s\n' "$1" | sed -n "s/^$2=//p"
+}
+
+# soak_check SINK EXPECTED EVENT: wait for SINK to show EXPECTED exactly.
+soak_check() {
+    if wait_until 50 sink_text_is "$1" "$2"; then
+        return 0
+    fi
+    printf 'cycle %s, after %s: expected %s; ' "$soak_cycle" "$3" \
+        "$(printf '%s' "$2" | sed -n l | tr -d '\n')"
+    describe "$1"
+    return 1
+}
+
+# soak_expand SINK EVENT: type the trigger in SINK, expect the current
+# replacement, then type an ordinary key and expect it unchanged.
+soak_expand() {
+    var=soak_text_$(printf '%s' "$1" | tr - _)
+    eval "before=\$$var"
+    expand_in "$1" "$before" ";s" || {
+        printf 'cycle %s, %s: the typist could not type the trigger; ' "$soak_cycle" "$2"
+        describe "$1"
+        return 2
+    }
+    soak_check "$1" "$before$soak_replacement" "$2" || return 1
+    user_types "$1" "$before${soak_replacement}k" "k" || {
+        printf 'cycle %s, after %s: an ordinary key did not arrive unchanged (stuck key?); ' \
+            "$soak_cycle" "$2"
+        describe "$1"
+        return 1
+    }
+    daemon_sees "k"
+    eval "$var=\"\$before\${soak_replacement}k\""
+    soak_events=$((soak_events + 1))
+}
+
+soak_config() {
+    printf '[[expansion]]\ntrigger = ";s"\nreplacement = "%s"\n' "$soak_replacement" | write_config
+}
+
+# Close the target windows but keep the daemon running.
+soak_close_sinks() {
+    for pid in $sink_pids; do
+        kill "$pid" 2>/dev/null || true
+    done
+    for pid in $sink_pids; do
+        wait "$pid" 2>/dev/null || true
+    done
+    sink_pids=
+}
+
+config_generation_changed_from() {
+    [ "$(status_field "$(daemon_status)" config_generation)" != "$1" ]
+}
+
+output_reconnected_since() {
+    [ "$(status_field "$(daemon_status)" output_reconnect_total)" -gt "$1" ] && daemon_ready
+}
+
+soak_open_sinks() {
+    start_sink e2e-a && start_sink e2e-b || return 1
+    # Read through eval in soak_expand.
+    # shellcheck disable=SC2034
+    soak_text_e2e_a=
+    soak_text_e2e_b=
+}
+
+scenario_lifecycle_soak() {
+    seconds=${E2E_SOAK_SECONDS:-90}
+    soak_cycle=0
+    soak_events=0
+    soak_replacement=R0
+    soak_config
+    soak_open_sinks && start_daemon || return 2
+    revocation=unsupported
+    command -v revoke_output >/dev/null 2>&1 && revocation=0
+    deadline=$(($(date +%s) + seconds))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        soak_cycle=$((soak_cycle + 1))
+
+        activate e2e-a || { printf 'cycle %s: could not focus A' "$soak_cycle"; return 2; }
+        soak_expand e2e-a expansion || return $?
+
+        # Focus moves to another window between expansions.
+        activate e2e-b || { printf 'cycle %s: could not focus B' "$soak_cycle"; return 2; }
+        soak_expand e2e-b focus-change || return $?
+
+        # A reload takes effect without a restart.
+        soak_replacement=R$soak_cycle
+        generation=$(status_field "$(daemon_status)" config_generation)
+        soak_config
+        wait_until 50 config_generation_changed_from "$generation" || {
+            printf 'cycle %s: the daemon did not load the edited configuration' "$soak_cycle"
+            return 1
+        }
+        soak_expand e2e-b reload || return $?
+
+        # The daemon is killed and started again.
+        kill -9 "$daemon_pid" 2>/dev/null
+        wait "$daemon_pid" 2>/dev/null
+        exec 3>&-
+        stdin_open=0
+        daemon_pid=
+        start_daemon || { printf 'cycle %s: the daemon did not restart' "$soak_cycle"; return 2; }
+        soak_expand e2e-b daemon-restart || return $?
+
+        # Output access is revoked while a trigger is in flight. Nothing may
+        # be typed (the trigger never reached the window, so erasing it would
+        # delete real text), and nothing stale may be replayed after the
+        # route reconnects.
+        if [ "$revocation" != unsupported ]; then
+            reconnects=$(status_field "$(daemon_status)" output_reconnect_total)
+            revoke_output || { printf 'cycle %s: could not revoke output' "$soak_cycle"; return 2; }
+            daemon_sees ";s"
+            sleep 0.5
+            restore_output || { printf 'cycle %s: could not restore output' "$soak_cycle"; return 2; }
+            # The failed attempt must have made the daemon reconnect.
+            wait_until 150 output_reconnected_since "${reconnects:-0}" || {
+                printf 'cycle %s: output did not reconnect after revocation; ' "$soak_cycle"
+                printf 'output_connection_state=%s' \
+                    "$(status_field "$(daemon_status)" output_connection_state)"
+                return 1
+            }
+            sleep 1.5
+            soak_check e2e-b "$soak_text_e2e_b" output-revocation || return 1
+            # Whatever the engine buffered before the disconnect must not
+            # complete a trigger now: a delimiter clears it.
+            daemon_sees " "
+            user_types e2e-b "$soak_text_e2e_b " " " || return 2
+            soak_text_e2e_b="$soak_text_e2e_b "
+            soak_expand e2e-b after-revocation || return $?
+            revocation=$((revocation + 1))
+        fi
+
+        # The target windows close and new ones open.
+        soak_close_sinks
+        soak_open_sinks || { printf 'cycle %s: could not reopen the windows' "$soak_cycle"; return 2; }
+    done
+    status=$(daemon_status)
+    printf '%s cycles, %s verified expansions in %ss, %s output revocations; rss_kib=%s high_water_kib=%s' \
+        "$soak_cycle" "$soak_events" "$seconds" "$revocation" \
+        "$(status_field "$status" memory_rss_kib)" "$(status_field "$status" memory_high_water_kib)"
+    [ "$soak_cycle" -gt 0 ]
+}
+
 # --- clipboard and forms -----------------------------------------------
 
 clipboard_config() {

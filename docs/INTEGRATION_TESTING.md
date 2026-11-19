@@ -65,6 +65,27 @@ timestamp so an archived result can be tied to the tested binary. Its scope
 and limitations are included in the report; a private headless result is not
 evidence of physical keyboard capture or certification on the active desktop.
 
+### Lifecycle soak
+
+`E2E_SOAK_SECONDS=600 scripts/test-kwin-e2e.sh lifecycle-soak` repeats lifecycle
+events against the real libei output for the given time (default 90 s; CI runs
+120 s) and checks the exact text in the target window after each one:
+
+1. a normal expansion, then an ordinary key that must arrive unchanged (a stuck
+   Shift or AltGr would alter it);
+2. the same after focus moves to another window;
+3. after a configuration edit, which must take effect without a restart;
+4. after the daemon is killed with SIGKILL and started again;
+5. EIS revocation: the session stops the EIS relay, which closes the daemon's
+   connection, while the daemon receives a trigger. Nothing may be typed or
+   erased, the daemon must reconnect once the relay is back, and nothing stale
+   may be replayed;
+6. the target windows close and new ones open.
+
+The report gives the cycle count, verified expansions, revocations, and the
+daemon's resident memory. Compositor restart, suspend/resume, and device
+reconnects are not covered.
+
 ### Keyboard layouts
 
 `scripts/test-kwin-e2e.sh --layout LAYOUTS[:VARIANTS]` starts the private KWin

@@ -140,6 +140,7 @@ env -i "${session_env[@]}" \
     E2E_WORK="$work" \
     E2E_RESULTS="$results" \
     E2E_SCENARIOS="$*" \
+    E2E_SOAK_SECONDS="${E2E_SOAK_SECONDS:-90}" \
     timeout 900 "$project_dir/scripts/sway-e2e-session.sh" \
     >"$work/session.out" 2>&1 || session_status=$?
 

@@ -13,7 +13,7 @@
 
 use std::{
     fs::File,
-    io::{Read, Seek, SeekFrom, Write},
+    io::Write,
     os::fd::{AsFd, OwnedFd},
     path::PathBuf,
 };
@@ -217,10 +217,15 @@ impl Sink {
 }
 
 fn read_keymap(fd: OwnedFd, size: u32) -> Result<String> {
-    let mut file = File::from(fd);
-    file.seek(SeekFrom::Start(0))?;
+    use std::os::unix::fs::FileExt;
+    // A positioned read: the compositor can hand the same open file
+    // description to several clients, which then share one file offset, so
+    // seek-then-read races with any other client reading the keymap (seen
+    // under Sway as "failed to fill whole buffer" and a dropped key). Real
+    // clients mmap the keymap and are not affected.
+    let file = File::from(fd);
     let mut bytes = vec![0; size as usize];
-    file.read_exact(&mut bytes)?;
+    file.read_exact_at(&mut bytes, 0)?;
     if bytes.last() == Some(&0) {
         bytes.pop();
     }
