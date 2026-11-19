@@ -823,7 +823,17 @@ export LANG=de_DE.UTF-8
 
 ### Translation System
 
-The language system is implemented in `crates/gui/src/lang.rs`:
+Plain translated strings live in `crates/gui/locales/en.toml`, `de.toml` and
+`id.toml`. Each key is the name of a `Strings` method (sections only group
+keys for readers), and `crates/gui/build.rs` generates one `&'static str`
+method per key at compile time. The build fails if a language is missing a key,
+has an extra one, or uses different `{placeholders}` than English, so a
+translation can never silently fall back or drop a value. Strings that are
+assembled with `format!` or depend on other values still live in
+`crates/gui/src/lang/*.rs`; `lang::fill` substitutes `{}` placeholders in a
+TOML string in order.
+
+The language type is in `crates/gui/src/lang.rs`:
 
 ```rust
 pub enum Language {
@@ -868,15 +878,13 @@ pub fn from_env() -> Self {
 }
 ```
 
-3. Add translations to each method in `Strings`. For example:
-```rust
-pub fn ready(&self) -> &'static str {
-    match self.lang {
-        Language::English => "Ready",
-        Language::German => "Fertig",
-        Language::French => "Prêt",
-    }
-}
+3. Add `crates/gui/locales/fr.toml` with every key from `en.toml`, add it to
+   `LANGUAGES` in `crates/gui/build.rs`, and add a `Language::French` arm to
+   each function remaining in `crates/gui/src/lang/*.rs`. The build lists any
+   key the new file lacks:
+```toml
+[status]
+ready = "Prêt"
 ```
 
 4. Update the language selector dialog in `main.rs`:

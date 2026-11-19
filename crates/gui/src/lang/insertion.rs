@@ -186,14 +186,6 @@ impl Strings {
         }
     }
 
-    pub fn keystroke_limit(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Synthetic output and replacement limit",
-            Language::German => "Limit für synthetische Ausgabe und Ersetzungen",
-            Language::Indonesian => "Batas keluaran sintetis dan penggantian",
-        }
-    }
-
     pub fn keystroke_limit_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
@@ -217,14 +209,6 @@ impl Strings {
             Language::Indonesian => {
                 format!("batas penekanan tombol harus berupa bilangan bulat ({detail})")
             }
-        }
-    }
-
-    pub fn compatibility_mode_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Keystroke routes (compatibility mode)",
-            Language::German => "Tastenanschlag-Wege (Kompatibilitätsmodus)",
-            Language::Indonesian => "Jalur penekanan tombol (mode kompatibilitas)",
         }
     }
 
@@ -253,22 +237,6 @@ impl Strings {
             Language::Indonesian => {
                 "Jalur terverifikasi (metode input, IBus) memeriksa teks kolom itu sendiri sebelum mengganti pemicu. Jalur penekanan tombol (evdev dengan libei atau wlroots) menghapus dengan Backspace tanpa melihat teks, sehingga hanya mengganti pemicu jika Anda mengizinkannya di sini. Fokus terlacak juga mengharuskan pelacak jendela (KWin, atau ekstensi GNOME Shell) memastikan, tepat sebelum mengetik, bahwa jendela pemicu masih fokus. Fokus tak terlacak mengizinkan penghapusan saat tidak ada pelacak yang dapat memastikan fokus. Perpindahan fokus yang terdeteksi selalu ditolak, dan keluaran yang mungkin hanya sebagian terketik tidak pernah diulang."
             }
-        }
-    }
-
-    pub fn compatibility_mode_risk(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Risk of non-atomic replacement: physical typing can reach the application while WayExpand is erasing and inserting, so the two streams may interleave and corrupt nearby text. Evdev also cannot detect password fields. Keep this Off for strict safety; prefer a verified input-method route when text integrity matters.",
-            Language::German => "Risiko einer nicht atomaren Ersetzung: Physische Tasten können die Anwendung erreichen, während WayExpand löscht und einfügt. Beide Eingabeströme können sich überlagern und benachbarten Text beschädigen. Evdev erkennt außerdem keine Passwortfelder. Für strikte Sicherheit deaktiviert lassen; wenn Textintegrität wichtig ist, eine verifizierte Eingabemethoden-Route verwenden.",
-            Language::Indonesian => "Risiko penggantian non-atomik: ketikan fisik dapat mencapai aplikasi saat WayExpand menghapus dan menyisipkan teks. Kedua aliran input dapat bercampur dan merusak teks di sekitarnya. Evdev juga tidak dapat mendeteksi kolom kata sandi. Biarkan nonaktif untuk keselamatan ketat; gunakan rute metode input terverifikasi bila integritas teks penting.",
-        }
-    }
-
-    pub fn terminal_paste_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Terminal paste",
-            Language::German => "Einfügen im Terminal",
-            Language::Indonesian => "Tempel di terminal",
         }
     }
 

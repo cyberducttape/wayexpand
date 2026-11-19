@@ -2,22 +2,6 @@ use super::{Language, Strings};
 use crate::*;
 
 impl Strings {
-    pub fn appearance(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Appearance",
-            Language::Indonesian => "Tampilan",
-            Language::German => "Erscheinungsbild",
-        }
-    }
-
-    pub fn engine(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing engine",
-            Language::Indonesian => "Mesin pengetikan",
-            Language::German => "Eingabe-Engine",
-        }
-    }
-
     pub fn appearance_note(&self) -> &'static str {
         match self.lang {
             Language::English => "Appearance changes apply and are saved immediately.",
@@ -39,70 +23,6 @@ impl Strings {
             Language::German => {
                 "Diese Werte werden in der Konfigurationsdatei gespeichert. Zum Übernehmen auf Speichern klicken."
             }
-        }
-    }
-
-    pub fn theme(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Theme",
-            Language::Indonesian => "Tema",
-            Language::German => "Design",
-        }
-    }
-
-    pub fn theme_dark(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Dark",
-            Language::Indonesian => "Gelap",
-            Language::German => "Dunkel",
-        }
-    }
-
-    pub fn theme_light(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Light",
-            Language::Indonesian => "Terang",
-            Language::German => "Hell",
-        }
-    }
-
-    pub fn language(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Language",
-            Language::Indonesian => "Bahasa",
-            Language::German => "Sprache",
-        }
-    }
-
-    pub fn color_pack(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Color pack",
-            Language::Indonesian => "Paket warna",
-            Language::German => "Farbschema",
-        }
-    }
-
-    pub fn color_pack_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Pick a visual style for the editor.",
-            Language::Indonesian => "Pilih gaya visual untuk editor.",
-            Language::German => "Visuellen Stil für den Editor auswählen.",
-        }
-    }
-
-    pub fn font_size(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Font size",
-            Language::Indonesian => "Ukuran huruf",
-            Language::German => "Schriftgröße",
-        }
-    }
-
-    pub fn font_size_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Adjust text size for readability on your display.",
-            Language::Indonesian => "Sesuaikan ukuran teks agar mudah dibaca di layar Anda.",
-            Language::German => "Textgröße für die Lesbarkeit auf Ihrem Bildschirm anpassen.",
         }
     }
 

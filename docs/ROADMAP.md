@@ -395,7 +395,11 @@ Not release blockers; they keep 2.0 tractable.
       keymap, text, keyboard fallback, injector), `gui/src/app/editor.rs`,
       `backend-input-method/src/lib.rs`, and `backend-ibus/src/lib.rs`.
 - [ ] Move GUI strings out of the Rust `lang.rs` match tables into a
-      data-driven format (for example Fluent/FTL) before adding languages.
+      data-driven format before adding languages. Partly done: 745 plain
+      strings are in `crates/gui/locales/{en,de,id}.toml` with build-time
+      key and placeholder checks. About 220 strings built with `format!` or
+      selected by other values (for example next-step problems) remain in
+      `crates/gui/src/lang/*.rs`.
 
 ## Maintenance principles
 

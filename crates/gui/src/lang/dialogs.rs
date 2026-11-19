@@ -1,54 +1,6 @@
 use super::{Language, Strings};
 
 impl Strings {
-    pub fn diagnostics_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Diagnostics",
-            Language::Indonesian => "Diagnostik",
-            Language::German => "Diagnose",
-        }
-    }
-
-    pub fn runtime_health(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Runtime health",
-            Language::Indonesian => "Kesehatan runtime",
-            Language::German => "Laufzeit-Zustand",
-        }
-    }
-
-    pub fn compatibility_center(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Compatibility Center",
-            Language::Indonesian => "Pusat Kompatibilitas",
-            Language::German => "Kompatibilitätszentrum",
-        }
-    }
-
-    pub fn production_readiness(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Production readiness",
-            Language::Indonesian => "Kesiapan produksi",
-            Language::German => "Produktionsreife",
-        }
-    }
-
-    pub fn production_readiness_unavailable(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Unavailable · no compatible live route",
-            Language::Indonesian => "Tidak tersedia · tidak ada rute aktif yang kompatibel",
-            Language::German => "Nicht verfügbar · kein kompatibler aktiver Weg",
-        }
-    }
-
-    pub fn production_readiness_limited(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Limited · one or more safety guarantees are missing",
-            Language::Indonesian => "Terbatas · satu atau lebih jaminan keamanan tidak tersedia",
-            Language::German => "Eingeschränkt · eine oder mehrere Sicherheitsgarantien fehlen",
-        }
-    }
-
     pub fn production_readiness_pending(&self) -> &'static str {
         match self.lang {
             Language::English => "Certification pending · live compositor/client evidence required",
@@ -103,70 +55,6 @@ impl Strings {
         }
     }
 
-    pub fn active_route(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Active route",
-            Language::Indonesian => "Rute aktif",
-            Language::German => "Aktiver Weg",
-        }
-    }
-
-    pub fn configuration_health(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Configuration",
-            Language::Indonesian => "Konfigurasi",
-            Language::German => "Konfiguration",
-        }
-    }
-
-    pub fn configuration_healthy(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Healthy",
-            Language::Indonesian => "Sehat",
-            Language::German => "In Ordnung",
-        }
-    }
-
-    pub fn configuration_invalid(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Invalid",
-            Language::Indonesian => "Tidak valid",
-            Language::German => "Ungültig",
-        }
-    }
-
-    pub fn safety(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Safety",
-            Language::Indonesian => "Keamanan",
-            Language::German => "Sicherheit",
-        }
-    }
-
-    pub fn capture_guarantees(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Keyboard capture",
-            Language::Indonesian => "Tangkapan papan ketik",
-            Language::German => "Tastaturerfassung",
-        }
-    }
-
-    pub fn injection_guarantees(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Text output",
-            Language::Indonesian => "Keluaran teks",
-            Language::German => "Textausgabe",
-        }
-    }
-
-    pub fn output_mode(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Negotiated output mode",
-            Language::Indonesian => "Mode keluaran yang dinegosiasikan",
-            Language::German => "Ausgehandelter Ausgabemodus",
-        }
-    }
-
     pub fn keysym_fallback_warning(&self) -> &'static str {
         match self.lang {
             Language::English => {
@@ -178,46 +66,6 @@ impl Strings {
             Language::German => {
                 "Keysym-Fallback ist aktiv: Die Ausgabe hängt vom Layout ab und wird gebremst; längere Ersetzungen können spürbar langsamer sein."
             }
-        }
-    }
-
-    pub fn latency(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Latency (recent samples)",
-            Language::Indonesian => "Latensi (sampel terbaru)",
-            Language::German => "Latenz (letzte Messwerte)",
-        }
-    }
-
-    pub fn matcher_latency(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Matcher latency",
-            Language::Indonesian => "Latensi pencocokan",
-            Language::German => "Matcher-Latenz",
-        }
-    }
-
-    pub fn output_latency(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Backend injection latency",
-            Language::Indonesian => "Latensi injeksi backend",
-            Language::German => "Latenz der Backend-Injektion",
-        }
-    }
-
-    pub fn no_samples(&self) -> &'static str {
-        match self.lang {
-            Language::English => "no samples yet",
-            Language::Indonesian => "belum ada sampel",
-            Language::German => "noch keine Messwerte",
-        }
-    }
-
-    pub fn application_context(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Application context",
-            Language::Indonesian => "Konteks aplikasi",
-            Language::German => "Anwendungskontext",
         }
     }
 
@@ -266,118 +114,6 @@ impl Strings {
         }
     }
 
-    pub fn capability_available(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Available",
-            Language::Indonesian => "Tersedia",
-            Language::German => "Verfügbar",
-        }
-    }
-
-    pub fn capability_unavailable(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Not provided",
-            Language::Indonesian => "Tidak disediakan",
-            Language::German => "Nicht verfügbar",
-        }
-    }
-
-    pub fn capability_unknown(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Unknown · update/restart daemon",
-            Language::Indonesian => "Tidak diketahui · perbarui/mulai ulang daemon",
-            Language::German => "Unbekannt · Dienst aktualisieren/neu starten",
-        }
-    }
-
-    pub fn daemon(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Daemon",
-            Language::Indonesian => "Daemon",
-            Language::German => "Daemon",
-        }
-    }
-
-    pub fn backends(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Backends",
-            Language::Indonesian => "Backend",
-            Language::German => "Backends",
-        }
-    }
-
-    pub fn refresh(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Refresh",
-            Language::Indonesian => "Segarkan",
-            Language::German => "Aktualisieren",
-        }
-    }
-
-    pub fn protocol_probes(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Non-mutating protocol probes",
-            Language::Indonesian => "Pemeriksaan protokol tanpa perubahan",
-            Language::German => "Nicht-mutierende Protokoll-Tests",
-        }
-    }
-
-    pub fn import_dialog_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Import Espanso library",
-            Language::Indonesian => "Impor pustaka Espanso",
-            Language::German => "Espanso-Bibliothek importieren",
-        }
-    }
-
-    pub fn source_yaml(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Source YAML file or Espanso match directory",
-            Language::Indonesian => "Berkas YAML sumber atau direktori match Espanso",
-            Language::German => "YAML-Quelldatei oder Espanso-Match-Verzeichnis",
-        }
-    }
-
-    pub fn import_preview_info(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Preview first, then merge while preserving current snippets or explicitly replace the library.",
-            Language::Indonesian => "Pratinjau dahulu, lalu gabungkan sambil mempertahankan cuplikan saat ini atau ganti pustaka secara eksplisit.",
-            Language::German => "Zuerst prüfen, dann aktuelle Snippets beim Zusammenführen bewahren oder die Bibliothek ausdrücklich ersetzen.",
-        }
-    }
-
-    pub fn load_preview(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Load preview",
-            Language::Indonesian => "Muat pratinjau",
-            Language::German => "Vorschau laden",
-        }
-    }
-
-    pub fn picker_cancel(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Cancel",
-            Language::Indonesian => "Batal",
-            Language::German => "Abbrechen",
-        }
-    }
-
-    pub fn replace_library(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Replace current library",
-            Language::Indonesian => "Ganti pustaka saat ini",
-            Language::German => "Aktuelle Bibliothek ersetzen",
-        }
-    }
-
-    pub fn merge_library(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Merge (keep current conflicts)",
-            Language::Indonesian => "Gabungkan (pertahankan konflik saat ini)",
-            Language::German => "Zusammenführen (Konflikte behalten)",
-        }
-    }
-
     pub fn status_import_merged(
         &self,
         added: usize,
@@ -400,22 +136,6 @@ impl Strings {
         }
     }
 
-    pub fn settings_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Settings",
-            Language::Indonesian => "Pengaturan",
-            Language::German => "Einstellungen",
-        }
-    }
-
-    pub fn buffer_limit(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Matcher buffer limit",
-            Language::Indonesian => "Batas buffer pencocok",
-            Language::German => "Matcher-Puffer-Limit",
-        }
-    }
-
     pub fn buffer_limit_help(&self) -> &'static str {
         match self.lang {
             Language::English => "Characters retained while looking for a trigger (1–4096).",
@@ -423,14 +143,6 @@ impl Strings {
             Language::German => {
                 "Zeichen, die bei der Suche nach einem Auslöser beibehalten werden (1–4096)."
             }
-        }
-    }
-
-    pub fn undo_chord(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Undo shortcut",
-            Language::Indonesian => "Pintasan urungkan",
-            Language::German => "Rückgängig-Tastenkombination",
         }
     }
 
@@ -445,22 +157,6 @@ impl Strings {
             Language::German => {
                 "Funktioniert nur, wenn die aktive Route das Zieldokument verifiziert. Die aktuellen IBus- und Daemon-Routen können ihre Ausgabe nicht verifizieren, daher kann diese Tastenkombination sie nicht rückgängig machen. Leer lassen zum Deaktivieren."
             }
-        }
-    }
-
-    pub fn save_settings(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Save settings",
-            Language::Indonesian => "Simpan pengaturan",
-            Language::German => "Einstellungen speichern",
-        }
-    }
-
-    pub fn close(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Close",
-            Language::Indonesian => "Tutup",
-            Language::German => "Schließen",
         }
     }
 }

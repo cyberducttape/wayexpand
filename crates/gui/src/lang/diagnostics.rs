@@ -75,14 +75,6 @@ impl Strings {
         }
     }
 
-    pub fn keyboard_layout_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Keyboard layout",
-            Language::Indonesian => "Tata letak papan ketik",
-            Language::German => "Tastaturlayout",
-        }
-    }
-
     pub fn layout_assessment_detail(&self, layout_aware: Option<bool>) -> String {
         match (self.lang, layout_aware) {
             (_, None) => match self.lang {
@@ -100,54 +92,6 @@ impl Strings {
                 Language::Indonesian => "Rute ini tidak dapat memverifikasi tata letak aktif. Pencocokan atau keluaran sintetis yang bergantung pada tata letak ditolak; rute komit teks mungkin tidak memerlukan informasi tata letak.".into(),
                 Language::German => "Diese Route kann das aktive Layout nicht verifizieren. Layoutabhängige Erkennung oder synthetische Ausgabe wird verweigert; Text-Commit-Routen benötigen möglicherweise keine Layoutdaten.".into(),
             },
-        }
-    }
-
-    pub fn next_step_layout(&self) -> &'static str {
-        match self.lang {
-            Language::English => "If this is a layout-dependent route, use one configured layout or choose a route with a live, trustworthy layout provider. On multi-layout KWin/libei, the optional Fcitx5 direct-commit bridge may provide Unicode output; it does not fix capture-side layout or IME composition awareness.",
-            Language::Indonesian => "Untuk rute yang bergantung pada tata letak, gunakan satu tata letak atau penyedia tata letak langsung yang tepercaya. Pada KWin/libei, jembatan Fcitx5 opsional dapat menyediakan keluaran Unicode, tetapi tidak menambahkan pelacakan tata letak input atau kesadaran komposisi IME.",
-            Language::German => "Bei layoutabhängigen Routen verwenden Sie ein einzelnes Layout oder einen vertrauenswürdigen Live-Layoutanbieter. Unter KWin/libei kann die optionale Fcitx5-Brücke Unicode ausgeben, ergänzt aber keine Layout- oder IME-Kompositionserkennung beim Erfassen.",
-        }
-    }
-
-    pub fn composition_assessment_detail(&self) -> &'static str {
-        match self.lang {
-            Language::English => "WayExpand sees committed text, not another IME's live preedit. Commit or cancel Chinese, Japanese, Korean, Rime, or other IME composition before typing a trigger. Committed Unicode support depends on this route and the target application.",
-            Language::Indonesian => "WayExpand menerima teks yang sudah dikomit, bukan preedit langsung dari IME lain. Selesaikan atau batalkan komposisi IME sebelum mengetik pemicu. Dukungan Unicode bergantung pada rute dan aplikasi tujuan.",
-            Language::German => "WayExpand verarbeitet bestätigten Text, nicht die laufende Vorschau eines anderen IME. Schließen oder verwerfen Sie die IME-Komposition vor dem Trigger. Unicode-Unterstützung hängt von Route und Zielanwendung ab.",
-        }
-    }
-
-    pub fn runtime_dashboard(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Wayland compatibility & reliability",
-            Language::Indonesian => "Kompatibilitas & keandalan Wayland",
-            Language::German => "Wayland-Kompatibilität und Zuverlässigkeit",
-        }
-    }
-
-    pub fn session_evidence_note(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Live session reports, not application tests or production certification. Latency covers matching and backend injection; it excludes keyboard capture and client paint.",
-            Language::Indonesian => "Laporan sesi langsung, bukan pengujian aplikasi atau sertifikasi produksi. Latensi mencakup pencocokan dan injeksi backend, bukan tangkapan papan ketik atau tampilan aplikasi.",
-            Language::German => "Live-Sitzungsmeldungen, keine Anwendungstests oder Produktionszertifizierung. Die Latenz umfasst Matcher und Backend-Injektion, nicht Tastaturerfassung oder Anwendungsdarstellung.",
-        }
-    }
-
-    pub fn refresh_session_report(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Refresh session report",
-            Language::Indonesian => "Segarkan laporan sesi",
-            Language::German => "Sitzungsbericht aktualisieren",
-        }
-    }
-
-    pub fn report_updated_just_now(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Session report updated just now",
-            Language::Indonesian => "Laporan sesi baru saja diperbarui",
-            Language::German => "Sitzungsbericht gerade aktualisiert",
         }
     }
 
@@ -171,110 +115,6 @@ impl Strings {
         }
     }
 
-    pub fn unicode_insertion(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Unicode insertion",
-            Language::Indonesian => "Penyisipan Unicode",
-            Language::German => "Unicode-Ausgabe",
-        }
-    }
-
-    pub fn replacement_assurance_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Route replacement contract",
-            Language::Indonesian => "Kontrak penggantian rute",
-            Language::German => "Ersetzungsvertrag der Route",
-        }
-    }
-
-    pub fn external_ime_composition(&self) -> &'static str {
-        match self.lang {
-            Language::English => "External IME composition",
-            Language::Indonesian => "Komposisi IME eksternal",
-            Language::German => "Externe IME-Komposition",
-        }
-    }
-
-    pub fn matcher_latency_p99(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Matcher p99",
-            Language::Indonesian => "Pencocokan p99",
-            Language::German => "Matcher p99",
-        }
-    }
-
-    pub fn output_latency_p99(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Output p99",
-            Language::Indonesian => "Keluaran p99",
-            Language::German => "Ausgabe p99",
-        }
-    }
-
-    pub fn interruption_latency(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Observed input interruption → backend return (not rendered-text latency)",
-            Language::Indonesian => "Input tumpang tindih teramati → backend kembali (bukan latensi teks yang ditampilkan)",
-            Language::German => "Eingabeunterbrechung erkannt → Backend-Rückkehr (keine sichtbare Textlatenz)",
-        }
-    }
-
-    pub fn recent_failures(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Recent failed expansions",
-            Language::Indonesian => "Ekspansi gagal terbaru",
-            Language::German => "Letzte fehlgeschlagene Expansionen",
-        }
-    }
-
-    pub fn reported_supported(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Route reports supported",
-            Language::Indonesian => "Rute melaporkan didukung",
-            Language::German => "Route meldet Unterstützung",
-        }
-    }
-
-    pub fn reported_limited(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Route reports limited",
-            Language::Indonesian => "Rute melaporkan keterbatasan",
-            Language::German => "Route meldet Einschränkungen",
-        }
-    }
-
-    pub fn unsupported_on_route(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Unsupported on this route",
-            Language::Indonesian => "Tidak didukung pada rute ini",
-            Language::German => "Auf dieser Route nicht unterstützt",
-        }
-    }
-
-    pub fn not_reported(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Not reported",
-            Language::Indonesian => "Tidak dilaporkan",
-            Language::German => "Nicht gemeldet",
-        }
-    }
-
-    pub fn route_assessment_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "What this route can do",
-            Language::Indonesian => "Kemampuan rute ini",
-            Language::German => "Was diese Route kann",
-        }
-    }
-
-    pub fn route_certification(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Route certification",
-            Language::Indonesian => "Sertifikasi rute",
-            Language::German => "Routenzertifizierung",
-        }
-    }
-
     pub fn route_certification_value(&self, certified: Option<bool>) -> String {
         match (self.lang, certified) {
             (_, None) => "Unknown".into(),
@@ -284,14 +124,6 @@ impl Strings {
             (Language::Indonesian, Some(false)) => "Belum tersertifikasi".into(),
             (Language::German, Some(true)) => "Zertifiziert".into(),
             (Language::German, Some(false)) => "Nicht zertifiziert".into(),
-        }
-    }
-
-    pub fn next_steps_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Recommended next steps",
-            Language::Indonesian => "Langkah berikutnya yang disarankan",
-            Language::German => "Empfohlene nächste Schritte",
         }
     }
 
@@ -306,70 +138,6 @@ impl Strings {
             Language::German => {
                 "Starten Sie den WayExpand-Benutzerdienst neu und aktualisieren Sie die Diagnose."
             }
-        }
-    }
-
-    pub fn next_step_permission(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Restore the compositor or device permission for the selected route, then refresh diagnostics.",
-            Language::Indonesian => "Pulihkan izin kompositor atau perangkat untuk rute yang dipilih, lalu segarkan diagnostik.",
-            Language::German => "Stellen Sie die Compositor- oder Geräteberechtigung für die ausgewählte Route wieder her und aktualisieren Sie die Diagnose.",
-        }
-    }
-
-    pub fn next_step_insertion_blocked(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Insertion is blocked by this route or safety policy. Review the ranked routes and choose a verified replacement route when available; do not retry the trigger until the route is healthy.",
-            Language::Indonesian => "Penyisipan diblokir oleh rute atau kebijakan keselamatan ini. Tinjau urutan rute dan pilih rute penggantian terverifikasi jika tersedia; jangan ulangi pemicu sebelum rute sehat.",
-            Language::German => "Diese Route oder Sicherheitsrichtlinie blockiert die Ausgabe. Prüfen Sie die Routenliste und wählen Sie, falls verfügbar, eine verifizierte Ersetzungsroute. Wiederholen Sie das Kürzel erst, wenn die Route bereit ist.",
-        }
-    }
-
-    pub fn next_step_insertion_limited(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Replacement is best-effort on this route. Prefer a verified route for important text; compatibility mode can be disabled to refuse uncertain keystroke replacement.",
-            Language::Indonesian => "Penggantian pada rute ini bersifat upaya terbaik. Gunakan rute terverifikasi untuk teks penting; mode kompatibilitas dapat dimatikan untuk menolak penggantian tombol yang tidak pasti.",
-            Language::German => "Die Ersetzung ist auf dieser Route bestmöglich, aber nicht verifiziert. Verwenden Sie für wichtige Texte eine verifizierte Route; der Kompatibilitätsmodus lässt sich deaktivieren, um unsichere Tastenersetzungen abzulehnen.",
-        }
-    }
-
-    pub fn next_step_focus(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Focus tracking is incomplete. Check window-tracker permission and keep compatibility mode off when focus cannot be confirmed.",
-            Language::Indonesian => "Pelacakan fokus belum lengkap. Periksa izin pelacak jendela dan nonaktifkan mode kompatibilitas saat fokus tidak dapat dikonfirmasi.",
-            Language::German => "Die Fokusverfolgung ist unvollständig. Prüfen Sie die Berechtigung des Fenster-Trackers und lassen Sie den Kompatibilitätsmodus deaktiviert, wenn der Fokus nicht bestätigt werden kann.",
-        }
-    }
-
-    pub fn next_step_sensitive_fields(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Password-field protection is not verified for this session. Avoid automatic expansion in credential fields; prefer a route with a reported sensitive-field signal.",
-            Language::Indonesian => "Perlindungan kolom kata sandi belum terverifikasi untuk sesi ini. Hindari ekspansi otomatis pada kolom kredensial; utamakan rute dengan sinyal bidang sensitif.",
-            Language::German => "Der Schutz von Passwortfeldern ist für diese Sitzung nicht verifiziert. Vermeiden Sie automatische Expansionen in Anmeldefeldern und bevorzugen Sie eine Route mit Sensitivitätssignal.",
-        }
-    }
-
-    pub fn evdev_privacy_limitation(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Evdev captures global keyboard input and cannot detect password fields, password-manager prompts, or other sensitive fields.",
-            Language::Indonesian => "Evdev menangkap masukan papan ketik global dan tidak dapat mendeteksi kolom kata sandi, prompt pengelola kata sandi, atau kolom sensitif lainnya.",
-            Language::German => "Evdev erfasst globale Tastatureingaben und kann Passwortfelder, Passwortmanager-Abfragen oder andere sensible Felder nicht erkennen.",
-        }
-    }
-
-    pub fn next_step_certification(&self) -> &'static str {
-        match self.lang {
-            Language::English => "This route is not certified for the current compositor. Treat runtime capability reports as diagnostics, not proof of reliable behavior in applications.",
-            Language::Indonesian => "Rute ini belum tersertifikasi untuk kompositor saat ini. Anggap laporan kemampuan runtime sebagai diagnostik, bukan bukti keandalan di aplikasi.",
-            Language::German => "Diese Route ist für den aktuellen Compositor nicht zertifiziert. Laufzeitangaben sind Diagnosewerte und kein Nachweis zuverlässigen Verhaltens in Anwendungen.",
-        }
-    }
-
-    pub fn terminal_only_route_notice(&self) -> &'static str {
-        match self.lang {
-            Language::English => "This route only expands in configured terminal applications. Browser, editor, and other desktop fields are not covered.",
-            Language::Indonesian => "Rute ini hanya mengembangkan teks di aplikasi terminal yang dikonfigurasi. Kolom browser, editor, dan aplikasi desktop lain tidak didukung.",
-            Language::German => "Diese Route erweitert Text nur in konfigurierten Terminalanwendungen. Browser-, Editor- und andere Desktop-Felder werden nicht abgedeckt.",
         }
     }
 
@@ -412,46 +180,6 @@ impl Strings {
         }
     }
 
-    pub fn compositor_surface_focus_diagnostic(&self) -> &'static str {
-        match self.lang {
-            Language::English => "WX-EVDEV-FOCUS-006: KWin reported its own process ID for a compositor surface, not an application. WayExpand cannot safely identify this target, so terminal-only matching stays blocked; there is no allowlist setting that fixes it. Use Quick Picker in copy-only mode and paste manually. Retest only after KWin reports a verified client application ID. Never allowlist kwin_wayland or use a window title as client identity.",
-            Language::Indonesian => "WX-EVDEV-FOCUS-006: KWin melaporkan ID prosesnya sendiri untuk permukaan kompositor, bukan aplikasi. WayExpand tidak dapat mengenali target ini dengan aman, jadi pencocokan khusus terminal tetap diblokir; tidak ada pengaturan daftar izin yang dapat memperbaikinya. Gunakan Quick Picker dalam mode salin saja lalu tempel manual. Uji kembali setelah KWin melaporkan ID aplikasi klien yang terverifikasi. Jangan izinkan kwin_wayland atau memakai judul jendela sebagai identitas klien.",
-            Language::German => "WX-EVDEV-FOCUS-006: KWin meldet seine eigene Prozess-ID für eine Compositor-Oberfläche, nicht für eine Anwendung. WayExpand kann dieses Ziel nicht sicher identifizieren; der Abgleich nur in Terminals bleibt gesperrt und lässt sich nicht durch eine Zulassungsliste beheben. Nutzen Sie den Schnellwähler im Nur-Kopieren-Modus und fügen Sie den Text manuell ein. Testen Sie erst erneut, wenn KWin eine verifizierte Client-Anwendungs-ID meldet. kwin_wayland niemals zulassen und keinen Fenstertitel als Client-Identität verwenden.",
-        }
-    }
-
-    pub fn next_step_terminal_only_route(&self) -> &'static str {
-        match self.lang {
-            Language::English => "For browser or editor fields, open Quick Picker and copy/paste, or configure an input-method route that supports that application. This route will not capture those fields.",
-            Language::Indonesian => "Untuk kolom browser atau editor, buka Quick Picker untuk menyalin dan menempel, atau atur rute metode input yang mendukung aplikasi tersebut. Rute ini tidak menangkap kolom itu.",
-            Language::German => "Öffnen Sie für Browser- oder Editorfelder den Quick Picker zum Kopieren und Einfügen oder richten Sie eine Eingabemethoden-Route ein, die diese Anwendung unterstützt. Diese Route erfasst solche Felder nicht.",
-        }
-    }
-
-    pub fn capture_availability_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Capture availability",
-            Language::Indonesian => "Ketersediaan tangkapan",
-            Language::German => "Verfügbarkeit der Erfassung",
-        }
-    }
-
-    pub fn insertion_safety_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Insertion safety",
-            Language::Indonesian => "Keamanan penyisipan",
-            Language::German => "Sicherheit der Ausgabe",
-        }
-    }
-
-    pub fn insertion_assurance_unknown(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The daemon has not reported replacement guarantees.",
-            Language::Indonesian => "Daemon belum melaporkan jaminan penggantian.",
-            Language::German => "Der Daemon hat keine Ersetzungsgarantien gemeldet.",
-        }
-    }
-
     pub fn evdev_quarantine_notice(&self, count: u64) -> String {
         match self.lang {
             Language::English => format!(
@@ -473,38 +201,6 @@ impl Strings {
             Language::German => {
                 "Einige Unicode-Zeichen werden von dieser Route möglicherweise nicht unterstützt."
             }
-        }
-    }
-
-    pub fn insertion_unicode_unknown(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Full Unicode support has not been reported for this route.",
-            Language::Indonesian => "Dukungan Unicode penuh belum dilaporkan untuk rute ini.",
-            Language::German => "Volle Unicode-Unterstützung wurde für diese Route nicht gemeldet.",
-        }
-    }
-
-    pub fn compositor_permissions_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Compositor permissions",
-            Language::Indonesian => "Izin kompositor",
-            Language::German => "Compositor-Berechtigungen",
-        }
-    }
-
-    pub fn focus_visibility_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Focus visibility",
-            Language::Indonesian => "Visibilitas fokus",
-            Language::German => "Sichtbarkeit des Fokus",
-        }
-    }
-
-    pub fn sensitive_verification_note(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Sensitivity capability is a runtime report; certification requires compositor and real-client evidence.",
-            Language::Indonesian => "Kemampuan deteksi bidang sensitif berasal dari laporan runtime; sertifikasi memerlukan bukti kompositor dan aplikasi nyata.",
-            Language::German => "Die Erkennung sensibler Felder ist eine Laufzeitmeldung; eine Zertifizierung erfordert Nachweise mit Compositor und echten Anwendungen.",
         }
     }
 
@@ -814,150 +510,6 @@ impl Strings {
         }
     }
 
-    pub fn capture_route(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Capture route",
-            Language::Indonesian => "Rute tangkap",
-            Language::German => "Eingaberoute",
-        }
-    }
-
-    pub fn injection_backend(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Injection backend",
-            Language::Indonesian => "Backend penyisipan",
-            Language::German => "Ausgabebackend",
-        }
-    }
-
-    pub fn route_id(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Route ID",
-            Language::Indonesian => "ID rute",
-            Language::German => "Routen-ID",
-        }
-    }
-
-    pub fn compositor_version(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Compositor",
-            Language::Indonesian => "Kompositor",
-            Language::German => "Compositor",
-        }
-    }
-
-    pub fn permission_health(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Permission health",
-            Language::Indonesian => "Status izin",
-            Language::German => "Berechtigungsstatus",
-        }
-    }
-
-    pub fn matcher_latency_p95(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Matcher p95",
-            Language::Indonesian => "P95 pencocokan",
-            Language::German => "Matcher p95",
-        }
-    }
-
-    pub fn insertion_latency_p95(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Insertion p95",
-            Language::Indonesian => "P95 penyisipan",
-            Language::German => "Ausgabe p95",
-        }
-    }
-
-    pub fn usage_persistence(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Usage statistics persistence",
-            Language::Indonesian => "Penyimpanan statistik penggunaan",
-            Language::German => "Speicherung der Nutzungsstatistik",
-        }
-    }
-
-    pub fn usage_recorded(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Events recorded",
-            Language::Indonesian => "Peristiwa tercatat",
-            Language::German => "Erfasste Ereignisse",
-        }
-    }
-
-    pub fn usage_persisted(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Events persisted",
-            Language::Indonesian => "Peristiwa tersimpan",
-            Language::German => "Gespeicherte Ereignisse",
-        }
-    }
-
-    pub fn usage_dropped(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Events dropped",
-            Language::Indonesian => "Peristiwa dibuang",
-            Language::German => "Verworfene Ereignisse",
-        }
-    }
-
-    pub fn usage_queue_rejected(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Queue rejections",
-            Language::Indonesian => "Penolakan antrean",
-            Language::German => "Abgewiesene Warteschlangenaufträge",
-        }
-    }
-
-    pub fn usage_flush_failures(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Flush failures",
-            Language::Indonesian => "Kegagalan flush",
-            Language::German => "Fehlgeschlagene Schreibvorgänge",
-        }
-    }
-
-    pub fn usage_worker_failures(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Worker failures",
-            Language::Indonesian => "Kegagalan worker",
-            Language::German => "Worker-Fehler",
-        }
-    }
-
-    pub fn usage_max_flush(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Longest flush",
-            Language::Indonesian => "Flush terlama",
-            Language::German => "Längster Schreibvorgang",
-        }
-    }
-
-    pub fn usage_persistence_note(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Statistics are written asynchronously. Recorded events are not a durability guarantee; shutdown, queue pressure, or worker failures can leave some events unpersisted.",
-            Language::Indonesian => "Statistik ditulis secara asinkron. Peristiwa tercatat tidak dijamin tersimpan; penghentian, antrean penuh, atau kegagalan worker dapat menyebabkan sebagian peristiwa tidak tersimpan.",
-            Language::German => "Statistiken werden asynchron geschrieben. Erfasste Ereignisse sind keine Dauerhaftigkeitsgarantie; beim Beenden, bei Warteschlangendruck oder Worker-Fehlern können Ereignisse ungespeichert bleiben.",
-        }
-    }
-
-    pub fn sensitive_verification(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Sensitive-field protection",
-            Language::Indonesian => "Perlindungan kolom sensitif",
-            Language::German => "Schutz sensibler Felder",
-        }
-    }
-
-    pub fn recent_expansion_outcomes(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Recent expansion outcomes · content-free trace",
-            Language::Indonesian => "Hasil ekspansi terbaru · jejak tanpa konten",
-            Language::German => "Letzte Expansionsergebnisse · inhaltsfreie Spur",
-        }
-    }
-
     pub fn no_recent_outcomes(&self) -> &'static str {
         match self.lang {
             Language::English => "No output transactions recorded in this daemon session.",
@@ -1231,78 +783,6 @@ impl Strings {
         }
     }
 
-    pub fn trace_trigger_matched(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Trigger matched",
-            Language::Indonesian => "Pemicu cocok",
-            Language::German => "Trigger erkannt",
-        }
-    }
-
-    pub fn trace_focus_admission(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Focus admission",
-            Language::Indonesian => "Pemeriksaan fokus",
-            Language::German => "Fokusfreigabe",
-        }
-    }
-
-    pub fn trace_backend_selected(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Backend selected",
-            Language::Indonesian => "Backend dipilih",
-            Language::German => "Backend ausgewählt",
-        }
-    }
-
-    pub fn trace_erase_acknowledgement(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Erase/replacement acknowledgement",
-            Language::Indonesian => "Konfirmasi penghapusan/penggantian",
-            Language::German => "Bestätigung für Löschen/Ersetzen",
-        }
-    }
-
-    pub fn trace_insertion_attempted(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Insertion attempted",
-            Language::Indonesian => "Penyisipan dicoba",
-            Language::German => "Einfügen versucht",
-        }
-    }
-
-    pub fn trace_privacy_and_limits(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Matched policy decisions and output transactions are recorded without typed or inserted text. Output acknowledgement does not prove the target application displayed the text; unmatched typing is never recorded. Use Matcher preview to explain a test input.",
-            Language::Indonesian => "Keputusan kebijakan atas pemicu yang cocok dan transaksi keluaran dicatat tanpa teks yang diketik atau disisipkan. Konfirmasi keluaran tidak membuktikan aplikasi tujuan menampilkan teks; ketikan yang tidak cocok tidak pernah dicatat. Gunakan Pratinjau pencocok untuk menjelaskan teks uji.",
-            Language::German => "Erkannte Richtlinienentscheidungen und Ausgabetransaktionen werden ohne getippten oder eingefügten Text erfasst. Eine Ausgabebestätigung beweist nicht, dass die Zielanwendung den Text angezeigt hat; nicht erkannte Eingaben werden nie protokolliert. Die Matcher-Vorschau erklärt Testeingaben.",
-        }
-    }
-
-    pub fn trigger_suggestions(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Available trigger suggestions",
-            Language::Indonesian => "Saran pemicu yang tersedia",
-            Language::German => "Verfügbare Trigger-Vorschläge",
-        }
-    }
-
-    pub fn form_test_values(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Test this form with sample values",
-            Language::Indonesian => "Uji formulir dengan nilai contoh",
-            Language::German => "Formular mit Beispielwerten testen",
-        }
-    }
-
-    pub fn form_template_rendered(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Rendered template",
-            Language::Indonesian => "Templat hasil render",
-            Language::German => "Gerenderte Vorlage",
-        }
-    }
-
     pub fn form_preview_privacy(&self) -> &'static str {
         match self.lang {
             Language::English => "Values and rendered text stay in this editor session.",
@@ -1340,30 +820,6 @@ impl Strings {
         }
     }
 
-    pub fn protection_uncertified(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Not compositor-certified",
-            Language::Indonesian => "Belum disertifikasi untuk kompositor",
-            Language::German => "Für diesen Compositor nicht zertifiziert",
-        }
-    }
-
-    pub fn fleet_layers(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Fleet layers",
-            Language::Indonesian => "Lapisan armada",
-            Language::German => "Flotten-Ebenen",
-        }
-    }
-
-    pub fn not_checked(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Not checked",
-            Language::Indonesian => "Belum diperiksa",
-            Language::German => "Nicht geprüft",
-        }
-    }
-
     /// A readable label for a backend's state. The raw
     /// `implementation/availability/permission` triple is still shown
     /// verbatim next to it so the GUI stays a faithful mirror of
@@ -1390,21 +846,6 @@ impl Strings {
             (Language::German, BackendState::NotImplemented) => "Nicht implementiert",
         }
     }
-    pub fn ibus_route_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "IBus route",
-            Language::Indonesian => "Jalur IBus",
-            Language::German => "IBus-Weg",
-        }
-    }
-
-    pub fn input_method_progress_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Input method: configured, running, verified",
-            Language::Indonesian => "Metode input: dikonfigurasi, berjalan, terverifikasi",
-            Language::German => "Eingabemethode: konfiguriert, aktiv, verifiziert",
-        }
-    }
 
     pub fn ibus_route_ready(&self) -> &'static str {
         match self.lang {
@@ -1415,70 +856,6 @@ impl Strings {
             Language::German => {
                 "Bereit: IBus kann in Anwendungen erweitern, die ihren Text melden."
             }
-        }
-    }
-
-    pub fn ibus_recent_fields(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Recently focused fields (no text is recorded)",
-            Language::Indonesian => "Kolom yang baru difokuskan (tidak ada teks yang direkam)",
-            Language::German => "Zuletzt fokussierte Felder (es wird kein Text aufgezeichnet)",
-        }
-    }
-
-    pub fn ibus_configuration_readiness(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Configuration readiness",
-            Language::Indonesian => "Kesiapan konfigurasi",
-            Language::German => "Konfigurationsbereitschaft",
-        }
-    }
-
-    pub fn ibus_operational_readiness(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Operational readiness",
-            Language::Indonesian => "Kesiapan operasional",
-            Language::German => "Betriebsbereitschaft",
-        }
-    }
-
-    pub fn ibus_watch_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => "To check one app, type a trigger in it and refresh this report, or run `wayexpand ibus watch`.",
-            Language::Indonesian => "Untuk memeriksa satu aplikasi, ketik pemicu di sana lalu segarkan laporan ini, atau jalankan `wayexpand ibus watch`.",
-            Language::German => "Um eine Anwendung zu prüfen, tippen Sie dort einen Auslöser und aktualisieren diesen Bericht, oder führen Sie `wayexpand ibus watch` aus.",
-        }
-    }
-
-    pub fn fix_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Fix:",
-            Language::Indonesian => "Perbaikan:",
-            Language::German => "Lösung:",
-        }
-    }
-
-    pub fn copy_fix_tooltip(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Copy this fix to the clipboard",
-            Language::Indonesian => "Salin perbaikan ini ke papan klip",
-            Language::German => "Diese Lösung in die Zwischenablage kopieren",
-        }
-    }
-
-    pub fn ranked_routes_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Ranked input routes",
-            Language::Indonesian => "Peringkat jalur input",
-            Language::German => "Eingabewege nach Rang",
-        }
-    }
-
-    pub fn ranked_routes_subtitle(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Based on this session, organization policy, and catalog certification. Experimental routes remain uncertified.",
-            Language::Indonesian => "Berdasarkan sesi ini, kebijakan organisasi, dan sertifikasi katalog. Jalur eksperimental tetap belum tersertifikasi.",
-            Language::German => "Basierend auf dieser Sitzung, der Organisationsrichtlinie und der Katalogzertifizierung. Experimentelle Wege bleiben unzertifiziert.",
         }
     }
 
