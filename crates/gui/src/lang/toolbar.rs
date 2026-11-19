@@ -81,22 +81,6 @@ impl Strings {
         }
     }
 
-    pub fn header_status_details_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Click for diagnostics",
-            Language::German => "Klicken für die Diagnose",
-            Language::Indonesian => "Klik untuk diagnostik",
-        }
-    }
-
-    pub fn title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Snippet library",
-            Language::Indonesian => "Pustaka cuplikan",
-            Language::German => "Snippet-Bibliothek",
-        }
-    }
-
     pub fn snippets_count(&self, count: usize) -> String {
         match self.lang {
             Language::English => format!("{} snippets", count),
@@ -113,110 +97,6 @@ impl Strings {
         }
     }
 
-    pub fn unsaved_changes(&self) -> &'static str {
-        match self.lang {
-            Language::English => "● Unsaved changes",
-            Language::Indonesian => "● Perubahan belum disimpan",
-            Language::German => "● Ungespeicherte Änderungen",
-        }
-    }
-
-    pub fn settings(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Settings",
-            Language::Indonesian => "Pengaturan",
-            Language::German => "Einstellungen",
-        }
-    }
-
-    pub fn more_actions(&self) -> &'static str {
-        match self.lang {
-            Language::English => "More actions",
-            Language::Indonesian => "Tindakan lainnya",
-            Language::German => "Weitere Aktionen",
-        }
-    }
-
-    pub fn experience_label(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Workspace",
-            Language::Indonesian => "Ruang kerja",
-            Language::German => "Arbeitsbereich",
-        }
-    }
-
-    pub fn experience_everyday(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Everyday",
-            Language::Indonesian => "Sehari-hari",
-            Language::German => "Alltag",
-        }
-    }
-
-    pub fn experience_everyday_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Create, find, edit and test text snippets.",
-            Language::Indonesian => "Buat, cari, edit, dan uji cuplikan teks.",
-            Language::German => "Textbausteine erstellen, finden, bearbeiten und testen.",
-        }
-    }
-
-    pub fn experience_advanced(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Advanced",
-            Language::Indonesian => "Lanjutan",
-            Language::German => "Erweitert",
-        }
-    }
-
-    pub fn experience_advanced_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Application rules, forms, variables, profiles and imports.",
-            Language::Indonesian => "Aturan aplikasi, formulir, variabel, profil, dan impor.",
-            Language::German => "App-Regeln, Formulare, Variablen, Profile und Importe.",
-        }
-    }
-
-    pub fn experience_developer_admin(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Developer / administrator",
-            Language::Indonesian => "Pengembang / administrator",
-            Language::German => "Entwicklung / Administration",
-        }
-    }
-
-    pub fn experience_developer_admin_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Command-backed snippets, packs, policy and diagnostics.",
-            Language::Indonesian => "Cuplikan perintah, paket, kebijakan, dan diagnostik.",
-            Language::German => "Befehlsbausteine, Pakete, Richtlinien und Diagnose.",
-        }
-    }
-
-    pub fn set_picker_shortcut(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Set Quick Picker shortcut",
-            Language::Indonesian => "Atur pintasan Quick Picker",
-            Language::German => "Schnellwähler-Tastenkürzel festlegen",
-        }
-    }
-
-    pub fn sync_library(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Sync library",
-            Language::Indonesian => "Sinkronkan pustaka",
-            Language::German => "Bibliothek synchronisieren",
-        }
-    }
-
-    pub fn sync_running(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Synchronizing the library with Git…",
-            Language::Indonesian => "Menyinkronkan pustaka dengan Git…",
-            Language::German => "Bibliothek wird mit Git synchronisiert…",
-        }
-    }
-
     pub fn sync_save_first(&self) -> &'static str {
         match self.lang {
             Language::English => "Save or discard the open edit before syncing",
@@ -226,118 +106,6 @@ impl Strings {
             Language::German => {
                 "Vor dem Synchronisieren die offene Änderung speichern oder verwerfen"
             }
-        }
-    }
-
-    pub fn import_espanso(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Import Espanso",
-            Language::Indonesian => "Impor Espanso",
-            Language::German => "Espanso importieren",
-        }
-    }
-
-    pub fn diagnostics(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Diagnostics",
-            Language::Indonesian => "Diagnostik",
-            Language::German => "Diagnose",
-        }
-    }
-
-    pub fn pause(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Pause",
-            Language::Indonesian => "Jeda",
-            Language::German => "Pause",
-        }
-    }
-
-    pub fn resume(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Resume",
-            Language::Indonesian => "Lanjutkan",
-            Language::German => "Fortsetzen",
-        }
-    }
-
-    pub fn daemon_running_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Service: Running",
-            Language::Indonesian => "Layanan: Berjalan",
-            Language::German => "Dienst: Aktiv",
-        }
-    }
-
-    pub fn daemon_restart_required_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Restart service",
-            Language::Indonesian => "Mulai ulang layanan",
-            Language::German => "Dienst neu starten",
-        }
-    }
-
-    pub fn daemon_restart_required_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The running daemon is from a different build. Restart the WayExpand user service before relying on this editor's fixes.",
-            Language::Indonesian => "Daemon yang berjalan berasal dari build berbeda. Mulai ulang layanan pengguna WayExpand sebelum mengandalkan perbaikan di editor ini.",
-            Language::German => "Der laufende Daemon stammt aus einem anderen Build. Starten Sie den WayExpand-Benutzerdienst neu, bevor Sie sich auf Korrekturen dieses Editors verlassen.",
-        }
-    }
-
-    pub fn daemon_build_unverified_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The running daemon's build identity is missing or unknown. Runtime safety guarantees cannot be matched to this GUI build.",
-            Language::Indonesian => "Identitas build daemon yang berjalan tidak tersedia atau tidak diketahui. Jaminan keamanan runtime tidak dapat dicocokkan dengan build GUI ini.",
-            Language::German => "Die Build-Identität des laufenden Daemons fehlt oder ist unbekannt. Laufzeit-Sicherheitsgarantien lassen sich diesem GUI-Build nicht zuordnen.",
-        }
-    }
-
-    pub fn daemon_unreachable_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Service: Not running",
-            Language::Indonesian => "Layanan: Tidak berjalan",
-            Language::German => "Dienst: Läuft nicht",
-        }
-    }
-
-    pub fn ibus_active_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "IBus: Active",
-            Language::Indonesian => "IBus: Aktif",
-            Language::German => "IBus: Aktiv",
-        }
-    }
-
-    pub fn ibus_active_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The WayExpand IBus engine is expanding in your apps; no background service is needed for it. Click for the IBus route checks.",
-            Language::Indonesian => "Mesin IBus WayExpand sedang mengekspansi di aplikasi Anda; tidak perlu layanan latar belakang. Klik untuk pemeriksaan jalur IBus.",
-            Language::German => "Die WayExpand-IBus-Engine erweitert in Ihren Anwendungen; dafür ist kein Hintergrunddienst nötig. Klicken für die IBus-Prüfungen.",
-        }
-    }
-
-    pub fn daemon_status_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The WayExpand background service captures typing on keyboard routes and runs commands. Click for diagnostics.",
-            Language::Indonesian => "Layanan latar belakang WayExpand menangkap ketikan pada jalur keyboard dan menjalankan perintah. Klik untuk diagnostik.",
-            Language::German => "Der WayExpand-Hintergrunddienst erfasst Eingaben auf Tastaturwegen und führt Befehle aus. Klicken für die Diagnose.",
-        }
-    }
-
-    pub fn daemon_not_enabled_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "WayExpand: Not enabled",
-            Language::Indonesian => "WayExpand: Belum diaktifkan",
-            Language::German => "WayExpand: Nicht aktiviert",
-        }
-    }
-
-    pub fn daemon_unknown_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Service: Checking…",
-            Language::Indonesian => "Layanan: Memeriksa…",
-            Language::German => "Dienst: Wird geprüft…",
         }
     }
 
@@ -425,112 +193,6 @@ impl Strings {
         )
     }
 
-    pub fn route_connected_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Ready",
-            Language::Indonesian => "Integrasi pengetikan: Siap",
-            Language::German => "Tastaturintegration: Bereit",
-        }
-    }
-
-    /// Connected with full protection, but the route is not certified, so
-    /// expansion has not been verified on this desktop.
-    pub fn route_running_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Running",
-            Language::Indonesian => "Integrasi pengetikan: Berjalan",
-            Language::German => "Tastaturintegration: Aktiv",
-        }
-    }
-    pub fn route_limited_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Limited protection",
-            Language::Indonesian => "Integrasi pengetikan: Perlindungan terbatas",
-            Language::German => "Tastaturintegration: Eingeschränkter Schutz",
-        }
-    }
-    pub fn route_paused_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Paused",
-            Language::Indonesian => "Integrasi pengetikan: Dijeda",
-            Language::German => "Tastaturintegration: Pausiert",
-        }
-    }
-    pub fn route_reconnecting_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Reconnecting…",
-            Language::Indonesian => "Integrasi pengetikan: Menyambung ulang…",
-            Language::German => "Tastaturintegration: Verbindet neu…",
-        }
-    }
-    pub fn route_starting_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Starting…",
-            Language::Indonesian => "Integrasi pengetikan: Memulai…",
-            Language::German => "Tastaturintegration: Startet…",
-        }
-    }
-
-    pub fn route_permission_required_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Permission required",
-            Language::Indonesian => "Integrasi pengetikan: Perlu izin",
-            Language::German => "Tastaturintegration: Berechtigung erforderlich",
-        }
-    }
-
-    pub fn route_portal_revoked_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Permission revoked",
-            Language::Indonesian => "Integrasi pengetikan: Izin dicabut",
-            Language::German => "Tastaturintegration: Berechtigung widerrufen",
-        }
-    }
-
-    pub fn route_unsupported_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Unsupported",
-            Language::Indonesian => "Integrasi pengetikan: Tidak didukung",
-            Language::German => "Tastaturintegration: Nicht unterstützt",
-        }
-    }
-    pub fn route_degraded_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Degraded",
-            Language::Indonesian => "Integrasi pengetikan: Terganggu",
-            Language::German => "Tastaturintegration: Beeinträchtigt",
-        }
-    }
-    pub fn route_failed_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Failed",
-            Language::Indonesian => "Integrasi pengetikan: Gagal",
-            Language::German => "Tastaturintegration: Fehlgeschlagen",
-        }
-    }
-    pub fn route_stopped_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Stopped",
-            Language::Indonesian => "Integrasi pengetikan: Berhenti",
-            Language::German => "Tastaturintegration: Gestoppt",
-        }
-    }
-    pub fn route_unknown_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Typing integration: Unknown",
-            Language::Indonesian => "Integrasi pengetikan: Tidak diketahui",
-            Language::German => "Tastaturintegration: Unbekannt",
-        }
-    }
-
-    pub fn technical_details(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Technical details",
-            Language::Indonesian => "Detail teknis",
-            Language::German => "Technische Details",
-        }
-    }
-
     pub fn backend_label(&self, kind: wayexpand_core::BackendKind) -> &'static str {
         match (self.lang, kind) {
             (
@@ -573,78 +235,6 @@ impl Strings {
             (Language::English, wayexpand_core::BackendKind::Clipboard) => "Clipboard",
             (Language::Indonesian, wayexpand_core::BackendKind::Clipboard) => "Papan klip",
             (Language::German, wayexpand_core::BackendKind::Clipboard) => "Zwischenablage",
-        }
-    }
-
-    pub fn reload(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Reload",
-            Language::Indonesian => "Muat ulang",
-            Language::German => "Neu laden",
-        }
-    }
-
-    pub fn search_placeholder(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Search snippets…",
-            Language::Indonesian => "Cari cuplikan…",
-            Language::German => "Snippets durchsuchen…",
-        }
-    }
-
-    pub fn search_fields(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Search fields",
-            Language::Indonesian => "Bidang pencarian",
-            Language::German => "Suchfelder",
-        }
-    }
-
-    pub fn search_triggers(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Triggers",
-            Language::Indonesian => "Pemicu",
-            Language::German => "Kürzel",
-        }
-    }
-
-    pub fn search_descriptions(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Names and descriptions",
-            Language::Indonesian => "Nama dan deskripsi",
-            Language::German => "Namen und Beschreibungen",
-        }
-    }
-
-    pub fn search_tags(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Tags",
-            Language::Indonesian => "Tag",
-            Language::German => "Schlagwörter",
-        }
-    }
-
-    pub fn search_replacements(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Replacement content",
-            Language::Indonesian => "Isi teks pengganti",
-            Language::German => "Eingefügter Text",
-        }
-    }
-
-    pub fn welcome_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Welcome to WayExpand",
-            Language::Indonesian => "Selamat datang di WayExpand",
-            Language::German => "Willkommen bei WayExpand",
-        }
-    }
-
-    pub fn welcome_intro(&self) -> &'static str {
-        match self.lang {
-            Language::English => "From your first setup check to a real expansion in an app.",
-            Language::Indonesian => "Dari pemeriksaan awal hingga ekspansi nyata di aplikasi.",
-            Language::German => "Vom ersten Einrichtungscheck bis zur Ersetzung in einer App.",
         }
     }
 
@@ -755,110 +345,6 @@ impl Strings {
             (Language::English, None) => "Not ready: the daemon is running a different build. Restart the WayExpand service for this route, then refresh these checks before testing snippets.".into(),
             (Language::Indonesian, None) => "Belum siap: daemon menjalankan build yang berbeda. Mulai ulang layanan WayExpand untuk jalur ini, lalu segarkan pemeriksaan sebelum menguji cuplikan.".into(),
             (Language::German, None) => "Noch nicht bereit: Der Daemon verwendet einen anderen Build. Starten Sie den WayExpand-Dienst für diese Route neu und aktualisieren Sie diese Prüfungen, bevor Sie Snippets testen.".into(),
-        }
-    }
-
-    pub fn onboarding_unverified_daemon_state(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Not ready: the daemon's build identity is unknown. Install matching builds with a recorded commit identity before testing snippets.",
-            Language::Indonesian => "Belum siap: identitas build daemon tidak diketahui. Pasang build yang cocok dengan identitas commit tercatat sebelum menguji cuplikan.",
-            Language::German => "Noch nicht bereit: Die Build-Identität des Daemons ist unbekannt. Installieren Sie passende Builds mit aufgezeichneter Commit-Identität, bevor Sie Snippets testen.",
-        }
-    }
-
-    pub fn first_run_continue_setup(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Continue guided setup",
-            Language::Indonesian => "Lanjutkan penyiapan terpandu",
-            Language::German => "Geführte Einrichtung fortsetzen",
-        }
-    }
-
-    pub fn onboarding_refresh_checks(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Refresh session checks",
-            Language::Indonesian => "Segarkan pemeriksaan sesi",
-            Language::German => "Sitzungsprüfung aktualisieren",
-        }
-    }
-
-    pub fn onboarding_setup_recovery(&self) -> &'static str {
-        match self.lang {
-            Language::English => "If setup cannot find `wayexpand`, install WayExpand with your package or build instructions, then reopen the GUI. The setup command is shown in the status message and is never run as root.",
-            Language::Indonesian => "Jika perintah `wayexpand` tidak ditemukan, pasang WayExpand melalui paket atau petunjuk build, lalu buka kembali GUI. Perintah penyiapan terlihat pada status dan tidak pernah dijalankan sebagai root.",
-            Language::German => "Wird `wayexpand` nicht gefunden, installieren Sie WayExpand anhand der Paket- oder Build-Anleitung und öffnen Sie die GUI erneut. Der Setup-Befehl steht in der Statusmeldung und läuft nie als root.",
-        }
-    }
-
-    pub fn onboarding_open_diagnostics(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Open diagnostics",
-            Language::Indonesian => "Buka diagnostik",
-            Language::German => "Diagnose öffnen",
-        }
-    }
-
-    pub fn onboarding_troubleshooting_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Let’s recover the test",
-            Language::Indonesian => "Mari perbaiki pengujian",
-            Language::German => "Test gemeinsam beheben",
-        }
-    }
-
-    pub fn onboarding_troubleshooting_steps(&self) -> &'static str {
-        match self.lang {
-            Language::English => "1. Check that the daemon and route show Connected, then refresh session checks.\n2. If permission is required, approve the desktop input portal and refresh. Do not grant raw keyboard access just to make this test pass.\n3. Confirm the test snippet is enabled, then type ;hello followed by a space in an ordinary text field.\n4. If the matcher preview works but the real app does not, open diagnostics and check the active capture/injection route and focus support. Reload after changing the route.\n5. If text is partly deleted, duplicated, or inserted in the wrong place, pause WayExpand and do not repeat the test. Use a route with verified replacement before relying on it.",
-            Language::Indonesian => "1. Pastikan daemon dan rute berstatus Terhubung, lalu segarkan pemeriksaan sesi.\n2. Jika izin diperlukan, setujui portal masukan desktop lalu segarkan. Jangan memberi akses papan ketik mentah hanya agar tes ini berhasil.\n3. Pastikan cuplikan uji aktif, lalu ketik ;hello diikuti spasi pada kolom teks biasa.\n4. Jika pratinjau pencocok berhasil tetapi aplikasi nyata tidak, buka diagnostik dan periksa rute tangkapan/penyisipan serta dukungan fokus. Muat ulang setelah mengubah rute.\n5. Jika teks terhapus sebagian, berulang, atau masuk ke tempat yang salah, jeda WayExpand dan jangan ulangi tes. Gunakan rute dengan penggantian terverifikasi sebelum mengandalkannya.",
-            Language::German => "1. Prüfen Sie, ob Daemon und Route Verbunden anzeigen, und aktualisieren Sie die Sitzungsprüfung.\n2. Falls eine Freigabe nötig ist, bestätigen Sie das Desktop-Eingabeportal und aktualisieren Sie erneut. Gewähren Sie für diesen Test keinen Rohzugriff auf die Tastatur.\n3. Prüfen Sie, ob das Test-Snippet aktiv ist, und geben Sie ;hello plus Leerzeichen in ein normales Textfeld ein.\n4. Funktioniert die Matcher-Vorschau, aber nicht die App, öffnen Sie die Diagnose und prüfen Sie aktive Erfassungs-/Ausgaberoute sowie Fokusunterstützung. Laden Sie nach einem Routenwechsel neu.\n5. Werden Zeichen teilweise gelöscht, dupliziert oder falsch eingefügt, pausieren Sie WayExpand und wiederholen Sie den Test nicht. Verwenden Sie erst eine Route mit verifizierter Ersetzung.",
-        }
-    }
-
-    pub fn onboarding_defer(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Continue later",
-            Language::Indonesian => "Lanjutkan nanti",
-            Language::German => "Später fortsetzen",
-        }
-    }
-
-    pub fn getting_started(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Getting started",
-            Language::Indonesian => "Memulai",
-            Language::German => "Erste Schritte",
-        }
-    }
-
-    pub fn onboarding_skip(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Skip the guide — I already use WayExpand",
-            Language::Indonesian => "Lewati panduan — saya sudah memakai WayExpand",
-            Language::German => "Assistent überspringen – ich nutze WayExpand bereits",
-        }
-    }
-
-    pub fn onboarding_skipped_note(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Setup guide skipped. Reopen it any time from the menu with Getting started; nothing was verified.",
-            Language::Indonesian => "Panduan penyiapan dilewati. Buka lagi kapan saja dari menu lewat Memulai; tidak ada yang diverifikasi.",
-            Language::German => "Einrichtungsassistent übersprungen. Sie öffnen ihn jederzeit über „Erste Schritte“ im Menü; es wurde nichts verifiziert.",
-        }
-    }
-
-    pub fn onboarding_complete_note(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Thanks for confirming. This records your manual test; WayExpand does not observe or certify insertion in another application.",
-            Language::Indonesian => "Terima kasih atas konfirmasinya. Ini mencatat tes manual Anda; WayExpand tidak mengamati atau mensertifikasi penyisipan di aplikasi lain.",
-            Language::German => "Danke für die Bestätigung. Damit wird Ihr manueller Test gespeichert; WayExpand beobachtet oder zertifiziert das Einfügen in anderen Apps nicht.",
-        }
-    }
-
-    pub fn select_snippet_prompt(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Select a snippet from your library to edit it.",
-            Language::Indonesian => "Pilih cuplikan dari pustaka Anda untuk menyuntingnya.",
-            Language::German => "Wählen Sie ein Snippet aus Ihrer Bibliothek zum Bearbeiten aus.",
         }
     }
 
@@ -986,14 +472,6 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_probe_caveat(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Backend probes show what may be available; they do not certify reliable input or output.",
-            Language::Indonesian => "Pemeriksaan backend menunjukkan apa yang mungkin tersedia; pemeriksaan ini tidak menjamin masukan atau keluaran yang andal.",
-            Language::German => "Backend-Prüfungen zeigen mögliche Verfügbarkeit, zertifizieren aber keine zuverlässige Ein- oder Ausgabe.",
-        }
-    }
-
     pub fn onboarding_app_caveat(&self) -> &'static str {
         match self.lang {
             Language::English => {
@@ -1008,43 +486,11 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_ibus_field_limitation(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The recommended desktop integration can support more text fields than the current setup. Some browser and terminal fields still do not provide enough information for safe replacement; use Quick Picker to copy and paste there. Setup explains the replacement tradeoff before asking for consent.",
-            Language::Indonesian => "Integrasi desktop yang disarankan dapat mendukung lebih banyak kolom daripada penyiapan saat ini. Beberapa kolom browser dan terminal tetap tidak memberikan cukup informasi untuk penggantian yang aman; gunakan Quick Picker untuk menyalin dan menempel di sana. Penyiapan menjelaskan risikonya sebelum meminta persetujuan.",
-            Language::German => "Die empfohlene Desktop-Integration kann mehr Textfelder unterstützen als die aktuelle Einrichtung. Manche Browser- und Terminalfelder liefern trotzdem nicht genug Informationen für einen sicheren Austausch. Verwenden Sie dort den Schnellwähler zum Kopieren und Einfügen. Vor einer Zustimmung erklärt die Einrichtung den Kompromiss.",
-        }
-    }
-
-    pub fn create_test_snippet(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Create test snippet",
-            Language::Indonesian => "Buat cuplikan uji",
-            Language::German => "Testsnippet erstellen",
-        }
-    }
-
     pub fn onboarding_test_state_save_failed(&self, error: &str) -> String {
         match self.lang {
             Language::English => format!("The test snippet was added, but its onboarding state could not be saved: {error}"),
             Language::Indonesian => format!("Cuplikan uji ditambahkan, tetapi status penyiapannya tidak dapat disimpan: {error}"),
             Language::German => format!("Das Test-Snippet wurde hinzugefügt, aber der Einrichtungsstatus konnte nicht gespeichert werden: {error}"),
-        }
-    }
-
-    pub fn onboarding_sample_description(&self) -> &'static str {
-        match self.lang {
-            Language::English => "A test expansion for your first-run check",
-            Language::Indonesian => "Ekspansi uji untuk pemeriksaan pertama Anda",
-            Language::German => "Eine Textersetzung zum Ausprobieren",
-        }
-    }
-
-    pub fn onboarding_sample_category(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Getting started",
-            Language::Indonesian => "Memulai",
-            Language::German => "Erste Schritte",
         }
     }
 
@@ -1333,38 +779,6 @@ impl Strings {
             }
             Language::Indonesian => "Aktifkan tangkapan papan ketik mentah — lanjutan…",
             Language::German => "Rohe Tastaturerfassung aktivieren — erweitert…",
-        }
-    }
-
-    pub fn evdev_setup_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Enable raw keyboard capture — no password-field detection",
-            Language::Indonesian => "Aktifkan tangkapan papan ketik mentah — lanjutan",
-            Language::German => "Rohe Tastaturerfassung aktivieren — erweitert",
-        }
-    }
-
-    pub fn evdev_setup_warning(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Evdev reads global keyboard input and cannot detect password fields, password-manager prompts, or other sensitive fields. Keystrokes in those fields may be observed. Use an input-method route when you need sensitive-field protection. This is an explicit opt-in. Device permissions are a separate system-wide change and are never made by this GUI.",
-            Language::Indonesian => "Berfungsi di lebih banyak aplikasi, tetapi dapat mengamati pengetikan di kolom kata sandi karena mode ini tidak memiliki sinyal kolom sensitif. Ini adalah pilihan eksplisit. Izin perangkat merupakan perubahan terpisah di seluruh sistem dan tidak pernah dilakukan oleh GUI ini.",
-            Language::German => "Funktioniert in mehr Anwendungen, kann aber Eingaben in Passwortfeldern beobachten, weil dieser Modus kein Signal für sensible Felder hat. Dies ist eine ausdrückliche Zustimmung. Geräteberechtigungen sind eine separate systemweite Änderung und werden von dieser GUI niemals vorgenommen.",
-        }
-    }
-
-    pub fn evdev_setup_acknowledge(&self) -> &'static str {
-        match self.lang {
-            Language::English => "I understand evdev cannot detect or protect sensitive fields",
-            Language::Indonesian => "Saya memahami batasan masukan mentah dan kolom kata sandi",
-            Language::German => "Ich verstehe die Einschränkungen bei Rohdaten und Passwortfeldern",
-        }
-    }
-
-    pub fn evdev_setup_steps(&self) -> &'static str {
-        match self.lang {
-            Language::English => "If keyboard-device access is not already configured, first complete the administrator permission step in Getting Started. Then copy the command below into a terminal: it enables the user service, and the desktop may ask you to approve the input portal. Return here, refresh diagnostics, and test in a normal text field.",
-            Language::Indonesian => "Jika akses perangkat papan ketik belum dikonfigurasi, selesaikan dahulu langkah izin administrator di Memulai. Lalu salin perintah di bawah ke terminal: perintah ini mengaktifkan layanan pengguna, dan desktop mungkin meminta Anda menyetujui portal masukan. Kembali ke sini, segarkan diagnostik, dan uji di kolom teks biasa.",
-            Language::German => "Falls der Zugriff auf Tastaturgeräte noch nicht eingerichtet ist, schließen Sie zuerst den Administrator-Schritt in der Installationsanleitung ab. Kopieren Sie danach den folgenden Befehl in ein Terminal: Er aktiviert den Benutzerdienst; der Desktop kann um Freigabe des Eingabeportals bitten. Kehren Sie zurück, aktualisieren Sie die Diagnose und testen Sie in einem normalen Textfeld.",
         }
     }
 }

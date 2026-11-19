@@ -595,14 +595,6 @@ impl Strings {
         }
     }
 
-    pub fn next_step_details(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Details",
-            Language::German => "Details",
-            Language::Indonesian => "Detail",
-        }
-    }
-
     /// The concrete follow-up for the one prioritized diagnosis. Keep this
     /// separate from the button label: some problems need a user action in
     /// the desktop before the button's live test can be meaningful.
@@ -1057,46 +1049,6 @@ impl Strings {
             Language::Indonesian => format!(
                 "CLI GUI ini tidak cocok dengan instalasi aktif. Jalankan `{path} upgrade --check` dan ikuti laporannya; tidak ada layanan yang dimulai ulang."
             ),
-        }
-    }
-
-    pub(crate) fn upgrade_restart_available(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The version check found the matching WayExpand service. Review the restart prompt to continue.",
-            Language::German => "Die Versionsprüfung hat den passenden WayExpand-Dienst gefunden. Prüfen Sie die Neustartabfrage, um fortzufahren.",
-            Language::Indonesian => "Pemeriksaan versi menemukan layanan WayExpand yang sesuai. Tinjau konfirmasi mulai ulang untuk melanjutkan.",
-        }
-    }
-
-    pub(crate) fn upgrade_restart_unmanaged(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The daemon build differs, but no matching managed service was identified. Do not restart another service; inspect Diagnostics → Services.",
-            Language::German => "Der Daemon-Build unterscheidet sich, aber es wurde kein passender verwalteter Dienst gefunden. Starten Sie keinen anderen Dienst neu; prüfen Sie Diagnose → Dienste.",
-            Language::Indonesian => "Build daemon berbeda, tetapi layanan terkelola yang sesuai tidak ditemukan. Jangan mulai ulang layanan lain; periksa Diagnostik → Layanan.",
-        }
-    }
-
-    pub(crate) fn upgrade_build_current(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The running daemon matches this GUI build. Refresh diagnostics to check the input route.",
-            Language::German => "Der laufende Daemon entspricht diesem GUI-Build. Aktualisieren Sie die Diagnose, um den Eingabeweg zu prüfen.",
-            Language::Indonesian => "Daemon yang berjalan cocok dengan build GUI ini. Perbarui diagnostik untuk memeriksa rute input.",
-        }
-    }
-
-    pub(crate) fn upgrade_check_unreadable(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The version check did not return a readable report. Open Diagnostics → Versions and run `wayexpand upgrade --check --json`.",
-            Language::German => "Die Versionsprüfung lieferte keinen lesbaren Bericht. Öffnen Sie Diagnose → Versionen und führen Sie `wayexpand upgrade --check --json` aus.",
-            Language::Indonesian => "Pemeriksaan versi tidak menghasilkan laporan yang dapat dibaca. Buka Diagnostik → Versi dan jalankan `wayexpand upgrade --check --json`.",
-        }
-    }
-
-    pub(crate) fn upgrade_installation_incomplete(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The upgrade check found missing installed components. Open Diagnostics and run `wayexpand install-check --json` to see what needs repair.",
-            Language::German => "Die Upgrade-Prüfung hat fehlende installierte Komponenten gefunden. Öffnen Sie Diagnose und führen Sie `wayexpand install-check --json` aus, um die nötige Reparatur zu sehen.",
-            Language::Indonesian => "Pemeriksaan upgrade menemukan komponen terpasang yang hilang. Buka Diagnostik dan jalankan `wayexpand install-check --json` untuk melihat perbaikannya.",
         }
     }
 

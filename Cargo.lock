@@ -4661,6 +4661,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "toml",
  "toml_edit",
  "wayexpand-backend-gnome-window",
  "wayexpand-backend-ibus",

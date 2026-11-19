@@ -1,86 +1,6 @@
 use super::{Language, Strings};
 
 impl Strings {
-    pub fn trigger(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Trigger",
-            Language::Indonesian => "Pemicu",
-            Language::German => "Auslöser",
-        }
-    }
-
-    pub fn trigger_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => ";;hello",
-            Language::Indonesian => ";;hello",
-            Language::German => ";;hallo",
-        }
-    }
-
-    pub fn duplicate_trigger(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Warning: another snippet already uses this trigger; saving will be rejected.",
-            Language::Indonesian => "Peringatan: cuplikan lain sudah menggunakan pemicu ini; penyimpanan akan ditolak.",
-            Language::German => "Warnung: Ein anderes Snippet verwendet bereits diesen Auslöser; das Speichern wird abgelehnt.",
-        }
-    }
-
-    pub fn trigger_tip(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Tip: use a distinctive prefix such as ;; or : to avoid accidental matches.",
-            Language::Indonesian => "Tips: gunakan awalan khas seperti ;; atau : untuk menghindari kecocokan yang tidak disengaja.",
-            Language::German => "Tipp: Verwenden Sie ein eindeutiges Präfix wie ;; oder :, um versehentliche Treffer zu vermeiden.",
-        }
-    }
-
-    pub fn description(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Description",
-            Language::Indonesian => "Deskripsi",
-            Language::German => "Beschreibung",
-        }
-    }
-
-    pub fn tags(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Tags",
-            Language::Indonesian => "Tag",
-            Language::German => "Tags",
-        }
-    }
-
-    pub fn category(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Category",
-            Language::Indonesian => "Kategori",
-            Language::German => "Kategorie",
-        }
-    }
-
-    pub fn category_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => "productivity, shortcuts, custom",
-            Language::Indonesian => "produktivitas, pintasan, kustom",
-            Language::German => "Produktivität, Verknüpfungen, Benutzerdefiniert",
-        }
-    }
-
-    pub fn output_file(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Write to file",
-            Language::Indonesian => "Tulis ke berkas",
-            Language::German => "In Datei schreiben",
-        }
-    }
-
-    pub fn generate_only(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Only use this snippet to generate files",
-            Language::Indonesian => "Gunakan cuplikan ini hanya untuk membuat berkas",
-            Language::German => "Snippet nur zum Erzeugen von Dateien verwenden",
-        }
-    }
-
     pub fn generate_only_hint(&self) -> &'static str {
         match self.lang {
             Language::English => {
@@ -92,14 +12,6 @@ impl Strings {
             Language::German => {
                 "Das Kürzel wird beim Tippen nicht ersetzt; das Snippet füllt nur die Datei oben."
             }
-        }
-    }
-
-    pub fn output_file_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Dockerfile, site.yml (optional)",
-            Language::Indonesian => "Dockerfile, site.yml (opsional)",
-            Language::German => "Dockerfile, site.yml (optional)",
         }
     }
 
@@ -117,78 +29,6 @@ impl Strings {
         }
     }
 
-    pub fn existing(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Choose…",
-            Language::Indonesian => "Pilih…",
-            Language::German => "Auswählen…",
-        }
-    }
-
-    pub fn app_filter(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Only in these apps",
-            Language::Indonesian => "Hanya di aplikasi ini",
-            Language::German => "Nur in diesen Apps",
-        }
-    }
-
-    pub fn detect_app(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Use current app",
-            Language::Indonesian => "Gunakan aplikasi saat ini",
-            Language::German => "Aktuelle App verwenden",
-        }
-    }
-
-    pub fn detect_app_tooltip(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Click this, then click a window of the app this snippet is for within 15 seconds (KDE Plasma only for now)",
-            Language::Indonesian => "Klik ini, lalu klik jendela aplikasi untuk cuplikan ini dalam 15 detik (saat ini hanya KDE Plasma)",
-            Language::German => "Hier klicken und dann innerhalb von 15 Sekunden ein Fenster der App anklicken, für die das Snippet gilt (nur KDE Plasma)",
-        }
-    }
-
-    pub fn window_tracking_warning(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Warning: if window tracking isn't available on your compositor, this snippet will never match rather than matching everywhere.",
-            Language::Indonesian => "Peringatan: jika pelacakan jendela tidak tersedia di compositor Anda, cuplikan ini tidak akan pernah cocok alih-alih cocok di mana saja.",
-            Language::German => "Warnung: Wenn die Fenster-Verfolgung in Ihrem Kompositor nicht verfügbar ist, passt dieses Snippet nie, anstatt überall zu passen.",
-        }
-    }
-
-    pub fn enabled(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Enabled",
-            Language::Indonesian => "Aktif",
-            Language::German => "Aktiviert",
-        }
-    }
-
-    pub fn immediate(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Immediate",
-            Language::Indonesian => "Langsung",
-            Language::German => "Sofort",
-        }
-    }
-
-    pub fn word_boundary(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Word boundary",
-            Language::Indonesian => "Batas kata",
-            Language::German => "Wortgrenze",
-        }
-    }
-
-    pub fn propagate_case(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Follow trigger capitalization",
-            Language::Indonesian => "Ikuti kapitalisasi pemicu",
-            Language::German => "Groß-/Kleinschreibung anpassen",
-        }
-    }
-
     pub fn propagate_case_tooltip(&self) -> &'static str {
         match self.lang {
             Language::English => {
@@ -203,14 +43,6 @@ impl Strings {
         }
     }
 
-    pub fn replacement(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Replacement",
-            Language::Indonesian => "Teks pengganti",
-            Language::German => "Ersatz",
-        }
-    }
-
     pub fn insertion_limit_warning(&self, count: usize, limit: usize, mode: &str) -> String {
         match self.lang {
             Language::English => format!(
@@ -222,126 +54,6 @@ impl Strings {
             Language::German => format!(
                 "Dieses Snippet hat {count} Zeichen, aber der aktive Modus {mode} unterstützt höchstens {limit}. Die Einfügung wird möglicherweise abgelehnt."
             ),
-        }
-    }
-
-    pub fn save_changes(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Save changes",
-            Language::Indonesian => "Simpan perubahan",
-            Language::German => "Änderungen speichern",
-        }
-    }
-
-    pub fn save_tooltip(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Save changes (Ctrl+S)",
-            Language::Indonesian => "Simpan perubahan (Ctrl+S)",
-            Language::German => "Änderungen speichern (Strg+S)",
-        }
-    }
-
-    pub fn delete(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Delete…",
-            Language::Indonesian => "Hapus…",
-            Language::German => "Löschen…",
-        }
-    }
-
-    pub fn preview(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Preview",
-            Language::Indonesian => "Pratinjau",
-            Language::German => "Vorschau",
-        }
-    }
-
-    pub fn matcher_preview_scope(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Checks snippet matching and rendering only; it does not test keyboard input or insertion in another app.",
-            Language::Indonesian => "Hanya memeriksa pencocokan dan render cuplikan; ini tidak menguji input keyboard atau penyisipan di aplikasi lain.",
-            Language::German => "Prüft nur Snippet-Erkennung und Darstellung; Tastatureingabe und Einfügen in einer anderen App werden nicht getestet.",
-        }
-    }
-
-    pub fn input(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Input",
-            Language::Indonesian => "Masukan",
-            Language::German => "Eingabe",
-        }
-    }
-
-    pub fn input_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => "text containing the trigger",
-            Language::Indonesian => "teks yang berisi pemicu",
-            Language::German => "Text mit dem Auslöser",
-        }
-    }
-
-    pub fn use_trigger(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Use trigger",
-            Language::Indonesian => "Gunakan pemicu",
-            Language::German => "Auslöser verwenden",
-        }
-    }
-
-    pub fn copy(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Copy",
-            Language::Indonesian => "Salin",
-            Language::German => "Kopieren",
-        }
-    }
-
-    pub fn copy_tooltip(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Copy the previewed output",
-            Language::Indonesian => "Salin keluaran pratinjau",
-            Language::German => "Kopieren Sie die vorbereitete Ausgabe",
-        }
-    }
-
-    pub fn template_variables(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Template variables",
-            Language::Indonesian => "Variabel templat",
-            Language::German => "Template-Variablen",
-        }
-    }
-
-    pub fn template_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Insert a value into the replacement; hover a button for what it does. Edit the inserted text to change a format, length or name.",
-            Language::Indonesian => "Sisipkan nilai ke dalam teks pengganti; arahkan ke tombol untuk penjelasannya. Ubah teks yang disisipkan untuk mengganti format, panjang, atau nama.",
-            Language::German => "Fügt einen Wert in den Ersatz ein; Tooltip zeigt, was er bewirkt. Den eingefügten Text bearbeiten, um Format, Länge oder Namen zu ändern.",
-        }
-    }
-
-    pub fn reusable_snippets(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Reusable snippets",
-            Language::Indonesian => "Cuplikan yang dapat digunakan ulang",
-            Language::German => "Wiederverwendbare Snippets",
-        }
-    }
-
-    pub fn reusable_snippet_search_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Search static snippets by trigger or description",
-            Language::Indonesian => "Cari cuplikan statis berdasarkan pemicu atau deskripsi",
-            Language::German => "Statische Snippets nach Auslöser oder Beschreibung suchen",
-        }
-    }
-
-    pub fn no_reusable_snippet_matches(&self) -> &'static str {
-        match self.lang {
-            Language::English => "No reusable snippets match this search",
-            Language::Indonesian => "Tidak ada cuplikan yang cocok dengan pencarian ini",
-            Language::German => "Keine wiederverwendbaren Snippets für diese Suche",
         }
     }
 
@@ -361,14 +73,6 @@ impl Strings {
         }
     }
 
-    pub fn dynamic_command(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Dynamic command (optional)",
-            Language::Indonesian => "Perintah dinamis (opsional)",
-            Language::German => "Dynamischer Befehl (optional)",
-        }
-    }
-
     pub fn broker_action_unlisted(&self) -> &'static str {
         match self.lang {
             Language::English => {
@@ -380,30 +84,6 @@ impl Strings {
             Language::German => {
                 "Diese Aktion ist nicht in der für die GUI sichtbaren Broker-Richtlinie aufgeführt."
             }
-        }
-    }
-
-    pub fn broker_action_contract(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Approved action input contract",
-            Language::Indonesian => "Kontrak input aksi yang disetujui",
-            Language::German => "Eingabevertrag der freigegebenen Aktion",
-        }
-    }
-
-    pub fn broker_schema_unavailable(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The broker schema could not be read completely; verify it with `wayexpand validate` before using this action.",
-            Language::Indonesian => "Skema broker tidak dapat dibaca seluruhnya; verifikasi dengan `wayexpand validate` sebelum menggunakan aksi ini.",
-            Language::German => "Das Broker-Schema konnte nicht vollständig gelesen werden. Prüfen Sie es mit `wayexpand validate`, bevor Sie diese Aktion verwenden.",
-        }
-    }
-
-    pub fn broker_schema_no_parameters(&self) -> &'static str {
-        match self.lang {
-            Language::English => "This action has no form parameters.",
-            Language::Indonesian => "Aksi ini tidak memiliki parameter formulir.",
-            Language::German => "Diese Aktion hat keine Formularparameter.",
         }
     }
 
@@ -439,14 +119,6 @@ impl Strings {
         }
     }
 
-    pub fn broker_schema_no_shell_interpolation(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Values are broker-validated and placed only into fixed argv slots; no shell interpolation is used.",
-            Language::Indonesian => "Nilai divalidasi broker dan hanya ditempatkan pada slot argv tetap; tidak ada interpolasi shell.",
-            Language::German => "Werte werden vom Broker geprüft und nur in feste argv-Slots eingesetzt; es findet keine Shell-Interpolation statt.",
-        }
-    }
-
     pub fn broker_schema_constraint_mismatch(&self, names: &str) -> String {
         match self.lang {
             Language::English => {
@@ -461,78 +133,6 @@ impl Strings {
         }
     }
 
-    pub fn broker_schema_runtime_validation(&self) -> &'static str {
-        match self.lang {
-            Language::English => "The broker checks every submitted value at runtime; this preview cannot guarantee user-entered text is accepted.",
-            Language::Indonesian => "Broker memeriksa setiap nilai saat dijalankan; pratinjau ini tidak dapat menjamin teks yang dimasukkan pengguna akan diterima.",
-            Language::German => "Der Broker prüft jeden übermittelten Wert zur Laufzeit. Diese Vorschau kann nicht garantieren, dass eingegebener Text akzeptiert wird.",
-        }
-    }
-
-    pub fn execution_type(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Execution type",
-            Language::Indonesian => "Jenis eksekusi",
-            Language::German => "Ausführungsart",
-        }
-    }
-
-    pub fn direct_executable(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Direct executable",
-            Language::Indonesian => "Program langsung",
-            Language::German => "Direktes Programm",
-        }
-    }
-
-    pub fn managed_action(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Managed action",
-            Language::Indonesian => "Aksi terkelola",
-            Language::German => "Verwaltete Aktion",
-        }
-    }
-
-    pub fn action(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Action",
-            Language::Indonesian => "Aksi",
-            Language::German => "Aktion",
-        }
-    }
-
-    pub fn select_or_type_action(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Select or type an action",
-            Language::Indonesian => "Pilih atau ketik aksi",
-            Language::German => "Aktion auswählen oder eingeben",
-        }
-    }
-
-    pub fn action_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => "cluster-status",
-            Language::Indonesian => "cluster-status",
-            Language::German => "cluster-status",
-        }
-    }
-
-    pub fn command_checkbox(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Run a direct program when this snippet matches",
-            Language::Indonesian => "Jalankan program langsung saat cuplikan ini cocok",
-            Language::German => "Führen Sie ein direktes Programm aus, wenn dieses Snippet passt",
-        }
-    }
-
-    pub fn command_help(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Only the configured executable is run; shell syntax is never interpreted. Arguments are entered one per line.",
-            Language::Indonesian => "Hanya program yang dikonfigurasi yang dijalankan; sintaks shell tidak pernah ditafsirkan. Masukkan satu argumen per baris.",
-            Language::German => "Nur die konfigurierte ausführbare Datei wird ausgeführt; Shell-Syntax wird nie interpretiert. Argumente werden eine pro Zeile eingegeben.",
-        }
-    }
-
     pub fn command_warning(&self) -> &'static str {
         match self.lang {
             Language::English => "Warning: this runs a local executable when the trigger matches.",
@@ -542,46 +142,6 @@ impl Strings {
             Language::German => {
                 "Warnung: Dieses Programm wird ausgeführt, wenn der Auslöser passt."
             }
-        }
-    }
-
-    pub fn program(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Program",
-            Language::Indonesian => "Program",
-            Language::German => "Programm",
-        }
-    }
-
-    pub fn program_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => "uname",
-            Language::Indonesian => "uname",
-            Language::German => "uname",
-        }
-    }
-
-    pub fn timeout_ms(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Timeout ms",
-            Language::Indonesian => "Batas waktu (ms)",
-            Language::German => "Zeitüberschreitung ms",
-        }
-    }
-
-    pub fn cache_ms(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Cache ms",
-            Language::Indonesian => "Cache (ms)",
-            Language::German => "Cache ms",
-        }
-    }
-
-    pub fn arguments(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Arguments",
-            Language::Indonesian => "Argumen",
-            Language::German => "Argumente",
         }
     }
 
@@ -598,15 +158,4 @@ impl Strings {
             }
         }
     }
-}
-
-crate::texts! {
-    advanced_options =>
-        "Advanced options",
-        "Erweiterte Optionen",
-        "Opsi lanjutan";
-    advanced_options_in_use =>
-        "Advanced options (in use)",
-        "Erweiterte Optionen (verwendet)",
-        "Opsi lanjutan (digunakan)";
 }

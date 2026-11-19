@@ -1,38 +1,6 @@
 use super::{Language, Strings};
 
 impl Strings {
-    pub fn filtered_snippets(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Filtered snippets",
-            Language::Indonesian => "Cuplikan terfilter",
-            Language::German => "Gefilterte Snippets",
-        }
-    }
-
-    pub fn new_button(&self) -> &'static str {
-        match self.lang {
-            Language::English => "+ New",
-            Language::Indonesian => "+ Baru",
-            Language::German => "+ Neu",
-        }
-    }
-
-    pub fn new_tooltip(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Create a new snippet (Ctrl+N)",
-            Language::Indonesian => "Buat cuplikan baru (Ctrl+N)",
-            Language::German => "Ein neues Snippet erstellen (Strg+N)",
-        }
-    }
-
-    pub fn duplicate(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Duplicate",
-            Language::Indonesian => "Duplikat",
-            Language::German => "Duplizieren",
-        }
-    }
-
     pub fn undo_button(&self, count: usize) -> String {
         match self.lang {
             // The history depth is useful once there is something to undo;
@@ -42,22 +10,6 @@ impl Strings {
             Language::English => format!("Undo ({count})"),
             Language::Indonesian => format!("Urungkan ({count})"),
             Language::German => format!("Rückgängig ({count})"),
-        }
-    }
-
-    pub fn all(&self) -> &'static str {
-        match self.lang {
-            Language::English => "All",
-            Language::Indonesian => "Semua",
-            Language::German => "Alle",
-        }
-    }
-
-    pub fn no_snippets(&self) -> &'static str {
-        match self.lang {
-            Language::English => "No snippets yet.",
-            Language::Indonesian => "Belum ada cuplikan.",
-            Language::German => "Noch keine Snippets.",
         }
     }
 
@@ -86,14 +38,6 @@ impl Strings {
             Language::English => format!("No snippets in {}.", category),
             Language::Indonesian => format!("Tidak ada cuplikan di {}.", category),
             Language::German => format!("Keine Snippets in {}.", category),
-        }
-    }
-
-    pub fn clear_filters(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Clear filters",
-            Language::Indonesian => "Bersihkan filter",
-            Language::German => "Filter löschen",
         }
     }
 }

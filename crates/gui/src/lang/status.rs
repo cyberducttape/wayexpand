@@ -2,53 +2,6 @@ use super::{Language, Strings};
 
 impl Strings {
     // Status line
-    pub fn status_diagnostics_refreshed(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Diagnostics refreshed",
-            Language::Indonesian => "Diagnostik diperbarui",
-            Language::German => "Diagnose aktualisiert",
-        }
-    }
-
-    pub fn diagnostics_running(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Running diagnostics…",
-            Language::Indonesian => "Menjalankan diagnostik…",
-            Language::German => "Diagnose läuft…",
-        }
-    }
-
-    pub fn daemon_reloading(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Reloading daemon configuration…",
-            Language::Indonesian => "Memuat ulang konfigurasi daemon…",
-            Language::German => "Daemon-Konfiguration wird neu geladen…",
-        }
-    }
-
-    pub fn config_reload_running(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Loading configuration…",
-            Language::Indonesian => "Memuat konfigurasi…",
-            Language::German => "Konfiguration wird geladen…",
-        }
-    }
-
-    pub fn status_reload_discarded_due_edits(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Reload discarded because the configuration or draft changed while loading",
-            Language::Indonesian => "Pemuatan ulang dibuang karena konfigurasi atau draf berubah saat dimuat",
-            Language::German => "Neuladen verworfen, da sich Konfiguration oder Entwurf während des Ladens geändert hat",
-        }
-    }
-
-    pub fn daemon_control_running(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Updating daemon state…",
-            Language::Indonesian => "Memperbarui status daemon…",
-            Language::German => "Daemon-Status wird aktualisiert…",
-        }
-    }
 
     pub fn background_queue_full(&self) -> &'static str {
         match self.lang {
@@ -59,14 +12,6 @@ impl Strings {
             Language::German => {
                 "Hintergrundwarteschlange ausgelastet; bitte gleich erneut versuchen"
             }
-        }
-    }
-
-    pub fn background_runtime_stopped(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Background runtime stopped unexpectedly",
-            Language::Indonesian => "Runtime latar belakang berhenti secara tak terduga",
-            Language::German => "Hintergrunddienst wurde unerwartet beendet",
         }
     }
 
@@ -106,14 +51,6 @@ impl Strings {
         }
     }
 
-    pub fn status_settings_saved(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Settings saved atomically",
-            Language::Indonesian => "Pengaturan disimpan secara atomik",
-            Language::German => "Einstellungen atomar gespeichert",
-        }
-    }
-
     pub fn status_appearance_save_failed(&self, detail: &str) -> String {
         match self.lang {
             Language::English => {
@@ -136,35 +73,11 @@ impl Strings {
         }
     }
 
-    pub fn status_font_size_saved(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Font size saved",
-            Language::Indonesian => "Ukuran huruf disimpan",
-            Language::German => "Schriftgröße gespeichert",
-        }
-    }
-
-    pub fn status_import_loaded(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Espanso library loaded for review",
-            Language::Indonesian => "Pustaka Espanso dimuat untuk ditinjau",
-            Language::German => "Espanso-Bibliothek zur Prüfung geladen",
-        }
-    }
-
     pub fn status_import_failed(&self, detail: &str) -> String {
         match self.lang {
             Language::English => format!("Import failed: {detail}"),
             Language::Indonesian => format!("Impor gagal: {detail}"),
             Language::German => format!("Import fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_import_needs_clean_draft(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Save or discard the current draft before importing",
-            Language::Indonesian => "Simpan atau buang draf saat ini sebelum mengimpor",
-            Language::German => "Aktuellen Entwurf vor dem Import speichern oder verwerfen",
         }
     }
 
@@ -200,14 +113,6 @@ impl Strings {
             Language::German => format!(
                 "Espanso-Import angewendet: {fully_migrated} vollständig importiert, {with_warnings} mit Warnungen, {unsupported} nicht unterstützt"
             ),
-        }
-    }
-
-    pub fn status_config_reloaded(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Configuration reloaded",
-            Language::Indonesian => "Konfigurasi dimuat ulang",
-            Language::German => "Konfiguration neu geladen",
         }
     }
 
@@ -291,22 +196,6 @@ impl Strings {
         }
     }
 
-    pub fn status_saving(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Saving configuration…",
-            Language::Indonesian => "Menyimpan konfigurasi…",
-            Language::German => "Konfiguration wird gespeichert…",
-        }
-    }
-
-    pub fn status_save_busy(&self) -> &'static str {
-        match self.lang {
-            Language::English => "A save is already in progress",
-            Language::Indonesian => "Penyimpanan sedang berlangsung",
-            Language::German => "Ein Speichervorgang läuft bereits",
-        }
-    }
-
     pub fn status_save_before_matcher_preview(&self) -> &'static str {
         match self.lang {
             Language::English => {
@@ -321,30 +210,6 @@ impl Strings {
         }
     }
 
-    pub fn status_save_completed_with_newer_edits(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Save completed; newer edits remain unsaved",
-            Language::Indonesian => "Penyimpanan selesai; suntingan yang lebih baru belum disimpan",
-            Language::German => "Gespeichert; neuere Änderungen sind noch nicht gespeichert",
-        }
-    }
-
-    pub fn status_snippet_saved(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Snippet saved atomically",
-            Language::Indonesian => "Cuplikan disimpan secara atomik",
-            Language::German => "Snippet atomar gespeichert",
-        }
-    }
-
-    pub fn status_nothing_to_undo(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Nothing to undo",
-            Language::Indonesian => "Tidak ada yang bisa diurungkan",
-            Language::German => "Nichts zum Rückgängigmachen",
-        }
-    }
-
     pub fn status_undo_save_failed(&self, detail: &str) -> String {
         match self.lang {
             Language::English => format!("Undo save failed: {detail}"),
@@ -353,35 +218,11 @@ impl Strings {
         }
     }
 
-    pub fn status_undone(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Undid the last saved change",
-            Language::Indonesian => "Perubahan tersimpan terakhir diurungkan",
-            Language::German => "Letzte gespeicherte Änderung rückgängig gemacht",
-        }
-    }
-
-    pub fn status_created(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Created a new snippet",
-            Language::Indonesian => "Cuplikan baru dibuat",
-            Language::German => "Neues Snippet erstellt",
-        }
-    }
-
     pub fn status_create_failed(&self, detail: &str) -> String {
         match self.lang {
             Language::English => format!("Create failed: {detail}"),
             Language::Indonesian => format!("Gagal membuat: {detail}"),
             Language::German => format!("Erstellen fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_duplicated(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Duplicated snippet",
-            Language::Indonesian => "Cuplikan diduplikasi",
-            Language::German => "Snippet dupliziert",
         }
     }
 
@@ -433,22 +274,6 @@ impl Strings {
         }
     }
 
-    pub fn status_paused(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Expansion paused",
-            Language::Indonesian => "Ekspansi dijeda",
-            Language::German => "Erweiterung angehalten",
-        }
-    }
-
-    pub fn status_resumed(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Expansion resumed",
-            Language::Indonesian => "Ekspansi dilanjutkan",
-            Language::German => "Erweiterung fortgesetzt",
-        }
-    }
-
     pub fn status_control_unavailable(&self, detail: &str) -> String {
         match self.lang {
             Language::English => {
@@ -470,14 +295,6 @@ impl Strings {
                 format!("\"{value}\" ditambahkan ke filter aplikasi")
             }
             Language::German => format!("\"{value}\" zum App-Filter hinzugefügt"),
-        }
-    }
-
-    pub fn status_window_unidentified(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Could not identify the focused window",
-            Language::Indonesian => "Tidak dapat mengidentifikasi jendela yang fokus",
-            Language::German => "Fokussiertes Fenster konnte nicht ermittelt werden",
         }
     }
 
@@ -507,75 +324,11 @@ impl Strings {
         }
     }
 
-    pub fn status_detection_failed(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Window detection failed unexpectedly",
-            Language::Indonesian => "Deteksi jendela gagal secara tak terduga",
-            Language::German => "Fenstererkennung ist unerwartet fehlgeschlagen",
-        }
-    }
-
-    pub fn status_preview_copied(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Preview copied to clipboard",
-            Language::Indonesian => "Pratinjau disalin ke papan klip",
-            Language::German => "Vorschau in die Zwischenablage kopiert",
-        }
-    }
-
-    pub fn status_enable_command_first(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Enable the dynamic command first",
-            Language::Indonesian => "Aktifkan perintah dinamis terlebih dahulu",
-            Language::German => "Zuerst den dynamischen Befehl aktivieren",
-        }
-    }
-
     pub fn status_command_failed(&self, detail: &str) -> String {
         match self.lang {
             Language::English => format!("Command failed: {detail}"),
             Language::Indonesian => format!("Perintah gagal: {detail}"),
             Language::German => format!("Befehl fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_command_preview_failed(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Command preview failed unexpectedly",
-            Language::Indonesian => "Pratinjau perintah gagal secara tak terduga",
-            Language::German => "Befehlsvorschau ist unerwartet fehlgeschlagen",
-        }
-    }
-
-    pub fn unsaved_change_kept(&self) -> &'static str {
-        match self.lang {
-            Language::English => "A change is not saved yet",
-            Language::Indonesian => "Ada perubahan yang belum disimpan",
-            Language::German => "Eine Änderung ist noch nicht gespeichert",
-        }
-    }
-
-    pub fn retry_save(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Retry save",
-            Language::Indonesian => "Coba simpan lagi",
-            Language::German => "Erneut speichern",
-        }
-    }
-
-    pub fn discard_unsaved_change(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Discard change",
-            Language::Indonesian => "Buang perubahan",
-            Language::German => "Änderung verwerfen",
-        }
-    }
-
-    pub fn status_unsaved_change_discarded(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Unsaved change discarded",
-            Language::Indonesian => "Perubahan yang belum disimpan dibuang",
-            Language::German => "Nicht gespeicherte Änderung verworfen",
         }
     }
 
