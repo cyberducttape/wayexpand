@@ -125,6 +125,16 @@ supported end state before broad adoption:
 - [ ] Verify no input loss, stale expansion, unsafe replacement, stuck key,
       or restart-loop behavior.
 - [ ] Publish representative soak duration and results.
+- [x] Headless lifecycle soak against real output
+      (`scripts/test-kwin-e2e.sh lifecycle-soak`, 2 minutes in CI;
+      `E2E_SOAK_SECONDS` for longer runs). Each cycle checks the exact target
+      text after a normal expansion, a focus change, a reload, a daemon
+      `kill -9` and restart, an EIS revocation with a trigger in flight (no
+      output, no stale replay, reconnect), and window close/reopen; an
+      ordinary key after each expansion detects stuck modifiers. It found and
+      fixed a libei bug where a revoked EIS connection was never reconnected.
+      Remaining: compositor restart, suspend/resume, device reconnects, and
+      long runs on real hardware.
 - [x] `scripts/soak-daemon.sh` checks memory and descriptor growth under
       typing, reloads, and control requests (3 minutes in CI). Run the 24 h /
       72 h release soak on real hardware and record the results; it does not

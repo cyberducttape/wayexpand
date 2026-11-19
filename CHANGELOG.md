@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed: when the compositor closed or revoked the libei (EIS) connection, the
+  daemon kept the dead connection and refused every later expansion until it
+  was restarted. A transport failure found while checking the text is now
+  retryable, so the daemon reconnects; nothing is typed for the failed
+  attempt and it is not replayed.
+- CI now runs a two-minute lifecycle soak against real output in headless KWin.
 - Fixed: with several keyboard layouts configured on KDE, the libei keystroke
   route refused every expansion after the first layout switch until the
   daemon restarted. It now follows KWin's active layout after a switch, and
