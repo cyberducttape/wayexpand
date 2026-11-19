@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed: when the compositor closed or revoked the libei (EIS) connection, the
+  daemon kept the dead connection and refused every later expansion until it
+  was restarted. A transport failure found while checking the text is now
+  retryable, so the daemon reconnects; nothing is typed for the failed
+  attempt and it is not replayed.
+- CI now runs a two-minute lifecycle soak under headless KWin and Sway.
 - The GUI snippet list now marks snippets the current typing route will refuse
   ("too long", "won't type", "no cursor") or types only on some keyboard
   layouts ("layout"), with an explanation on hover and in the editor preview.
