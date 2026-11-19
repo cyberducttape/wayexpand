@@ -795,9 +795,10 @@ impl GuiApp {
                 P::NoTypingRoute => (S::NeedsSetup, palette.warning),
                 P::InstallationIncomplete => (S::NeedsSetup, palette.warning),
                 P::NoEnabledExpansions => (S::NotSetUp, palette.warning),
-                P::FieldCannotReplace | P::SensitiveField | P::TerminalRouteNoInput => {
-                    (S::Limited, palette.warning)
-                }
+                P::FieldCannotReplace
+                | P::SensitiveField
+                | P::TerminalRouteNoInput
+                | P::ApplicationOutsideScope => (S::Limited, palette.warning),
                 P::ApplicationDeliveryUnverified
                 | P::IbusInputNotObserved
                 | P::FieldTextMismatch

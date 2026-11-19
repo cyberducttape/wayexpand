@@ -13,6 +13,24 @@ impl Strings {
         }
     }
 
+    pub(crate) fn why_app_scope_pattern(&self) -> &'static str {
+        use Language::{English as En, German as De, Indonesian as Id};
+        match self.lang {
+            En => "Trigger match: blocked because this app is outside the active capture allowlist.",
+            De => "Trigger-Abgleich: gesperrt, weil diese App nicht in der aktiven Erfassungsliste steht.",
+            Id => "Pencocokan pemicu: diblokir karena aplikasi ini tidak ada dalam daftar izin penangkapan aktif.",
+        }
+    }
+
+    pub(crate) fn why_app_scope_delivery(&self) -> &'static str {
+        use Language::{English as En, German as De, Indonesian as Id};
+        match self.lang {
+            En => "Application text: no replacement output was attempted in this app.",
+            De => "Anwendungstext: In dieser App wurde keine Ersetzung ausgegeben.",
+            Id => "Teks aplikasi: tidak ada keluaran pengganti yang dicoba di aplikasi ini.",
+        }
+    }
+
     pub(crate) fn why_focus_scope_delivery(&self) -> &'static str {
         use Language::{English as En, German as De, Indonesian as Id};
         match self.lang {
@@ -469,6 +487,15 @@ impl Strings {
             (Problem::TerminalFocusUnknown, Id) => {
                 "Rute khusus terminal ditutup dengan aman karena WayExpand tidak dapat mengenali aplikasi yang sedang aktif."
             }
+            (Problem::ApplicationOutsideScope, En) => {
+                "Automatic expansion is not enabled for this app on the current typing route."
+            }
+            (Problem::ApplicationOutsideScope, De) => {
+                "Automatische Textersetzung ist für diese App über den aktuellen Eingabeweg nicht aktiviert."
+            }
+            (Problem::ApplicationOutsideScope, Id) => {
+                "Ekspansi otomatis untuk aplikasi ini tidak diaktifkan pada rute pengetikan saat ini."
+            }
             (Problem::TerminalCompositorIdentity, En) => {
                 "WayExpand cannot verify this terminal, so automatic expansion is paused here."
             }
@@ -699,6 +726,15 @@ impl Strings {
             }
             (Problem::TerminalFocusUnknown, Id) => {
                 "Solusi sementara: buka Quick Picker, salin cuplikan, lalu tempelkan di terminal. Pencocokan otomatis diblokir sampai WayExpand dapat mengenali aplikasi yang aktif. Untuk mendiagnosisnya, fokuskan terminal dan jalankan `wayexpand debug --focused-app-id --json`; jika `focused_app_id` bernilai null, ikuti ID masalah dan saran tindakannya. Jangan izinkan compositor atau judul jendela. Uji kembali setelah ID aplikasi terminal terverifikasi tersedia."
+            }
+            (Problem::ApplicationOutsideScope, En) => {
+                "Copy a snippet with Quick Picker and paste it here. The current route only matches apps in its allowlist; raw keyboard capture can still observe keys in other apps, including password fields. If IBus is offered below, guided setup can test whether this app supports safe replacement."
+            }
+            (Problem::ApplicationOutsideScope, De) => {
+                "Kopieren Sie ein Snippet mit dem Schnellwähler und fügen Sie es hier ein. Der aktuelle Eingabeweg gleicht nur Apps in seiner Zulassungsliste ab; die rohe Tastaturerfassung kann trotzdem Eingaben in anderen Apps sehen, auch in Passwortfeldern. Wenn unten IBus angeboten wird, können Sie mit der geführten Einrichtung testen, ob diese App sichere Ersetzungen unterstützt."
+            }
+            (Problem::ApplicationOutsideScope, Id) => {
+                "Salin cuplikan dengan Quick Picker lalu tempel di sini. Rute saat ini hanya mencocokkan aplikasi dalam daftar izinnya; penangkapan keyboard mentah tetap dapat melihat ketikan di aplikasi lain, termasuk kolom sandi. Jika IBus ditawarkan di bawah, penyiapan terpandu dapat menguji apakah aplikasi ini mendukung penggantian yang aman."
             }
             (Problem::TerminalCompositorIdentity, En) => {
                 "Use Quick Picker to copy a snippet and paste it in this terminal. Open Diagnostics for the detailed explanation."
