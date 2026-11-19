@@ -2417,6 +2417,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         window_process_identity_state: None,
         inject_atomic_replace: Some(false),
         inject_full_unicode: Some(true),
+        inject_layout_checked_text: None,
         inject_cursor_reposition: Some(true),
         inject_key_passthrough: Some(true),
         replacement_assurance: Some(runtime::ReplacementAssurance::Unverified),
@@ -4861,4 +4862,65 @@ fn header_shows_the_quick_picker_apart_from_typed_triggers() {
         app.picker_readiness(),
         PickerReadiness::Unavailable(CopyReason::NotAtomic)
     );
+}
+
+#[test]
+fn snippet_list_route_verdicts_follow_the_daemons_output_route() {
+    use wayexpand_core::{RouteFit, RouteLimit};
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-route-fit-{}.toml",
+        std::process::id()
+    ));
+    fs::write(
+        &path,
+        "[[expansion]]\ntrigger = \":ok\"\nreplacement = \"Thanks\"\n\n\
+         [[expansion]]\ntrigger = \":de\"\nreplacement = \"Grüße\"\n\n\
+         [[expansion]]\ntrigger = \":long\"\nreplacement = \"Best regards, Ada\"\n\n\
+         [[expansion]]\ntrigger = \":cmd\"\nreplacement = \"\"\n[expansion.command]\nprogram = \"/bin/date\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    let _ = fs::remove_file(&path);
+
+    // Unknown route: no verdicts, so nothing is claimed.
+    app.daemon_capabilities = None;
+    assert!(app.route_fits().is_none());
+
+    // A keysym route that checks the active layout, limited to 8 characters.
+    app.daemon_capabilities = Some(runtime::DaemonCapabilities {
+        injection_mode: Some("libei keysym fallback"),
+        injection_max_text_chars: Some(8),
+        inject_full_unicode: Some(false),
+        inject_layout_checked_text: Some(true),
+        ..runtime::DaemonCapabilities::default()
+    });
+    let fits = app.route_fits().unwrap().to_vec();
+    assert_eq!(fits[0], RouteFit::Types);
+    assert_eq!(fits[1], RouteFit::DependsOnLayout);
+    assert!(matches!(
+        fits[2],
+        RouteFit::Refused(RouteLimit::TooLong { chars: 17, max: 8 })
+    ));
+    assert_eq!(fits[3], RouteFit::CheckedWhenUsed);
+    assert!(app.route_badge(fits[0]).is_none());
+    assert!(!app.route_badge(fits[1]).unwrap().warning);
+    assert!(app.route_badge(fits[2]).unwrap().warning);
+    let hint = app.route_fit_hint(fits[2]).unwrap();
+    assert!(hint.contains("17") && hint.contains('8'), "{hint}");
+    assert!(
+        !hint.contains("Best regards"),
+        "hints never repeat snippet text"
+    );
+
+    // A daemon that does not report layout checking is ASCII-only.
+    app.daemon_capabilities = Some(runtime::DaemonCapabilities {
+        injection_mode: Some("libei keysym fallback"),
+        inject_full_unicode: Some(false),
+        ..runtime::DaemonCapabilities::default()
+    });
+    assert!(matches!(
+        app.route_fits().unwrap()[1],
+        RouteFit::Refused(RouteLimit::Unicode { position: 3, .. })
+    ));
 }

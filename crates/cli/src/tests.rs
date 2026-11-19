@@ -813,6 +813,7 @@ fn status_json_matches_documented_stable_contract() {
          window_identity_exact=false\n\
          inject_atomic_replace=true\n\
          inject_full_unicode=true\n\
+         inject_layout_checked_text=false\n\
          inject_cursor_reposition=false\n\
          inject_key_passthrough=false\n\
          inject_insertion_mode=ei_text\n\

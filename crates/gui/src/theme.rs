@@ -657,6 +657,17 @@ pub struct SnippetRow<'a> {
     /// Hover text for the status dot, already chosen by the caller for the
     /// current `enabled` value.
     pub toggle_hint: &'a str,
+    /// A short, already translated note that the current output route will
+    /// refuse this snippet (`warning`) or types it only on some layouts.
+    pub route_badge: Option<RouteBadge<'a>>,
+}
+
+/// A snippet-list note about the current output route.
+#[derive(Clone, Copy)]
+pub struct RouteBadge<'a> {
+    pub label: &'a str,
+    /// The route refuses the snippet, rather than depending on the layout.
+    pub warning: bool,
 }
 
 /// The two independently clickable zones of a `snippet_row`: the row body
@@ -749,6 +760,13 @@ pub fn snippet_row_scaled(
         });
         let badge_reserve = if row.command_backed || row.generated_only {
             40.0 * scale
+        } else if let Some(badge) = row.route_badge {
+            let font = FontId::new(10.0 * scale, FontFamily::Proportional);
+            painter
+                .layout_no_wrap(badge.label.to_owned(), font, Color32::TRANSPARENT)
+                .size()
+                .x
+                + 22.0 * scale
         } else {
             0.0
         };
@@ -813,6 +831,35 @@ pub fn snippet_row_scaled(
                 "file",
                 badge_font,
                 palette.accent,
+            );
+        }
+        if let (Some(badge), false, false) =
+            (row.route_badge, row.command_backed, row.generated_only)
+        {
+            let badge_font = FontId::new(10.0 * scale, FontFamily::Proportional);
+            let pad = Vec2::new(6.0, 2.0) * scale;
+            let text_galley = painter.layout_no_wrap(
+                badge.label.to_owned(),
+                badge_font.clone(),
+                Color32::TRANSPARENT,
+            );
+            let badge_size = text_galley.size() + pad * 2.0;
+            let badge_rect = egui::Rect::from_min_size(
+                trigger_pos + Vec2::new(trigger_width + 8.0 * scale, -1.0),
+                badge_size,
+            );
+            let color = if badge.warning {
+                palette.warning
+            } else {
+                palette.muted
+            };
+            painter.rect_filled(badge_rect, CornerRadius::same(255), tint(color, 30));
+            painter.text(
+                badge_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                badge.label,
+                badge_font,
+                color,
             );
         }
         if let Some((galley, chip_rect, pad)) = category_chip {
@@ -1006,6 +1053,7 @@ mod tests {
                         category: "Demo",
                         detail_placeholder: "No description",
                         toggle_hint: "Click to enable",
+                        route_badge: None,
                     },
                     1.0,
                 );

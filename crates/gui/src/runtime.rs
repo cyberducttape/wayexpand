@@ -219,6 +219,7 @@ pub(crate) struct DaemonCapabilities {
     pub window_identity_exact: Option<bool>,
     pub inject_atomic_replace: Option<bool>,
     pub inject_full_unicode: Option<bool>,
+    pub inject_layout_checked_text: Option<bool>,
     pub inject_cursor_reposition: Option<bool>,
     pub inject_key_passthrough: Option<bool>,
     pub replacement_assurance: Option<ReplacementAssurance>,
@@ -284,6 +285,22 @@ pub(crate) enum OutputRefusal {
 }
 
 impl DaemonCapabilities {
+    /// The connected output route's typing limits, for checking a snippet
+    /// with the same rule the daemon applies before typing. `None` until the
+    /// daemon reports its route. A daemon that predates
+    /// `inject_layout_checked_text` is treated as ASCII-only, which is how
+    /// such a daemon behaves.
+    pub fn output_capabilities(&self) -> Option<wayexpand_core::InjectorCapabilities> {
+        self.injection_mode?;
+        Some(wayexpand_core::InjectorCapabilities {
+            max_text_chars: self.injection_max_text_chars.unwrap_or(0),
+            full_unicode: self.inject_full_unicode?,
+            layout_checked_text: self.inject_layout_checked_text.unwrap_or(false),
+            cursor_reposition: self.inject_cursor_reposition.unwrap_or(false),
+            ..wayexpand_core::InjectorCapabilities::default()
+        })
+    }
+
     pub fn insertion_plan(
         &self,
         output_characters: usize,
@@ -624,6 +641,10 @@ impl DaemonCapabilities {
                 &mut capabilities.inject_atomic_replace,
             ),
             ("inject_full_unicode", &mut capabilities.inject_full_unicode),
+            (
+                "inject_layout_checked_text",
+                &mut capabilities.inject_layout_checked_text,
+            ),
             (
                 "inject_cursor_reposition",
                 &mut capabilities.inject_cursor_reposition,

@@ -10,6 +10,11 @@ All notable changes to WayExpand are documented here.
   retryable, so the daemon reconnects; nothing is typed for the failed
   attempt and it is not replayed.
 - CI now runs a two-minute lifecycle soak under headless KWin and Sway.
+- The GUI snippet list now marks snippets the current typing route will refuse
+  ("too long", "won't type", "no cursor") or types only on some keyboard
+  layouts ("layout"), with an explanation on hover and in the editor preview.
+  It uses the same check as the service and `wayexpand explain`. Daemon status
+  reports the new `inject_layout_checked_text` field.
 - Keystroke output now types non-ASCII text the active keyboard layout
   produces directly, such as umlauts, accented letters, `ß`, `€` and Cyrillic,
   instead of refusing everything outside ASCII. A character the layout cannot

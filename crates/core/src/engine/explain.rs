@@ -496,8 +496,56 @@ fn diagnostic_budget_exceeded(typed: &str) -> Explanation {
     explanation
 }
 
+/// Whether an output route can type a snippet as configured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteFit {
+    /// The route can type the replacement as rendered now.
+    Types,
+    /// Non-ASCII text on a layout-checked route: typed only when the active
+    /// keyboard layout produces every character directly.
+    DependsOnLayout,
+    /// The route refuses the replacement before typing.
+    Refused(RouteLimit),
+    /// Command or form output, or a template that cannot be rendered ahead
+    /// of time: the route checks the text when the snippet fires.
+    CheckedWhenUsed,
+}
+
 /// Append the organization-policy check and return the explanation.
 impl ExpansionEngine {
+    /// Whether `capabilities` can type snippet `index` as configured: the
+    /// same check the daemon makes before typing, applied to the replacement
+    /// rendered now. `explain` and the GUI snippet list both use it.
+    pub fn route_fit(&self, index: usize, capabilities: &InjectorCapabilities) -> RouteFit {
+        let Some(expansion) = self.config.expansion.get(index) else {
+            return RouteFit::CheckedWhenUsed;
+        };
+        if expansion.command.is_some()
+            || self
+                .validated
+                .form_fields
+                .get(index)
+                .is_some_and(Option::is_some)
+        {
+            return RouteFit::CheckedWhenUsed;
+        }
+        let Ok((rendered, cursor_offset)) = self.render_replacement(index) else {
+            return RouteFit::CheckedWhenUsed;
+        };
+        match route_limit(capabilities, &rendered, None, cursor_offset) {
+            Some(limit) => RouteFit::Refused(limit),
+            // Whether the active layout reaches every character is checked
+            // when the expansion fires; it cannot be known ahead of time.
+            None if !capabilities.full_unicode
+                && capabilities.layout_checked_text
+                && !rendered.is_ascii() =>
+            {
+                RouteFit::DependsOnLayout
+            }
+            None => RouteFit::Types,
+        }
+    }
+
     /// Add whether the output route can type the snippet `explanation`
     /// resolved to exactly as written: the same check the daemon makes
     /// before typing. Command and form snippets are skipped, since their
@@ -510,51 +558,32 @@ impl ExpansionEngine {
         let Some(trigger) = explanation.snippet.as_deref() else {
             return;
         };
-        let Some((index, expansion)) = self
+        let Some(index) = self
             .config
             .expansion
             .iter()
-            .enumerate()
-            .find(|(_, expansion)| expansion.answers_to(trigger))
+            .position(|expansion| expansion.answers_to(trigger))
         else {
             return;
         };
-        if expansion.command.is_some()
-            || self
-                .validated
-                .form_fields
-                .get(index)
-                .is_some_and(Option::is_some)
-        {
-            return;
-        }
-        let Ok((rendered, cursor_offset)) = self.render_replacement(index) else {
-            return;
-        };
         let mode = capabilities.insertion_mode;
-        match route_limit(capabilities, &rendered, None, cursor_offset) {
-            // Whether the active layout reaches every character is checked
-            // when the expansion fires; explain cannot see that layout.
-            None if !capabilities.full_unicode
-                && capabilities.layout_checked_text
-                && !rendered.is_ascii() =>
-            {
-                explanation.push(
-                    "output route",
-                    CheckStatus::Info,
-                    format!(
-                        "{mode} types non-ASCII characters only when the active keyboard \
+        match self.route_fit(index, capabilities) {
+            RouteFit::CheckedWhenUsed => {}
+            RouteFit::DependsOnLayout => explanation.push(
+                "output route",
+                CheckStatus::Info,
+                format!(
+                    "{mode} types non-ASCII characters only when the active keyboard \
                          layout produces them directly; a character it cannot type is \
                          refused before anything is erased"
-                    ),
-                )
-            }
-            None => explanation.push(
+                ),
+            ),
+            RouteFit::Types => explanation.push(
                 "output route",
                 CheckStatus::Pass,
                 format!("{mode} can type the replacement"),
             ),
-            Some(RouteLimit::Unicode {
+            RouteFit::Refused(RouteLimit::Unicode {
                 character,
                 position,
             }) => explanation.push(
@@ -573,7 +602,9 @@ impl ExpansionEngine {
                     }
                 ),
             ),
-            Some(limit) => explanation.push("output route", CheckStatus::Fail, limit.message(mode)),
+            RouteFit::Refused(limit) => {
+                explanation.push("output route", CheckStatus::Fail, limit.message(mode))
+            }
         }
     }
 }

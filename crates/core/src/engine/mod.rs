@@ -20,7 +20,7 @@ pub use commands::{
     CommandErrorKind, CommandMetrics, ExpansionError, HotkeyError, HotkeyResult,
     ProcessWaitFailure, ProcessWaitOperation,
 };
-pub use explain::{CheckStatus, ExplainCheck, Explanation};
+pub use explain::{CheckStatus, ExplainCheck, Explanation, RouteFit};
 pub use insertion::InsertError;
 pub use state::{
     ExpansionResult, InputEvent, MatchPlan, PendingExpansionDispatch, PendingExpansionResult,

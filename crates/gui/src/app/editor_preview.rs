@@ -180,6 +180,36 @@ impl GuiApp {
                                 } => palette.danger,
                             };
                             ui.colored_label(color, self.strings.insertion_plan_notice(plan));
+                            // Command and form output is only known when the
+                            // snippet runs; the daemon checks it then.
+                            let static_draft = self.draft.as_ref().filter(|draft| {
+                                !draft.command_enabled
+                                    && draft.delivery
+                                        != wayexpand_core::ExpansionDelivery::GenerateOnly
+                                    && !draft.replacement.contains("{{field:")
+                            });
+                            if let (Some(draft), Some(output)) =
+                                (static_draft, capabilities.output_capabilities())
+                            {
+                                let delimiter = (draft.match_mode
+                                    == wayexpand_core::MatchMode::WordBoundary)
+                                    .then_some(' ');
+                                let fit = crate::app::route_fit::rendered_route_fit(
+                                    &output,
+                                    &preview_text,
+                                    delimiter,
+                                    None,
+                                );
+                                if let Some(hint) = self.route_fit_hint(fit) {
+                                    let color =
+                                        if matches!(fit, wayexpand_core::RouteFit::Refused(_)) {
+                                            palette.warning
+                                        } else {
+                                            palette.muted
+                                        };
+                                    ui.colored_label(color, hint);
+                                }
+                            }
                         }
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(&preview_text).monospace());
