@@ -169,10 +169,14 @@ this combination is certified.
 Single-layout `us`, `de`, `fr`, `us(altgr-intl)`, and `ru` sessions type the
 ASCII each layout can reach exactly, including AltGr symbols on `de` and
 characters that are also dead keys on `us(altgr-intl)` (headless, CI job
-`kwin-e2e`). Keystroke routes type only ASCII, so non-ASCII text is refused
-even on a layout that has the key (for example `ü` on `de`). ASCII that a
-layout offers only as a dead key (`^` and `` ` `` on `de`) is refused rather
-than composed, and Latin letters are refused on `ru`.
+`kwin-e2e`). The libei keystroke fallback also types non-ASCII characters the
+active layout produces directly, including through AltGr: `Grüße ß €` on `de`,
+`éèàçù` on `fr`, `äéñßøå` on `us(altgr-intl)`, and Cyrillic on `ru`. A
+character the layout offers only through a dead key (`^`, `` ` `` and `ê` on
+`de`) is refused rather than composed, as are Latin letters on `ru`, before
+anything is erased. The wlroots virtual-keyboard route uploads its own keymap
+for each replacement and so types any non-control character regardless of the
+user's layout (headless Sway `unicode-insertion`).
 
 The integration procedure is in
 [`docs/INTEGRATION_TESTING.md`](INTEGRATION_TESTING.md). A passing unit test,

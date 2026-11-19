@@ -533,6 +533,22 @@ impl ExpansionEngine {
         };
         let mode = capabilities.insertion_mode;
         match route_limit(capabilities, &rendered, None, cursor_offset) {
+            // Whether the active layout reaches every character is checked
+            // when the expansion fires; explain cannot see that layout.
+            None if !capabilities.full_unicode
+                && capabilities.layout_checked_text
+                && !rendered.is_ascii() =>
+            {
+                explanation.push(
+                    "output route",
+                    CheckStatus::Info,
+                    format!(
+                        "{mode} types non-ASCII characters only when the active keyboard \
+                         layout produces them directly; a character it cannot type is \
+                         refused before anything is erased"
+                    ),
+                )
+            }
             None => explanation.push(
                 "output route",
                 CheckStatus::Pass,

@@ -210,8 +210,8 @@ pub(super) fn transaction_texts(
 pub enum RouteLimit {
     /// More characters than the route accepts.
     TooLong { chars: usize, max: usize },
-    /// A character outside ASCII on a route that types through the keyboard
-    /// layout. `position` counts characters from 1.
+    /// A character outside ASCII on a keyboard route that does not check
+    /// text against the active layout. `position` counts characters from 1.
     Unicode { character: char, position: usize },
     /// The cursor must move back, and the route cannot move it.
     CursorMove,
@@ -262,7 +262,10 @@ pub fn route_limit(
             max: capabilities.max_text_chars,
         });
     }
-    if !capabilities.full_unicode {
+    // A layout-checked route has already verified every character against
+    // the active keymap in preflight; only an unchecked route is held to
+    // ASCII.
+    if !capabilities.full_unicode && !capabilities.layout_checked_text {
         if let Some((index, character)) = insert
             .chars()
             .chain(reinsert_after)
@@ -442,6 +445,39 @@ mod journal_tests {
             message: "simulated".into(),
             retryable: true,
         }
+    }
+
+    #[test]
+    fn layout_checked_routes_are_not_limited_to_ascii() {
+        let unchecked = InjectorCapabilities::default();
+        assert!(matches!(
+            route_limit(&unchecked, "grüße", None, None),
+            Some(RouteLimit::Unicode {
+                character: 'ü',
+                position: 3
+            })
+        ));
+        assert!(matches!(
+            route_limit(&unchecked, "привет", None, None),
+            Some(RouteLimit::Unicode { .. })
+        ));
+        // The backend's preflight checks each character against the active
+        // keymap, so the route limit does not second-guess it.
+        let checked = InjectorCapabilities {
+            layout_checked_text: true,
+            ..InjectorCapabilities::default()
+        };
+        assert_eq!(route_limit(&checked, "grüße", None, None), None);
+        assert_eq!(route_limit(&checked, "привет", Some('!'), None), None);
+        // Length limits still apply.
+        let paced = InjectorCapabilities {
+            max_text_chars: 3,
+            ..checked
+        };
+        assert!(matches!(
+            route_limit(&paced, "grüße", None, None),
+            Some(RouteLimit::TooLong { .. })
+        ));
     }
 
     #[test]

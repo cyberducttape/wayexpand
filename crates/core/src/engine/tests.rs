@@ -7307,6 +7307,28 @@ fn explain_reports_text_the_output_route_cannot_type() {
     );
     assert!(!detail.contains('ü'));
 
+    // A layout-checked route does not refuse it here: whether the active
+    // layout reaches each character is decided when the expansion fires.
+    let checked = InjectorCapabilities {
+        layout_checked_text: true,
+        ..keysym
+    };
+    let mut explanation = engine.explain(";x", "libei");
+    engine.explain_output_route(&mut explanation, &checked);
+    assert!(explanation.suppressed_by().is_none());
+    let route = explanation
+        .checks
+        .iter()
+        .find(|check| check.name == "output route")
+        .unwrap();
+    assert_eq!(route.status, CheckStatus::Info);
+    assert!(
+        route.detail.contains("active keyboard layout"),
+        "{}",
+        route.detail
+    );
+    assert!(!route.detail.contains('ü'));
+
     // ASCII passes; a full-Unicode route passes anything; too long fails.
     let engine = explain_engine("[[expansion]]\ntrigger = \";a\"\nreplacement = \"plain\"\n");
     let mut explanation = engine.explain(";a", "libei");

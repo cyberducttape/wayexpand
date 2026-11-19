@@ -1075,6 +1075,7 @@ impl TextInjector for InputMethodSource {
             // with the trigger, and delete + commit share one `done`.
             replacement_guarantee: wayexpand_core::ReplacementGuarantee::Atomic,
             full_unicode: true,
+            layout_checked_text: false,
             cursor_reposition: false,
             key_passthrough: false,
         }

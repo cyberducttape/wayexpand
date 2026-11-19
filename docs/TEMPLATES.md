@@ -60,8 +60,7 @@ replacement = "{{local_datetime:%F %H:%M %:z}}"     # 2026-10-09 08:05 -06:00
 
 `%-d`, `%-m`, `%-H`, `%-I` (any number with `-`) drop the leading zero:
 `%-m/%-d` is `10/9`. Names are always English, so a snippet renders the same
-on every machine; on keystroke routes, which type only ASCII, they always
-type. An unknown code is a configuration error.
+on every machine and, being ASCII, they type on every output route. An unknown code is a configuration error.
 
 ### Random values
 
