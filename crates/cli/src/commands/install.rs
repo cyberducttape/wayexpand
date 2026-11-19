@@ -987,14 +987,20 @@ fn replacement_consent_state(
 /// Choose the first repair that can unblock setup, rather than always
 /// printing `setup --apply` when the first failed check requires a different
 /// command. This is also serialized for automation clients.
+struct SetupActionContext<'a> {
+    activation_active: bool,
+    setup_backend: &'a str,
+    recommendation_backend: &'a str,
+    first_run_test_command: Option<&'a str>,
+}
+
 fn setup_next_action(
     integration: &[ReadinessCheck],
     operational: &[ReadinessCheck],
     terminal_match: &serde_json::Value,
     installation_ready: bool,
     route_available: bool,
-    setup_backend: &str,
-    recommendation_backend: &str,
+    context: SetupActionContext<'_>,
 ) -> (String, String) {
     if let Some(identity) = integration
         .iter()
@@ -1053,7 +1059,9 @@ fn setup_next_action(
     // An existing route is preserved by `setup` unless the user explicitly
     // chooses the recommendation. Do not tell them to repair IBus when the
     // activation command below will still configure a different backend.
-    if setup_backend == recommendation_backend && recommendation_backend == "ibus" {
+    if context.setup_backend == context.recommendation_backend
+        && context.recommendation_backend == "ibus"
+    {
         if let Some(check) = integration.iter().find(|check| {
             check.component.starts_with("ibus_route:")
                 && check.status == "fail"
@@ -1080,14 +1088,32 @@ fn setup_next_action(
             "No policy-allowed input route is ready; setup will report the missing route prerequisite.".into(),
         );
     }
-    let command = if setup_backend == "unavailable" {
+    if context.activation_active {
+        if let Some(command) = context.first_run_test_command {
+            return (
+                command.to_owned(),
+                "The selected input route is already running. Test a harmless trigger in the application you want to use; confirm the visible replacement there. Setup status alone does not verify application insertion.".into(),
+            );
+        }
+        return (
+            "wayexpand-gui".into(),
+            "The selected input route is already running, but there is no enabled global static snippet for the real-application test. Create or enable a harmless text snippet in the GUI, then test it in the target application.".into(),
+        );
+    }
+    let command = if context.setup_backend == "unavailable" {
         "wayexpand setup --apply".to_owned()
     } else {
-        format!("wayexpand setup --backend {setup_backend} --apply")
+        format!(
+            "wayexpand setup --backend {} --apply",
+            context.setup_backend
+        )
     };
     (
         command,
-        format!("Activate the {setup_backend} route; real application insertion still requires a separate test."),
+        format!(
+            "Activate the {} route; real application insertion still requires a separate test.",
+            context.setup_backend
+        ),
     )
 }
 
@@ -1136,26 +1162,42 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
         == Some("pass");
     let ready = installed && route_available && (!terminal_match_required || terminal_match_ok);
     let (ready_for_setup, preflight_state) = setup_preflight_fields(ready);
-    let (next_action, next_action_reason) = setup_next_action(
-        &integration,
-        &operational,
-        &terminal_match,
-        installed,
-        route_available,
-        setup_backend,
-        recommendation.backend.as_str(),
-    );
-    let activation_command = if setup_backend == "unavailable" {
-        "wayexpand setup --apply".to_owned()
-    } else {
-        format!("wayexpand setup --backend {setup_backend} --apply")
-    };
     let activation_active = activation_is_active(
         setup_backend,
         configured_backend,
         &ibus_report,
         daemon_status.as_ref(),
     );
+    let manual_test_command = first_run_test_trigger.as_deref().map(|trigger| {
+        format!(
+            "wayexpand debug --test {}",
+            crate::commands::shell_single_quote(trigger)
+        )
+    });
+    let test_preview_command = first_run_test_trigger.as_deref().map(|trigger| {
+        format!(
+            "wayexpand preview {}",
+            crate::commands::shell_single_quote(trigger)
+        )
+    });
+    let (next_action, next_action_reason) = setup_next_action(
+        &integration,
+        &operational,
+        &terminal_match,
+        installed,
+        route_available,
+        SetupActionContext {
+            activation_active,
+            setup_backend,
+            recommendation_backend: recommendation.backend.as_str(),
+            first_run_test_command: manual_test_command.as_deref(),
+        },
+    );
+    let activation_command = if setup_backend == "unavailable" {
+        "wayexpand setup --apply".to_owned()
+    } else {
+        format!("wayexpand setup --backend {setup_backend} --apply")
+    };
     let activation_state = if activation_active {
         "running"
     } else if configured_backend == Some(setup_backend) {
@@ -1174,18 +1216,6 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     let recommended_route_command = configured_backend
         .filter(|backend| *backend != recommendation.backend.as_str())
         .map(|_| "wayexpand setup --mode recommended --apply");
-    let manual_test_command = first_run_test_trigger.as_deref().map(|trigger| {
-        format!(
-            "wayexpand debug --test {}",
-            crate::commands::shell_single_quote(trigger)
-        )
-    });
-    let test_preview_command = first_run_test_trigger.as_deref().map(|trigger| {
-        format!(
-            "wayexpand preview {}",
-            crate::commands::shell_single_quote(trigger)
-        )
-    });
     if json {
         println!(
             "{}",
@@ -1717,6 +1747,59 @@ mod tests {
             setup_preflight_fields(false),
             (false, "prerequisites_incomplete")
         );
+    }
+
+    #[test]
+    fn setup_check_tests_an_active_route_instead_of_reapplying_it() {
+        let terminal_match = serde_json::json!({"status": "pass"});
+        let (command, reason) = setup_next_action(
+            &[],
+            &[],
+            &terminal_match,
+            true,
+            true,
+            SetupActionContext {
+                activation_active: true,
+                setup_backend: "evdev",
+                recommendation_backend: "ibus",
+                first_run_test_command: Some("wayexpand debug --test ';hello'"),
+            },
+        );
+        assert_eq!(command, "wayexpand debug --test ';hello'");
+        assert!(reason.contains("already running"));
+        assert!(reason.contains("does not verify application insertion"));
+
+        let (command, reason) = setup_next_action(
+            &[],
+            &[],
+            &terminal_match,
+            true,
+            true,
+            SetupActionContext {
+                activation_active: true,
+                setup_backend: "evdev",
+                recommendation_backend: "ibus",
+                first_run_test_command: None,
+            },
+        );
+        assert_eq!(command, "wayexpand-gui");
+        assert!(reason.contains("no enabled global static snippet"));
+
+        let (command, reason) = setup_next_action(
+            &[],
+            &[],
+            &terminal_match,
+            true,
+            true,
+            SetupActionContext {
+                activation_active: false,
+                setup_backend: "evdev",
+                recommendation_backend: "ibus",
+                first_run_test_command: Some("wayexpand debug --test ';hello'"),
+            },
+        );
+        assert_eq!(command, "wayexpand setup --backend evdev --apply");
+        assert!(reason.contains("Activate the evdev route"));
     }
 
     #[test]
