@@ -88,6 +88,11 @@ sink_text_input_active() {
 }
 
 start_sink() {
+    # The lifecycle soak closes and reopens these sinks in the same case
+    # directory. Remove the previous instance's state before launching so the
+    # readiness wait below cannot pass on stale JSON before the new window
+    # exists.
+    rm -f "$case_dir/$1.json"
     if [ "$e2e_input_source" = input-method ]; then
         "$bin/wx-e2e-sink" "$1" "$case_dir/$1.json" --text-input >>"$case_dir/$1.log" 2>&1 &
     else
