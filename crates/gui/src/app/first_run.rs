@@ -1012,8 +1012,11 @@ impl GuiApp {
                                 self.strings.onboarding_troubleshooting_title(),
                             );
                             ui.label(
-                                RichText::new(self.strings.onboarding_troubleshooting_steps())
-                                    .small(),
+                                RichText::new(crate::lang::fill(
+                                    self.strings.onboarding_troubleshooting_steps(),
+                                    &[&sample_trigger],
+                                ))
+                                .small(),
                             );
                         }
                     });
