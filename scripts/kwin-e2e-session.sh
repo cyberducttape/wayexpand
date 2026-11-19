@@ -30,12 +30,15 @@ e2e_input_source=${E2E_INPUT_SOURCE:-stdin}
 activate() {
     script="$case_dir/activate-$1.js"
     cat >"$script" <<EOF
-const target = workspace.windowList().find((window) => window.resourceClass === "$1" || window.desktopFileName === "$1");
+// The newest match: a window that just closed can still be listed.
+const target = workspace.windowList().filter((window) => window.resourceClass === "$1" || window.desktopFileName === "$1").pop();
 if (target) {
     workspace.activeWindow = target;
 }
 EOF
-    plugin="wx-e2e-activate-$$-$1"
+    # A unique name per call, so a reload never collides with a live plugin.
+    activate_seq=$((${activate_seq:-0} + 1))
+    plugin="wx-e2e-activate-$$-$1-$activate_seq"
     id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
         --method org.kde.kwin.Scripting.loadScript "$script" "$plugin" 2>>"$case_dir/kwin-script.log" |
         sed -n 's/^(\([0-9-]*\),)$/\1/p')
@@ -43,8 +46,10 @@ EOF
         log "could not load activation script for $1"
         return 1
     fi
-    gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$id" \
-        --method org.kde.kwin.Script.run >/dev/null 2>>"$case_dir/kwin-script.log"
+    # Scripting.start runs every loaded script that is not yet running;
+    # Script.run on a reused ID can silently do nothing.
+    gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+        --method org.kde.kwin.Scripting.start >/dev/null 2>>"$case_dir/kwin-script.log"
     gdbus call --session --dest org.kde.KWin --object-path /Scripting \
         --method org.kde.kwin.Scripting.unloadScript "$plugin" >/dev/null 2>>"$case_dir/kwin-script.log"
     wait_until 30 sink_focused "$1"
@@ -134,9 +139,26 @@ stop_everything() {
 }
 trap stop_everything EXIT
 trap 'exit 1' INT TERM
-"$bin/wx-e2e-eis-relay" "$LIBEI_SOCKET" >>"$work/relay.log" 2>&1 &
-relay_pid=$!
-if ! wait_until 50 test -S "$LIBEI_SOCKET"; then
+start_relay() {
+    rm -f "$LIBEI_SOCKET"
+    "$bin/wx-e2e-eis-relay" "$LIBEI_SOCKET" >>"$work/relay.log" 2>&1 &
+    relay_pid=$!
+    wait_until 50 test -S "$LIBEI_SOCKET"
+}
+
+# Revoke emulated input: stopping the relay closes every EIS connection
+# through it, as when the compositor or portal withdraws access.
+revoke_output() {
+    kill "$relay_pid" 2>/dev/null || return 1
+    wait "$relay_pid" 2>/dev/null
+    relay_pid=
+}
+
+restore_output() {
+    start_relay
+}
+
+if ! start_relay; then
     relay_diagnostic=$(tail -5 "$work/relay.log" 2>/dev/null | tr '\n' ' ' | cut -c 1-512)
     printf 'unverified session the EIS relay did not start: %s\n' \
         "${relay_diagnostic:-no relay output}" >>"$results"

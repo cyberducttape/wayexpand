@@ -233,6 +233,7 @@ env -i \
     E2E_RESULTS="$results" \
     E2E_INPUT_SOURCE="$input_source" \
     E2E_LAYOUT="$layout" \
+    E2E_SOAK_SECONDS="${E2E_SOAK_SECONDS:-90}" \
     E2E_SCENARIOS="$*" \
     timeout 900 dbus-run-session -- \
     kwin_wayland --virtual --no-lockscreen --no-global-shortcuts \

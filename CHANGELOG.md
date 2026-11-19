@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed: when the compositor closed or revoked the libei (EIS) connection, the
+  daemon kept the dead connection and refused every later expansion until it
+  was restarted. A transport failure found while checking the text is now
+  retryable, so the daemon reconnects; nothing is typed for the failed
+  attempt and it is not replayed.
+- CI now runs a two-minute lifecycle soak under headless KWin and Sway.
 - Keystroke output now types non-ASCII text the active keyboard layout
   produces directly, such as umlauts, accented letters, `ß`, `€` and Cyrillic,
   instead of refusing everything outside ASCII. A character the layout cannot
