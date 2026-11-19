@@ -648,6 +648,11 @@ jobs:
           for layout in de fr us:altgr-intl ru 'us,de:,'; do
             bash scripts/test-kwin-e2e.sh --keep --layout "$layout"
           done
+      - name: Lifecycle soak against real output (2 min)
+        run: |
+          # Cycles focus changes, reloads, daemon kills, output revocation
+          # and window close/reopen, checking the exact text after each.
+          E2E_SOAK_SECONDS=120 bash scripts/test-kwin-e2e.sh --keep lifecycle-soak
       - name: Test terminal paste into Konsole
         run: |
           # qt6-wayland provides the xdg-shell integration Konsole needs.

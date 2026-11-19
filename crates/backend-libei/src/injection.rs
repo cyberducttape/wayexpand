@@ -73,10 +73,14 @@ impl LibeiSession {
                 .and_then(|()| validate_text(text))
                 .and_then(|()| self.ensure_representable(text))
         };
+        // A refusal sends nothing either way. Keep transport failures
+        // retryable: a closed or revoked EIS connection must make the daemon
+        // reconnect, not be filed as "this text cannot be typed" while every
+        // later expansion fails against the same dead connection.
         result.map_err(|error| InjectorError {
             backend: BACKEND_NAME,
             message: error.to_string(),
-            retryable: false,
+            retryable: error.is_retryable(),
         })
     }
 
