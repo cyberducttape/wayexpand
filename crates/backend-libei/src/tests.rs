@@ -699,6 +699,62 @@ fn compositor_layout_snapshot_is_used_when_ordered_layout_groups_match() {
     ));
 }
 
+fn us_de_snapshot(generation: u64, group: u32) -> super::ActiveKeyboardLayout {
+    super::ActiveKeyboardLayout {
+        generation,
+        group,
+        rules: None,
+        model: Some("pc105".into()),
+        layout: Some("us,de".into()),
+        variant: Some(",".into()),
+        options: None,
+    }
+}
+
+/// KWin's EIS reports the group once at connect and never after a switch
+/// (docs/SUPPORT_MATRIX.md). Reproduced headless with
+/// `scripts/test-kwin-e2e.sh --layout us,de:,`: the first expansion typed,
+/// and every one after a switch was refused as a layout mismatch because the
+/// new provider group was compared with the typer's copy of the old one.
+#[test]
+fn provider_layout_switch_is_followed_when_the_server_never_re_reports() {
+    let mut typer = super::KeysymTyper::build(&layout_keymap("us,de")).unwrap();
+    typer.note_modifiers(0, 0);
+    typer.note_external_layout(&us_de_snapshot(1, 0)).unwrap();
+    typer.refresh().unwrap();
+    let us_z = typer.chars[&'z'].keycode;
+
+    typer.note_external_layout(&us_de_snapshot(2, 1)).unwrap();
+    typer.refresh().unwrap();
+    assert_ne!(typer.chars[&'z'].keycode, us_z, "now typing with QWERTZ");
+
+    // Switching back works the same way.
+    typer.note_external_layout(&us_de_snapshot(3, 0)).unwrap();
+    typer.refresh().unwrap();
+    assert_eq!(typer.chars[&'z'].keycode, us_z);
+}
+
+#[test]
+fn server_and_provider_disagreement_is_still_refused() {
+    // At connect: the server's own report contradicts the first snapshot.
+    let mut typer = super::KeysymTyper::build(&layout_keymap("us,de")).unwrap();
+    typer.note_modifiers(0, 0);
+    assert!(matches!(
+        typer.note_external_layout(&us_de_snapshot(1, 1)),
+        Err(super::LibeiError::LayoutProviderMismatch)
+    ));
+
+    // After a provider change: a newer server report that disagrees.
+    let mut typer = super::KeysymTyper::build(&layout_keymap("us,de")).unwrap();
+    typer.note_external_layout(&us_de_snapshot(1, 0)).unwrap();
+    typer.note_external_layout(&us_de_snapshot(2, 1)).unwrap();
+    typer.note_modifiers(0, 0);
+    assert!(matches!(
+        typer.note_external_layout(&us_de_snapshot(2, 1)),
+        Err(super::LibeiError::LayoutProviderMismatch)
+    ));
+}
+
 #[test]
 fn layout_group_check_ignores_model_differences_but_not_layout_order() {
     let compile = |model: &str, layout: &str| {

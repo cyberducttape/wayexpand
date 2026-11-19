@@ -39,6 +39,9 @@ pub(super) struct KeysymTyper {
     /// `ei_keyboard.modifiers` event).
     pub(super) reported: Option<KeyboardLock>,
     external_generation: Option<u64>,
+    /// Provenance of `reported.group`: what the EIS server itself last said,
+    /// as opposed to a group adopted from the external layout provider.
+    server_reports: ServerGroupReports,
     /// Evdev keycodes of the Shift, Level3 (AltGr) and Level5 keys, indexed
     /// like the `MOD_*` bits. Level3/Level5 are absent on layouts that do
     /// not define them.
@@ -49,6 +52,21 @@ pub(super) struct KeysymTyper {
     pub(super) tab_keycode: u32,
     /// The simplest keystroke producing each character on layout 0.
     pub(super) chars: HashMap<char, KeyStroke>,
+}
+
+/// The EIS server's own group reports, kept apart from groups adopted from
+/// the external provider so a provider update is never compared with a copy
+/// of the provider's previous answer.
+#[derive(Debug, Clone, Copy, Default)]
+struct ServerGroupReports {
+    /// Group in the server's latest `ei_keyboard.modifiers` event.
+    latest: Option<u32>,
+    /// Number of modifier events received.
+    count: u64,
+    /// `count` when the provider last reported a different layout state.
+    /// Earlier server reports predate that change and are not evidence
+    /// against it (KWin's EIS never re-reports the group after a switch).
+    count_at_provider_change: u64,
 }
 
 /// Server-side keyboard state that changes which key produces a character:
@@ -136,6 +154,7 @@ impl KeysymTyper {
             built_for: lock,
             reported,
             external_generation: None,
+            server_reports: ServerGroupReports::default(),
             modifier_keycodes,
             return_keycode,
             tab_keycode,
@@ -147,6 +166,8 @@ impl KeysymTyper {
     /// lazily by [`KeysymTyper::current`].
     pub(super) fn note_modifiers(&mut self, group: u32, locked_mods: u32) {
         self.reported = Some(KeyboardLock { group, locked_mods });
+        self.server_reports.latest = Some(group);
+        self.server_reports.count = self.server_reports.count.saturating_add(1);
     }
 
     pub(super) fn note_external_layout(
@@ -181,14 +202,23 @@ impl KeysymTyper {
             if !layout_groups_match(&self.keymap, &compiled) {
                 return Err(LibeiError::LayoutProviderMismatch);
             }
+            // The first snapshot is checked against everything the server
+            // has said. A later generation is a layout change the server's
+            // earlier reports cannot know about.
+            if self.external_generation.is_some() {
+                self.server_reports.count_at_provider_change = self.server_reports.count;
+            }
             self.external_generation = Some(snapshot.generation);
         }
         if snapshot.group as usize >= self.keymap.num_layouts() {
             return Err(LibeiError::UnknownActiveLayout(self.keymap.num_layouts()));
         }
-        if self
-            .reported
-            .is_some_and(|state| state.group != snapshot.group)
+        // Refuse when the server itself reported a different group since
+        // the provider's current state began; never compare against a group
+        // this typer copied from an earlier provider snapshot.
+        let reports = self.server_reports;
+        if reports.count > reports.count_at_provider_change
+            && reports.latest.is_some_and(|group| group != snapshot.group)
         {
             return Err(LibeiError::LayoutProviderMismatch);
         }
@@ -213,8 +243,10 @@ impl KeysymTyper {
         };
         if wanted != self.built_for {
             let external_generation = self.external_generation;
+            let server_reports = self.server_reports;
             *self = Self::build_for(self.keymap.clone(), wanted, self.reported)?;
             self.external_generation = external_generation;
+            self.server_reports = server_reports;
         }
         Ok(())
     }

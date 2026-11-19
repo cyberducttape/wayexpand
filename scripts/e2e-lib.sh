@@ -731,6 +731,170 @@ EOF
     return "$result"
 }
 
+# --- keyboard layouts ---------------------------------------------------
+# Each runs in a session started with that layout (E2E_LAYOUT, as
+# LAYOUTS[:VARIANTS]); the session driver defines compositor_layouts_are
+# LAYOUTS (the compositor reports exactly these layouts) and switch_layout
+# (advance to the next configured layout). Each expects exact output: a
+# layout-dependent route must type the replacement with the active keymap
+# or refuse before erasing anything; anything else is a failure.
+
+# require_layout LAYOUTS[:VARIANTS]
+require_layout() {
+    if [ "${E2E_LAYOUT:-}" != "$1" ]; then
+        printf 'needs a session started with --layout %s' "$1"
+        return 1
+    fi
+    command -v compositor_layouts_are >/dev/null 2>&1 || {
+        printf 'this session cannot confirm the compositor keyboard layout'
+        return 1
+    }
+    wait_until 50 compositor_layouts_are "${1%%:*}" || {
+        printf 'the compositor did not report the %s layout' "${1%%:*}"
+        return 1
+    }
+}
+
+# expect_layout_output SINK TEXT_BEFORE_EXPANSION EXPECTED: the replacement
+# appeared exactly (0), the route refused and left the text untouched (2),
+# or anything else (1).
+expect_layout_output() {
+    if wait_until 80 sink_text_is "$1" "$3"; then
+        return 0
+    fi
+    if sink_text_is "$1" "$2" && expansion_rejection_reported; then
+        # Both labels are content-free status values.
+        status=$(daemon_status)
+        printf 'route refused (%s/%s); ' \
+            "$(printf '%s\n' "$status" | sed -n 's/^output_last_unsupported=//p')" \
+            "$(printf '%s\n' "$status" | sed -n 's/^output_last_refusal=//p')"
+        return 2
+    fi
+    return 1
+}
+
+# toml_string TEXT: TEXT as a TOML basic string.
+toml_string() {
+    printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+
+# layout_case LAYOUTS[:VARIANTS] REPLACEMENT [TRIGGER]
+layout_case() {
+    require_layout "$1" || return 2
+    case_trigger=${3:-";lt"}
+    printf '[[expansion]]\ntrigger = %s\nreplacement = %s\n' \
+        "$(toml_string "$case_trigger")" "$(toml_string "$2")" | write_config
+    start_sink e2e-a && start_daemon || return 2
+    expand_in e2e-a "" "$case_trigger" || {
+        printf 'the typist could not type the trigger on %s; ' "$1"
+        describe e2e-a
+        return 2
+    }
+    expect_layout_output e2e-a "$case_trigger" "$2"
+    result=$?
+    printf 'layout=%s ' "$1"
+    describe e2e-a
+    return "$result"
+}
+
+# expect_layout_refusal SINK TEXT_BEFORE_EXPANSION: the route refused and
+# left the text exactly as it was.
+expect_layout_refusal() {
+    sleep 1.5
+    if sink_text_is "$1" "$2" && expansion_rejection_reported; then
+        return 0
+    fi
+    return 1
+}
+
+# layout_refusal_case LAYOUTS[:VARIANTS] REPLACEMENT [TRIGGER]
+layout_refusal_case() {
+    require_layout "$1" || return 2
+    case_trigger=${3:-";lt"}
+    printf '[[expansion]]\ntrigger = %s\nreplacement = %s\n' \
+        "$(toml_string "$case_trigger")" "$(toml_string "$2")" | write_config
+    start_sink e2e-a && start_daemon || return 2
+    expand_in e2e-a "" "$case_trigger" || {
+        printf 'the typist could not type the trigger on %s; ' "$1"
+        describe e2e-a
+        return 2
+    }
+    expect_layout_refusal e2e-a "$case_trigger"
+    result=$?
+    printf 'layout=%s refusal expected; ' "$1"
+    describe e2e-a
+    return "$result"
+}
+
+# Letters that move between US and German, and ASCII symbols that German
+# reaches only through AltGr (level 3).
+scenario_layout_de_altgr_ascii() {
+    layout_case de 'zy@{}[]|~\ Zy'
+}
+
+# "^" and "`" exist only as dead keys on the German layout, so a keystroke
+# route cannot type them without composing; it must refuse rather than leave
+# a stray accent. (If a later route composes them exactly, change this to
+# layout_case and update docs/SUPPORT_MATRIX.md.)
+scenario_layout_de_dead_key_only_ascii_is_refused() {
+    layout_refusal_case de 'a^b`c'
+}
+
+# Keystroke routes type only ASCII (docs/COMPATIBILITY.md), even when the
+# active layout has a key for the character; refuse before erasing.
+scenario_layout_de_non_ascii_is_refused() {
+    layout_refusal_case de "grüße"
+}
+
+# AZERTY moves letters and puts digits on the shifted level.
+scenario_layout_fr_azerty() {
+    layout_case fr "azqwm AZQWM 1234 !?;:"
+}
+
+# us(altgr-intl) makes ' " ` ~ and ^ dead keys on the base level.
+scenario_layout_altgr_intl_dead_keys() {
+    layout_case us:altgr-intl 'don'"'"'t "say" ~^`'
+}
+
+# A non-Latin layout types the punctuation and digits it has. The trigger
+# avoids Latin letters, which this layout cannot type.
+scenario_layout_ru_reachable_ascii() {
+    layout_case ru "1,2;3" ";12"
+}
+
+# ...and refuses Latin letters instead of typing whatever shares the key.
+scenario_layout_ru_latin_is_refused() {
+    layout_refusal_case ru "hello" ";12"
+}
+
+# Two configured layouts: the route must learn the active group from the
+# compositor, type correctly in it, and follow a switch while running.
+scenario_layout_multi_layout_switch() {
+    require_layout us,de:, || return 2
+    printf '[[expansion]]\ntrigger = ";zq"\nreplacement = "zany quiz"\n' | write_config
+    start_sink e2e-a && start_daemon || return 2
+    expand_in e2e-a "" ";zq" || return 2
+    expect_layout_output e2e-a ";zq" "zany quiz"
+    first=$?
+    printf 'us: '
+    describe e2e-a
+    [ "$first" -eq 0 ] || return "$first"
+    switch_layout || {
+        printf '; could not switch to the second layout'
+        return 2
+    }
+    expand_in e2e-a "zany quiz" " ;zq" || {
+        printf '; the typist could not type after the switch; '
+        describe e2e-a
+        return 2
+    }
+    expect_layout_output e2e-a "zany quiz ;zq" "zany quiz zany quiz"
+    second=$?
+    printf '; after switch to de: '
+    describe e2e-a
+    return "$second"
+}
+
 scenario_app_filter_follows_focus() {
     write_config <<'EOF'
 [[expansion]]
