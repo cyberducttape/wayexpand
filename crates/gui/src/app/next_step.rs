@@ -57,6 +57,7 @@ pub(crate) enum Problem {
     OutputInterrupted,
     SnippetActionFailed,
     OutputStatusUnknown,
+    ApplicationOutsideScope,
     TerminalFocusUnknown,
     TerminalCompositorIdentity,
     StatusUnknown,
@@ -158,6 +159,9 @@ pub(crate) struct Situation {
     /// The daemon reports application_scope_unknown: the restricted route is
     /// failing closed because it has no focused application identity.
     pub terminal_focus_unknown: bool,
+    /// The live focused application is known but outside the current raw
+    /// capture allowlist. This is a route limitation, not a failed expansion.
+    pub application_scope_denied: bool,
     /// KWin returned its own process ID instead of the focused client ID.
     pub terminal_compositor_identity: bool,
     /// Events accepted by this daemon since startup, when the status schema
@@ -506,6 +510,12 @@ pub(crate) fn next_step(s: &Situation) -> Option<(Problem, Action)> {
             Action::QuickPicker,
         ));
     }
+    // Current app-scope refusal outranks a recent output from a different
+    // application. Offer the safe copy/paste path and, when IBus is the
+    // recommended route, let the user choose guided setup explicitly.
+    if s.application_scope_denied {
+        return Some((Problem::ApplicationOutsideScope, Action::QuickPicker));
+    }
     match s.route_state {
         None if terminal_route_has_no_input(s) => {
             Some((Problem::TerminalRouteNoInput, Action::TestInApplication))
@@ -547,7 +557,9 @@ impl GuiApp {
     pub(crate) fn can_offer_recommended_ibus_setup(&self, problem: Problem) -> bool {
         if !matches!(
             problem,
-            Problem::TerminalFocusUnknown | Problem::TerminalCompositorIdentity
+            Problem::TerminalFocusUnknown
+                | Problem::TerminalCompositorIdentity
+                | Problem::ApplicationOutsideScope
         ) {
             return false;
         }
@@ -747,6 +759,9 @@ impl GuiApp {
             )
             .as_deref()
                 == Some("compositor-process-id"),
+            application_scope_denied: daemon_status_trusted
+                && runtime::status_field(&self.daemon_status, "capture_app_scope_state").as_deref()
+                    == Some("outside_allowlist"),
             input_events_total: runtime::status_field(&self.daemon_status, "input_events_total")
                 .and_then(|value| value.parse::<u64>().ok()),
             enabled_expansions: daemon_status_trusted
@@ -1227,6 +1242,24 @@ mod tests {
         assert_eq!(
             next_step(&current),
             Some((Problem::TerminalFocusUnknown, Action::QuickPicker))
+        );
+    }
+
+    #[test]
+    fn current_app_scope_refusal_offers_copy_paste_ahead_of_stale_output() {
+        let state = Situation {
+            daemon_reachable: Some(true),
+            build: Some(DaemonBuildState::Current),
+            route_state: Some(RouteState::Connected),
+            replacement_allowed: true,
+            application_scope_denied: true,
+            recent_outcome: Some(wayexpand_core::OutcomeKind::Expanded),
+            ..Situation::default()
+        };
+
+        assert_eq!(
+            next_step(&state),
+            Some((Problem::ApplicationOutsideScope, Action::QuickPicker))
         );
     }
 

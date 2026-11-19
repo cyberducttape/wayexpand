@@ -206,6 +206,7 @@ impl GuiApp {
                     super::Problem::TerminalFocusUnknown
                         | super::Problem::TerminalCompositorIdentity
                 );
+                let app_scope_blocked = problem == super::Problem::ApplicationOutsideScope;
                 let replacement_gate_blocked = matches!(
                     problem,
                     super::Problem::ReplacementNotAllowed
@@ -240,7 +241,9 @@ impl GuiApp {
                 );
                 ui.add(
                     egui::Label::new(
-                        RichText::new(if terminal_scope_blocked {
+                        RichText::new(if app_scope_blocked {
+                            self.strings.why_app_scope_pattern()
+                        } else if terminal_scope_blocked {
                             self.strings.why_focus_scope_pattern()
                         } else if input_route_blocked {
                             self.strings.why_route_blocked_pattern()
@@ -258,7 +261,9 @@ impl GuiApp {
                 );
                 ui.add(
                     egui::Label::new(
-                        RichText::new(if terminal_scope_blocked {
+                        RichText::new(if app_scope_blocked {
+                            self.strings.why_app_scope_delivery()
+                        } else if terminal_scope_blocked {
                             self.strings.why_focus_scope_delivery()
                         } else if input_route_blocked {
                             self.strings.why_route_blocked_delivery()

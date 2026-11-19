@@ -50,10 +50,30 @@ docker run --rm \
         apt-get update
         apt-get install -y --no-install-recommends ansible-core
         ansible-playbook --syntax-check -i localhost, site.yml
-        first=$(ansible-playbook -i localhost, site.yml)
+        if ! first=$(ansible-playbook -i localhost, site.yml); then
+            # Ubuntu archive indexes and their mirrors can briefly disagree
+            # while a package version is being published or superseded. A
+            # stale index returns 404 for the selected package even though a
+            # fresh index is available. Refresh once only for that transient
+            # archive failure; preserve all other failures as hard errors.
+            if printf "%s\n" "$first" | grep -Eq "404[[:space:]]+Not Found"; then
+                printf "%s\n" "Ubuntu package mirror returned 404; refreshing indexes and retrying once." >&2
+                apt-get update
+                if ! first=$(ansible-playbook -i localhost, site.yml); then
+                    printf "%s\n" "$first" >&2
+                    exit 1
+                fi
+            else
+                printf "%s\n" "$first" >&2
+                exit 1
+            fi
+        fi
         printf "%s\n" "$first" | tail -n 5
         printf "%s\n" "$first" | grep -Eq "changed=[1-9][0-9]*"
-        second=$(ansible-playbook -i localhost, site.yml)
+        if ! second=$(ansible-playbook -i localhost, site.yml); then
+            printf "%s\n" "$second" >&2
+            exit 1
+        fi
         printf "%s\n" "$second" | tail -n 5
         printf "%s\n" "$second" | grep -q "changed=0"
     '
