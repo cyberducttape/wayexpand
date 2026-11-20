@@ -194,6 +194,16 @@ configuration reload.
 This is intentional: the delay prioritizes correctness and reliability over speed
 when the fast path isn't available.
 
+**When a snippet is refused.** A snippet the route cannot type here (too
+long, a character the active layout lacks, a cursor move) is refused before
+the trigger is erased, so the trigger stays where you typed it. The daemon
+then shows a desktop notification naming the reason, never the trigger or
+text. Its **Copy snippet** button puts the text on the clipboard for you to
+paste; nothing is pasted automatically, and the text is forgotten after two
+minutes. Turn this off with `refusal_notifications = false` in `[settings]` or
+in the GUI's Engine settings. The copy button needs `ext-data-control-v1`
+(KWin 6, Sway, Hyprland); GNOME's Mutter does not offer it.
+
 **Terminal paste mode.** In terminals, typing a multi-line replacement runs
 each line in the shell as its Enter arrives. With `terminal_paste` set, the
 libei route pastes replacements in `terminal_apps` instead:

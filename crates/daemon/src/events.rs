@@ -612,10 +612,12 @@ pub(crate) fn finish_expansion_with_retry_allowed(
         wayexpand_core::TransactionOutcome::Applied => {
             failure_trace::note_expansion_outcome(true);
             failure_trace::note_output_acknowledged();
+            crate::route_refresh::note_healthy();
         }
         wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { ref source } => {
             failure_trace::note_expansion_outcome(true);
             failure_trace::note_output_acknowledged();
+            crate::route_refresh::note_healthy();
             warn!(%source, "output acknowledged but cursor repositioning failed; target text remains unverified");
         }
         wayexpand_core::TransactionOutcome::NotApplied { .. }

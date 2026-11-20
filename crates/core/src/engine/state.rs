@@ -204,6 +204,21 @@ pub struct ExpansionResult {
 }
 
 impl ExpansionResult {
+    /// The snippet's own text: `insert` without characters folded in from
+    /// what the user typed after the trigger.
+    pub fn replacement_text(&self) -> &str {
+        let insert = self.insert.as_str();
+        if self.folded_suffix_chars == 0 {
+            return insert;
+        }
+        let end = insert
+            .char_indices()
+            .rev()
+            .nth(self.folded_suffix_chars - 1)
+            .map_or(0, |(index, _)| index);
+        &insert[..end]
+    }
+
     /// Fold a character the user already typed into the target after the
     /// trigger into this transaction: it is erased with the trigger and typed
     /// again after the replacement. A requested cursor position stays at the
