@@ -1036,6 +1036,8 @@ mod tests {
         checkpoint: wayexpand_core::OutputCheckpoint,
         /// Set once an operation (already admitted) is waiting at the gate.
         waiting: Arc<std::sync::atomic::AtomicBool>,
+        /// Refuse every payload in preflight with this backend message.
+        preflight_refusal: Option<&'static str>,
     }
 
     impl GatedInjector {
@@ -1065,6 +1067,17 @@ mod tests {
 
         fn capabilities(&self) -> InjectorCapabilities {
             self.capabilities
+        }
+
+        fn preflight_text(&mut self, _text: &str) -> std::result::Result<(), InjectorError> {
+            match self.preflight_refusal {
+                Some(message) => Err(InjectorError {
+                    backend: "gated-test",
+                    message: message.into(),
+                    retryable: false,
+                }),
+                None => Ok(()),
+            }
         }
 
         fn erase(&mut self, trigger: &str) -> std::result::Result<(), InjectorError> {
@@ -1127,6 +1140,36 @@ mod tests {
     impl Harness {
         fn new(fail: bool) -> Self {
             Self::build(fail, false, None, None)
+        }
+
+        /// A connected route that refuses every payload in preflight.
+        fn refusing(message: &'static str) -> Self {
+            let mut harness = Self::new(false);
+            let refusing: Box<dyn TextInjector> = Box::new(GatedInjector {
+                gate: Arc::clone(&harness.gate),
+                calls: Arc::clone(&harness.calls),
+                delivered: Arc::clone(&harness.delivered),
+                erase_started: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                insert_gate: Arc::clone(&harness.insert_gate),
+                insert_waiting: Arc::clone(&harness.insert_waiting),
+                fail: false,
+                cursor_failure: false,
+                capabilities: InjectorCapabilities {
+                    replacement_guarantee: wayexpand_core::ReplacementGuarantee::BestEffort,
+                    ..InjectorCapabilities::default()
+                },
+                checkpoint: wayexpand_core::OutputCheckpoint::default(),
+                waiting: Arc::clone(&harness.waiting),
+                preflight_refusal: Some(message),
+            });
+            let (injector, failures, worker) =
+                spawn_async_injector(refusing, Some(harness.daemon.waker.clone())).unwrap();
+            harness.daemon.retire_output_injector();
+            harness.daemon.retiring_output_workers.clear();
+            harness.daemon.injector = Some(injector);
+            harness.daemon.output_failures = Some(failures);
+            harness.daemon.output_worker = Some(worker);
+            harness
         }
 
         fn cursor_failure() -> Self {
@@ -1205,6 +1248,7 @@ mod tests {
                 }),
                 checkpoint: wayexpand_core::OutputCheckpoint::default(),
                 waiting: Arc::clone(&waiting),
+                preflight_refusal: None,
             });
             let backend = match guard {
                 Some(guard) => crate::assurance::AssuredInjector::wrap(backend, guard),
@@ -1459,6 +1503,51 @@ mod tests {
             .output_failures
             .as_ref()
             .is_some_and(|failures| failures.try_recv().is_err()));
+        assert_eq!(harness.daemon.connection_state, "connected");
+    }
+
+    fn refuse_one(harness: &mut Harness) {
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Typed,
+                vec![OutputJob::Expansion(result(":a", "first"))],
+                Vec::new(),
+            )
+            .unwrap();
+        harness.run_until_resolved();
+    }
+
+    #[test]
+    fn repeated_stale_layout_refusals_reconnect_the_route_once() {
+        let mut harness = Harness::refusing(
+            "the compositor's active keyboard layout differs from the typing keymap",
+        );
+        harness.open_gate();
+        for _ in 1..crate::route_refresh::STATE_REFUSALS_BEFORE_REFRESH {
+            refuse_one(&mut harness);
+            assert!(
+                harness.daemon.injector.is_some(),
+                "a few refusals keep the route"
+            );
+            assert_eq!(harness.daemon.connection_state, "connected");
+        }
+        refuse_one(&mut harness);
+        assert!(harness.calls.lock().unwrap().is_empty(), "nothing typed");
+        assert!(harness.daemon.injector.is_none(), "stale route is retired");
+        assert_eq!(harness.daemon.connection_state, "reconnecting");
+        assert!(harness.daemon.output_retry_at.is_some());
+    }
+
+    #[test]
+    fn content_refusals_never_reconnect_the_route() {
+        let mut harness =
+            Harness::refusing("character U+00E9 is not in the active keyboard layout");
+        harness.open_gate();
+        for _ in 0..crate::route_refresh::STATE_REFUSALS_BEFORE_REFRESH * 2 {
+            refuse_one(&mut harness);
+        }
+        assert!(harness.daemon.injector.is_some());
         assert_eq!(harness.daemon.connection_state, "connected");
     }
 
