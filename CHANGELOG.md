@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- CI's headless KWin layout checks now include US International with dead
+  keys (`us(intl)`): `` don't "say" ~^` `` and `äéñßøå ¡¿` are typed exactly.
 - The lifecycle soak can keep one daemon running for the whole run
   (`E2E_SOAK_RESTART_EVERY=0`) and then fails on resident-memory growth
   beyond `E2E_SOAK_MAX_RSS_GROWTH_KIB`. Nightly CI runs it for 30 minutes
