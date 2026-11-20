@@ -116,9 +116,11 @@ JSON output are a contract (`docs/COMPATIBILITY.md`).
 test in `crates/gui/src/tests.rs`, and check the result with
 `cargo run -p wayexpand-gui` or `scripts/gui-screenshot.sh`.
 
-**Change GUI text:** Plain strings are in `crates/gui/locales/en.toml`,
-`de.toml` and `id.toml`; change all three. A key is the `Strings` method name,
-and the build fails if the files disagree on keys or `{placeholders}`.
+**Change GUI text:** Strings are in `crates/gui/locales/en.toml`, `de.toml`
+and `id.toml`; change all three. A key is the `Strings` method name, and the
+build fails if the files disagree on keys or `{placeholders}`. Named
+placeholders such as `{count}` may be reordered in a translation; unnamed `{}`
+ones may not.
 
 **Add a feature:** Write tests first, then implementation, then documentation
 

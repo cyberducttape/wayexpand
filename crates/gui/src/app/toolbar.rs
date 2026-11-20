@@ -654,7 +654,7 @@ impl GuiApp {
                 details.insert(
                     0,
                     self.strings
-                        .setup_changed_since_test(&self.strings.setup_change(&change)),
+                        .setup_changed_since_test(self.strings.setup_change(&change)),
                 );
             } else if !self.setup_record_saved {
                 details.insert(0, self.strings.verification_not_saved().to_owned());

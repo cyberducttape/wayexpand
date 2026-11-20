@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- 86 more GUI strings moved from Rust into the locale files: 80 with named
+  placeholders, which translations may now reorder (`{count}`, `{app}`), and
+  6 plain ones. Their output in English, German and Indonesian is unchanged.
 - Fixed: when the compositor closed or revoked the libei (EIS) connection, the
   daemon kept the dead connection and refused every later expansion until it
   was restarted. A transport failure found while checking the text is now

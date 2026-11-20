@@ -841,15 +841,25 @@ export LANG=de_DE.UTF-8
 
 ### Translation System
 
-Plain translated strings live in `crates/gui/locales/en.toml`, `de.toml` and
+Translated strings live in `crates/gui/locales/en.toml`, `de.toml` and
 `id.toml`. Each key is the name of a `Strings` method (sections only group
-keys for readers), and `crates/gui/build.rs` generates one `&'static str`
-method per key at compile time. The build fails if a language is missing a key,
-has an extra one, or uses different `{placeholders}` than English, so a
-translation can never silently fall back or drop a value. Strings that are
-assembled with `format!` or depend on other values still live in
-`crates/gui/src/lang/*.rs`; `lang::fill` substitutes `{}` placeholders in a
-TOML string in order.
+keys for readers), and `crates/gui/build.rs` generates one method per key at
+compile time:
+
+- A string whose placeholders are all names, such as
+  `"{count} snippets in {app}"`, becomes a method that takes those values in
+  the order English first uses them and returns the filled `String`
+  (`strings.key(count, app)`). Translations may put named placeholders in any
+  order.
+- Any other string becomes a `&'static str` method. Strings with unnamed
+  `{}` or numbered `{0}` placeholders are filled in order with `lang::fill`,
+  so their translations must keep that order.
+
+The build fails if a language is missing a key, has an extra one, or uses
+different placeholders than English, so a translation can never silently fall
+back or drop a value. Strings chosen by other values (for example by
+next-step problem) or assembled from several parts still live in
+`crates/gui/src/lang/*.rs`.
 
 The language type is in `crates/gui/src/lang.rs`:
 

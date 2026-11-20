@@ -1,38 +1,6 @@
 use super::{Language, Strings};
 
 impl Strings {
-    pub fn pack_catalog_invalid_count(&self, count: usize) -> String {
-        match self.lang {
-            Language::English => format!("Skipped {count} invalid catalog entr(y/ies)."),
-            Language::Indonesian => format!("{count} entri katalog tidak valid dilewati."),
-            Language::German => format!("{count} ungültige Katalogeinträge übersprungen."),
-        }
-    }
-
-    pub fn pack_catalog_verified_signer(&self, signer: &str) -> String {
-        match self.lang {
-            Language::English => format!("Signature verified by {signer}"),
-            Language::Indonesian => format!("Tanda tangan diverifikasi oleh {signer}"),
-            Language::German => format!("Signatur verifiziert durch {signer}"),
-        }
-    }
-
-    pub fn pack_catalog_signer_file(&self, path: &str) -> String {
-        match self.lang {
-            Language::English => format!("Catalog signatures checked with: {path}"),
-            Language::Indonesian => format!("Tanda tangan katalog diperiksa dengan: {path}"),
-            Language::German => format!("Katalogsignaturen geprüft mit: {path}"),
-        }
-    }
-
-    pub fn pack_catalog_signature_reason(&self, reason: &str) -> String {
-        match self.lang {
-            Language::English => format!("Signature unverified: {reason}"),
-            Language::Indonesian => format!("Tanda tangan belum diverifikasi: {reason}"),
-            Language::German => format!("Signatur nicht verifiziert: {reason}"),
-        }
-    }
-
     pub fn pack_rollback_complete(&self) -> &'static str {
         match self.lang {
             Language::English => "Previous pack version restored and daemon reload requested",
@@ -41,20 +9,6 @@ impl Strings {
             }
             Language::German => {
                 "Vorherige Paketversion wiederhergestellt und Neuladen des Daemons angefordert"
-            }
-        }
-    }
-
-    pub fn pack_review_record(&self, reviewer: &str, date: &str, summary: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Review record: {reviewer} · {date} · {summary} (metadata only)")
-            }
-            Language::Indonesian => {
-                format!("Catatan tinjauan: {reviewer} · {date} · {summary} (hanya metadata)")
-            }
-            Language::German => {
-                format!("Prüfvermerk: {reviewer} · {date} · {summary} (nur Metadaten)")
             }
         }
     }
@@ -69,20 +23,6 @@ impl Strings {
             Language::English => format!("Required capabilities: {values}"),
             Language::Indonesian => format!("Kemampuan yang dibutuhkan: {values}"),
             Language::German => format!("Benötigte Fähigkeiten: {values}"),
-        }
-    }
-
-    pub fn pack_action_counts(&self, commands: u64, hotkeys: u64) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Executable entries: {commands} commands · {hotkeys} hotkeys")
-            }
-            Language::Indonesian => {
-                format!("Entri yang dapat dijalankan: {commands} perintah · {hotkeys} hotkey")
-            }
-            Language::German => {
-                format!("Ausführbare Einträge: {commands} Befehle · {hotkeys} Hotkeys")
-            }
         }
     }
 
@@ -113,14 +53,6 @@ impl Strings {
         }
     }
 
-    pub fn pack_maintainer(&self, maintainer: &str) -> String {
-        match self.lang {
-            Language::English => format!("Maintainer: {maintainer}"),
-            Language::Indonesian => format!("Pemelihara: {maintainer}"),
-            Language::German => format!("Betreuung: {maintainer}"),
-        }
-    }
-
     pub fn pack_compatibility(
         &self,
         shells: &[String],
@@ -147,60 +79,6 @@ impl Strings {
         }
     }
 
-    pub fn pack_risk(&self, level: &str, summary: &str) -> String {
-        match self.lang {
-            Language::English => format!("Risk: {level} — {summary}"),
-            Language::Indonesian => format!("Risiko: {level} — {summary}"),
-            Language::German => format!("Risiko: {level} — {summary}"),
-        }
-    }
-
-    pub fn pack_minimum_version(&self, version: &str) -> String {
-        match self.lang {
-            Language::English => format!("Requires WayExpand {version} or newer"),
-            Language::Indonesian => format!("Memerlukan WayExpand {version} atau lebih baru"),
-            Language::German => format!("Benötigt WayExpand {version} oder neuer"),
-        }
-    }
-
-    pub fn pack_source_file(&self, file: &str) -> String {
-        match self.lang {
-            Language::English => format!("Source file: {file}"),
-            Language::Indonesian => format!("Berkas sumber: {file}"),
-            Language::German => format!("Quelldatei: {file}"),
-        }
-    }
-
-    pub fn pack_snippets(&self, count: usize) -> String {
-        match self.lang {
-            Language::English => format!("Review snippet contents ({count})"),
-            Language::Indonesian => format!("Tinjau isi cuplikan ({count})"),
-            Language::German => format!("Snippet-Inhalte prüfen ({count})"),
-        }
-    }
-
-    pub fn pack_signature_identity(&self, signer: &str, source: &str, path: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Verified signer: {signer} · trust source: {source} · {path}")
-            }
-            Language::Indonesian => format!(
-                "Penanda tangan terverifikasi: {signer} · sumber kepercayaan: {source} · {path}"
-            ),
-            Language::German => {
-                format!("Verifizierter Signierer: {signer} · Vertrauensquelle: {source} · {path}")
-            }
-        }
-    }
-
-    pub fn pack_signature_reason(&self, reason: &str) -> String {
-        match self.lang {
-            Language::English => format!("Signature verification detail: {reason}"),
-            Language::Indonesian => format!("Detail verifikasi tanda tangan: {reason}"),
-            Language::German => format!("Details zur Signaturprüfung: {reason}"),
-        }
-    }
-
     pub fn pack_signature_unsigned_detail(&self) -> &'static str {
         match self.lang {
             Language::English => "No cryptographic signer identity is available for this pack.",
@@ -224,14 +102,6 @@ impl Strings {
             Language::German => {
                 "Die Organisationsrichtlinie deaktiviert befehlsbasierte Einträge in diesem Paket."
             }
-        }
-    }
-
-    pub fn pack_install_result(&self, output: &str) -> String {
-        match self.lang {
-            Language::English => format!("Install result: {output}"),
-            Language::Indonesian => format!("Hasil pemasangan: {output}"),
-            Language::German => format!("Installationsergebnis: {output}"),
         }
     }
 }
@@ -500,28 +370,6 @@ impl Strings {
         }
     }
 
-    pub fn picker_copied(&self, trigger: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Copied {trigger} · switch to your app and paste with Ctrl+V · return here to close the picker")
-            }
-            Language::Indonesian => {
-                format!("{trigger} disalin · pindah ke aplikasi dan tempel dengan Ctrl+V · kembali ke sini untuk menutup pemilih")
-            }
-            Language::German => {
-                format!("{trigger} kopiert · zur App wechseln und mit Strg+V einfügen · zum Schließen hierher zurückkehren")
-            }
-        }
-    }
-
-    pub fn picker_inserting(&self, trigger: &str) -> String {
-        match self.lang {
-            Language::English => format!("Inserting {trigger}…"),
-            Language::Indonesian => format!("Menyisipkan {trigger}…"),
-            Language::German => format!("{trigger} wird eingefügt …"),
-        }
-    }
-
     pub fn picker_waiting_for_focus(&self) -> &'static str {
         match self.lang {
             Language::English => "Waiting for the original window to regain focus safely.",
@@ -539,14 +387,6 @@ impl Strings {
             Language::German => {
                 "Das ursprüngliche Fenster konnte nicht sicher wieder fokussiert werden."
             }
-        }
-    }
-
-    pub fn picker_app_scope(&self, scope: &str) -> String {
-        match self.lang {
-            Language::English => format!("Automatic insertion only in any of: {scope}"),
-            Language::Indonesian => format!("Penyisipan otomatis hanya di salah satu: {scope}"),
-            Language::German => format!("Automatisches Einfügen nur in einer dieser Apps: {scope}"),
         }
     }
 

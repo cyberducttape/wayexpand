@@ -922,7 +922,7 @@ impl GuiApp {
             self.desktop_test_verified_application = None;
             return Status::warning(
                 self.strings
-                    .setup_changed_since_test(&self.strings.setup_change(&staleness)),
+                    .setup_changed_since_test(self.strings.setup_change(&staleness)),
             );
         }
 
@@ -1161,7 +1161,7 @@ impl GuiApp {
                                     if let Some(error) = onboarding_state_error {
                                         Status::warning(
                                             self.strings
-                                                .setup_unverified_state_unsaved(&error.to_string()),
+                                                .setup_unverified_state_unsaved(error.to_string()),
                                         )
                                     } else {
                                         Status::info(self.strings.setup_configured_unverified())
@@ -1337,7 +1337,7 @@ impl GuiApp {
                 self.status = Status::info(self.strings.status_restarting_unit(&unit));
             }
             Err(error) => {
-                self.status = Status::error(self.strings.status_restart_failed(&error.to_string()))
+                self.status = Status::error(self.strings.status_restart_failed(error.to_string()))
             }
         }
     }

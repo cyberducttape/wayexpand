@@ -92,32 +92,4 @@ impl Strings {
             "Buat pustaka baru yang kosong",
         )
     }
-
-    pub fn recovery_open_failed(&self, error: &str) -> String {
-        match self.lang {
-            Language::English => format!("Could not open it: {error}"),
-            Language::German => format!("Konnte nicht geöffnet werden: {error}"),
-            Language::Indonesian => format!("Tidak dapat dibuka: {error}"),
-        }
-    }
-
-    pub fn recovery_relaunch_failed(&self, error: &str) -> String {
-        match self.lang {
-            Language::English => format!("Could not restart WayExpand: {error}"),
-            Language::German => format!("WayExpand konnte nicht neu gestartet werden: {error}"),
-            Language::Indonesian => format!("WayExpand tidak dapat dimulai ulang: {error}"),
-        }
-    }
-
-    pub fn recovery_action_failed(&self, error: &str) -> String {
-        match self.lang {
-            Language::English => format!("That did not work, and nothing was replaced: {error}"),
-            Language::German => {
-                format!("Das hat nicht funktioniert; nichts wurde ersetzt: {error}")
-            }
-            Language::Indonesian => {
-                format!("Itu tidak berhasil, dan tidak ada yang diganti: {error}")
-            }
-        }
-    }
 }

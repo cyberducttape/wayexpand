@@ -243,7 +243,7 @@ impl GuiApp {
         if let Some(signers_file) = self.pack_catalog_signers_file.as_deref() {
             ui.label(
                 self.strings
-                    .pack_catalog_signer_file(&sanitize_display_text(signers_file)),
+                    .pack_catalog_signer_file(sanitize_display_text(signers_file)),
             );
         }
         let packs = self.pack_catalog_results.clone();
@@ -278,20 +278,20 @@ impl GuiApp {
                 if let Some(risk) = pack.get("risk").filter(|value| value.is_object()) {
                     ui.label(
                         self.strings
-                            .pack_risk(&json_string(risk, "level"), &json_string(risk, "summary")),
+                            .pack_risk(json_string(risk, "level"), json_string(risk, "summary")),
                     );
                 }
                 let signature = &pack["signature"];
                 if signature["state"] == "verified" {
                     ui.label(
                         self.strings
-                            .pack_catalog_verified_signer(&json_string(signature, "signer")),
+                            .pack_catalog_verified_signer(json_string(signature, "signer")),
                     );
                 } else if signature["state"] == "unverified" {
                     ui.colored_label(
                         palette.warning,
                         self.strings
-                            .pack_catalog_signature_reason(&json_string(signature, "reason")),
+                            .pack_catalog_signature_reason(json_string(signature, "reason")),
                     );
                 } else {
                     ui.colored_label(palette.warning, self.strings.pack_unsigned_warning());
@@ -309,9 +309,9 @@ impl GuiApp {
                 }
                 if let Some(record) = pack.get("review").filter(|value| value.is_object()) {
                     ui.label(self.strings.pack_review_record(
-                        &json_string(record, "reviewed_by"),
-                        &json_string(record, "reviewed_at"),
-                        &json_string(record, "summary"),
+                        json_string(record, "reviewed_by"),
+                        json_string(record, "reviewed_at"),
+                        json_string(record, "summary"),
                     ));
                 } else {
                     ui.colored_label(palette.warning, self.strings.pack_no_review_record());
@@ -384,15 +384,15 @@ impl GuiApp {
         if let Some(risk) = manifest.get("risk").filter(|value| value.is_object()) {
             ui.label(
                 self.strings
-                    .pack_risk(&json_string(risk, "level"), &json_string(risk, "summary")),
+                    .pack_risk(json_string(risk, "level"), json_string(risk, "summary")),
             );
         }
         self.render_signature_details(ui, details);
         if let Some(review_record) = manifest.get("review").filter(|value| value.is_object()) {
             ui.label(self.strings.pack_review_record(
-                &json_string(review_record, "reviewed_by"),
-                &json_string(review_record, "reviewed_at"),
-                &json_string(review_record, "summary"),
+                json_string(review_record, "reviewed_by"),
+                json_string(review_record, "reviewed_at"),
+                json_string(review_record, "summary"),
             ));
         } else {
             ui.colored_label(palette.warning, self.strings.pack_no_review_record());
@@ -533,9 +533,9 @@ impl GuiApp {
         self.render_signature_details(ui, details);
         if let Some(review_record) = manifest.get("review").filter(|value| value.is_object()) {
             ui.label(self.strings.pack_review_record(
-                &json_string(review_record, "reviewed_by"),
-                &json_string(review_record, "reviewed_at"),
-                &json_string(review_record, "summary"),
+                json_string(review_record, "reviewed_by"),
+                json_string(review_record, "reviewed_at"),
+                json_string(review_record, "summary"),
             ));
         } else {
             ui.colored_label(palette.warning, self.strings.pack_no_review_record());
@@ -650,13 +650,13 @@ impl GuiApp {
         let signature = &details["signature"];
         match signature["state"].as_str() {
             Some("verified") => ui.label(self.strings.pack_signature_identity(
-                &json_string(signature, "signer"),
-                &json_string(signature, "signer_file_source"),
-                &json_string(signature, "signer_file"),
+                json_string(signature, "signer"),
+                json_string(signature, "signer_file_source"),
+                json_string(signature, "signer_file"),
             )),
             Some("unverified" | "untrusted_signer_file" | "blocked_by_policy") => ui.label(
                 self.strings
-                    .pack_signature_reason(&json_string(signature, "reason")),
+                    .pack_signature_reason(json_string(signature, "reason")),
             ),
             _ => ui.label(self.strings.pack_signature_unsigned_detail()),
         };
@@ -685,7 +685,7 @@ impl GuiApp {
                         ui.collapsing(title, |ui| {
                             ui.label(
                                 self.strings
-                                    .pack_source_file(&json_string(expansion, "file")),
+                                    .pack_source_file(json_string(expansion, "file")),
                             );
                             render_untrusted_text(
                                 ui,
@@ -709,7 +709,7 @@ impl GuiApp {
                                 ),
                                 |ui| {
                                     ui.label(
-                                        self.strings.pack_source_file(&json_string(hotkey, "file")),
+                                        self.strings.pack_source_file(json_string(hotkey, "file")),
                                     );
                                     render_command_review(ui, &hotkey["command"]);
                                 },

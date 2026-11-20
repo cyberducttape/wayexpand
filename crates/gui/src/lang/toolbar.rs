@@ -238,14 +238,6 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_install_summary(&self, version: &str) -> String {
-        match self.lang {
-            Language::English => format!("WayExpand GUI {version} is running. The next step starts its user service."),
-            Language::Indonesian => format!("WayExpand GUI {version} sedang berjalan. Langkah berikutnya menjalankan layanan pengguna."),
-            Language::German => format!("WayExpand GUI {version} läuft. Im nächsten Schritt wird der Benutzerdienst gestartet."),
-        }
-    }
-
     /// Short, localized descriptions of the typing route's live state, used
     /// inside the first-run session sentence.
     pub fn onboarding_route_detail(&self, key: &str) -> &'static str {
@@ -483,14 +475,6 @@ impl Strings {
             Language::German => {
                 "App-Filter benötigen Desktop-Integration und sind möglicherweise nicht verfügbar. IBus kann Text nur ersetzen, wenn ein Feld verifizierbaren Umgebungstext bereitstellt; in anderen Feldern können Sie mit dem Schnellwähler kopieren und einfügen."
             }
-        }
-    }
-
-    pub fn onboarding_test_state_save_failed(&self, error: &str) -> String {
-        match self.lang {
-            Language::English => format!("The test snippet was added, but its onboarding state could not be saved: {error}"),
-            Language::Indonesian => format!("Cuplikan uji ditambahkan, tetapi status penyiapannya tidak dapat disimpan: {error}"),
-            Language::German => format!("Das Test-Snippet wurde hinzugefügt, aber der Einrichtungsstatus konnte nicht gespeichert werden: {error}"),
         }
     }
 

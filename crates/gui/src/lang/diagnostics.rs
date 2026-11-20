@@ -95,14 +95,6 @@ impl Strings {
         }
     }
 
-    pub fn report_updated_minutes_ago(&self, minutes: u64) -> String {
-        match self.lang {
-            Language::English => format!("Session report updated {minutes} min ago · refresh before relying on it"),
-            Language::Indonesian => format!("Laporan sesi diperbarui {minutes} mnt lalu · segarkan sebelum mengandalkannya"),
-            Language::German => format!("Sitzungsbericht vor {minutes} Min. aktualisiert · vor der Verwendung aktualisieren"),
-        }
-    }
-
     pub fn report_not_run_yet(&self) -> &'static str {
         match self.lang {
             Language::English => "No session report yet · refresh to collect current evidence",
@@ -141,20 +133,6 @@ impl Strings {
         }
     }
 
-    pub fn raw_capture_app_scope_notice(&self, count: usize) -> String {
-        match self.lang {
-            Language::English => format!(
-                "Raw-input matching is assigned to {count} configured applications. This limits where WayExpand matches, not where evdev observes keys; password fields cannot be detected, and browser-field insertion is not verified."
-            ),
-            Language::Indonesian => format!(
-                "Pencocokan input mentah ditetapkan untuk {count} aplikasi. Ini membatasi lokasi WayExpand mencocokkan teks, bukan lokasi evdev mengamati tombol; kolom kata sandi tidak dapat dideteksi dan penyisipan di kolom browser belum diverifikasi."
-            ),
-            Language::German => format!(
-                "Die Raw-Input-Suche ist {count} konfigurierten Anwendungen zugewiesen. Das begrenzt, wo WayExpand vergleicht, nicht wo evdev Tasten beobachtet; Passwortfelder werden nicht erkannt und das Einfügen in Browserfelder ist nicht verifiziert."
-            ),
-        }
-    }
-
     pub fn capture_app_scope_state(&self, state: &str) -> &'static str {
         match (self.lang, state) {
             (_, "allowed") => match self.lang {
@@ -177,20 +155,6 @@ impl Strings {
                 Language::Indonesian => "Aplikasi yang difokuskan tidak diketahui; ekspansi dengan cakupan diblokir secara aman.",
                 Language::German => "Die fokussierte Anwendung ist unbekannt; begrenzte Expansionen werden sicher blockiert.",
             },
-        }
-    }
-
-    pub fn evdev_quarantine_notice(&self, count: u64) -> String {
-        match self.lang {
-            Language::English => format!(
-                "{count} captured input events were ignored after output to prevent stale input from triggering again. If a trigger did not expand, type it again after output settles."
-            ),
-            Language::Indonesian => format!(
-                "{count} peristiwa input yang tertangkap diabaikan setelah output untuk mencegah input lama memicu ekspansi lagi. Jika pemicu tidak berekspansi, ketik ulang setelah output selesai."
-            ),
-            Language::German => format!(
-                "{count} erfasste Eingabeereignisse wurden nach der Ausgabe verworfen, damit veraltete Eingaben keine erneute Expansion auslösen. Falls ein Kürzel nicht expandiert wurde, geben Sie es nach Abschluss der Ausgabe erneut ein."
-            ),
         }
     }
 
@@ -775,14 +739,6 @@ impl Strings {
         })
     }
 
-    pub fn trace_progress(&self, erased: usize, inserted: usize) -> String {
-        match self.lang {
-            Language::English => format!("Confirmed output progress: {erased} erased, {inserted} inserted units"),
-            Language::Indonesian => format!("Progres keluaran terkonfirmasi: {erased} unit dihapus, {inserted} unit disisipkan"),
-            Language::German => format!("Bestätigter Ausgabefortschritt: {erased} gelöscht, {inserted} eingefügte Einheiten"),
-        }
-    }
-
     pub fn form_preview_privacy(&self) -> &'static str {
         match self.lang {
             Language::English => "Values and rendered text stay in this editor session.",
@@ -790,22 +746,6 @@ impl Strings {
                 "Nilai dan teks hasil render hanya tersimpan di sesi editor ini."
             }
             Language::German => "Werte und gerenderter Text bleiben in dieser Editorsitzung.",
-        }
-    }
-
-    pub fn cursor_placement(&self, position: usize) -> String {
-        match self.lang {
-            Language::English => format!("Cursor placement: character {position}"),
-            Language::Indonesian => format!("Posisi kursor: karakter {position}"),
-            Language::German => format!("Cursorposition: Zeichen {position}"),
-        }
-    }
-
-    pub fn template_error(&self, error: &str) -> String {
-        match self.lang {
-            Language::English => format!("Template error: {error}"),
-            Language::Indonesian => format!("Kesalahan templat: {error}"),
-            Language::German => format!("Vorlagenfehler: {error}"),
         }
     }
 
@@ -859,27 +799,6 @@ impl Strings {
         }
     }
 
-    pub fn ibus_route_not_ready(&self, failed_check: &str) -> String {
-        match self.lang {
-            Language::English => format!("Not ready — fix this first: {failed_check}"),
-            Language::Indonesian => format!("Belum siap — perbaiki ini dulu: {failed_check}"),
-            Language::German => format!("Nicht bereit — zuerst beheben: {failed_check}"),
-        }
-    }
-
-    pub fn ibus_field_counts(&self, keys: u64, output_emissions: u64) -> String {
-        match self.lang {
-            Language::English => {
-                format!("{keys} keys · {output_emissions} output emission(s), unverified")
-            }
-            Language::Indonesian => {
-                format!("{keys} tombol · {output_emissions} keluaran dikirim, belum terverifikasi")
-            }
-            Language::German => {
-                format!("{keys} Tasten · {output_emissions} Ausgabe(n) gesendet, nicht verifiziert")
-            }
-        }
-    }
     pub fn ibus_readiness_stage(&self, stage: &str) -> &'static str {
         match (stage, self.lang) {
             ("component_installed", Language::English) => "component installed",

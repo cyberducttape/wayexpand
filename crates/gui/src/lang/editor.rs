@@ -57,22 +57,6 @@ impl Strings {
         }
     }
 
-    pub fn reusable_snippet_tooltip(&self, trigger: &str) -> String {
-        match self.lang {
-            Language::English => format!("Insert the static text from {trigger}"),
-            Language::Indonesian => format!("Sisipkan teks statis dari {trigger}"),
-            Language::German => format!("Statischen Text aus {trigger} einfügen"),
-        }
-    }
-
-    pub fn reusable_snippet_description(&self, trigger: &str, description: &str) -> String {
-        match self.lang {
-            Language::English => format!("{trigger}: {description}"),
-            Language::Indonesian => format!("{trigger}: {description}"),
-            Language::German => format!("{trigger}: {description}"),
-        }
-    }
-
     pub fn broker_action_unlisted(&self) -> &'static str {
         match self.lang {
             Language::English => {
@@ -94,42 +78,6 @@ impl Strings {
             Language::German => {
                 "Die Formularfelder stimmen anhand ihrer Namen mit dem Broker-Schema überein."
             }
-        }
-    }
-
-    pub fn broker_schema_missing(&self, names: &str) -> String {
-        match self.lang {
-            Language::English => format!("Add form fields for: {names}"),
-            Language::Indonesian => format!("Tambahkan kolom formulir untuk: {names}"),
-            Language::German => format!("Formularfelder hinzufügen für: {names}"),
-        }
-    }
-
-    pub fn broker_schema_unexpected(&self, names: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Remove or rename fields not accepted by this action: {names}")
-            }
-            Language::Indonesian => {
-                format!("Hapus atau ganti nama kolom yang tidak diterima aksi ini: {names}")
-            }
-            Language::German => {
-                format!("Nicht akzeptierte Felder entfernen oder umbenennen: {names}")
-            }
-        }
-    }
-
-    pub fn broker_schema_constraint_mismatch(&self, names: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Form input may exceed the broker constraints for: {names}")
-            }
-            Language::Indonesian => {
-                format!("Input formulir mungkin melampaui batasan broker untuk: {names}")
-            }
-            Language::German => format!(
-                "Formulareingaben können die Broker-Beschränkungen überschreiten für: {names}"
-            ),
         }
     }
 

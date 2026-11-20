@@ -988,20 +988,6 @@ impl Strings {
         }
     }
 
-    pub fn setup_changed_since_test(&self, change: &str) -> String {
-        match self.lang {
-            Language::English => format!(
-                "Your setup changed since the last confirmed test ({change}). Test it again from Getting started."
-            ),
-            Language::German => format!(
-                "Ihre Einrichtung hat sich seit dem letzten bestätigten Test geändert ({change}). Testen Sie erneut über „Erste Schritte“."
-            ),
-            Language::Indonesian => format!(
-                "Penyiapan Anda berubah sejak uji terakhir yang dipastikan ({change}). Uji lagi dari Memulai."
-            ),
-        }
-    }
-
     pub fn setup_change(&self, change: &crate::setup_record::Staleness) -> String {
         use crate::setup_record::Staleness;
         match (change, self.lang) {

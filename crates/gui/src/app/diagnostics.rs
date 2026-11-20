@@ -1653,11 +1653,10 @@ impl GuiApp {
                     } else {
                         profile.verified_applications.join(", ")
                     };
-                    ui.label(crate::lang::fill(
+                    ui.label(
                         self.strings
-                            .dg_verified_applications_verified_applications(),
-                        &[&verified_applications],
-                    ));
+                            .dg_verified_applications_verified_applications(&verified_applications),
+                    );
                 });
             }
         });
@@ -1689,13 +1688,7 @@ impl GuiApp {
                         "wayexpand backend test --capture",
                         "wayexpand backend test --injection",
                     ] {
-                        if ui
-                            .button(crate::lang::fill(
-                                self.strings.dg_copy_command(),
-                                &[&command],
-                            ))
-                            .clicked()
-                        {
+                        if ui.button(self.strings.dg_copy_command(command)).clicked() {
                             ui.ctx().copy_text(command.to_owned());
                         }
                     }
@@ -1816,12 +1809,9 @@ impl GuiApp {
                         ..
                     } = &self.config.expansion[index];
                     ui.label(
-                        RichText::new(crate::lang::fill(
-                            self.strings.dg_type_this_once_trigger(),
-                            &[&trigger],
-                        ))
-                        .heading()
-                        .strong(),
+                        RichText::new(self.strings.dg_type_this_once_trigger(trigger))
+                            .heading()
+                            .strong(),
                     );
                     ui.label(RichText::new(self.strings.dg_expected_replacement()).strong());
                     ui.add(
@@ -2035,7 +2025,7 @@ impl GuiApp {
             self.desktop_test_verified_application = None;
             self.status = Status::warning(
                 self.strings
-                    .setup_changed_since_test(&self.strings.setup_change(staleness)),
+                    .setup_changed_since_test(self.strings.setup_change(staleness)),
             );
             self.desktop_test_review = None;
         } else if confirmed {
@@ -2105,10 +2095,7 @@ impl GuiApp {
                     .service_restart_unit
                     .as_deref()
                     .unwrap_or("unknown service");
-                ui.label(crate::lang::fill(
-                    self.strings.dg_restart_unit_using_your_user_systemd(),
-                    &[&unit],
-                ));
+                ui.label(self.strings.dg_restart_unit_using_your_user_systemd(unit));
                 ui.colored_label(
                     palette.warning,
                     self.strings.dg_the_input_route_may_be_interrupted(),
@@ -2591,22 +2578,14 @@ impl GuiApp {
             .create_new(true)
             .mode(0o600)
             .open(&path)
-            .map_err(|error| {
-                crate::lang::fill(
-                    self.strings.dg_could_not_create_report_file_error(),
-                    &[&error],
-                )
-            })?;
+            .map_err(|error| self.strings.dg_could_not_create_report_file_error(&error))?;
         if let Err(error) = file
             .write_all(report.as_bytes())
             .and_then(|()| file.sync_all())
         {
             drop(file);
             let _ = std::fs::remove_file(&path);
-            return Err(crate::lang::fill(
-                self.strings.dg_could_not_write_report_error(),
-                &[&error],
-            ));
+            return Err(self.strings.dg_could_not_write_report_error(&error));
         }
         Ok(())
     }
@@ -2692,11 +2671,11 @@ impl GuiApp {
                 );
                 ui.colored_label(
                     if running { palette.success } else if readiness.ibus_running && readiness.engine_running { palette.warning } else { palette.muted },
-                    crate::lang::fill(self.strings.dg_running_running_text(), &[&running_text]),
+                    self.strings.dg_running_running_text(running_text),
                 );
                 ui.colored_label(
                     if self.desktop_test_verified { palette.success } else { palette.muted },
-                    crate::lang::fill(self.strings.dg_verified_verified_text(), &[&verified_text]),
+                    self.strings.dg_verified_verified_text(&verified_text),
                 );
             });
             if !self.desktop_test_verified {
@@ -2814,12 +2793,9 @@ impl GuiApp {
                     ui.label(RichText::new(&check.detail).small().color(palette.muted));
                     if let Some(problem_id) = check.problem_id {
                         ui.label(
-                            RichText::new(crate::lang::fill(
-                                self.strings.dg_problem_problem_id(),
-                                &[&problem_id],
-                            ))
-                            .small()
-                            .color(color),
+                            RichText::new(self.strings.dg_problem_problem_id(problem_id))
+                                .small()
+                                .color(color),
                         );
                     }
                     if check.state != IbusCheckState::Pass {

@@ -9,10 +9,16 @@ fn main() {
     generate_locale_strings();
 }
 
-/// Read `locales/{en,de,id}.toml` and generate one `&'static str` method on
-/// `Strings` per key. The build fails when a language lacks a key, has an
-/// extra one, or uses different `{placeholders}` than English, so a
-/// translation can never silently fall back or drop a value.
+/// Read `locales/{en,de,id}.toml` and generate one method on `Strings` per
+/// key. A key whose placeholders are all names (`{count}`, `{app_id}`) gets a
+/// method taking those values, in the order English first uses them, and
+/// returning the filled `String`; translations may reorder named
+/// placeholders. Any other key returns its `&'static str` template.
+///
+/// The build fails when a language lacks a key, has an extra one, or uses
+/// different placeholders than English (the same names, or for unnamed
+/// placeholders the same sequence), so a translation can never silently fall
+/// back or drop a value.
 fn generate_locale_strings() {
     let dir = Path::new("locales");
     println!("cargo:rerun-if-changed=locales");
@@ -38,7 +44,17 @@ fn generate_locale_strings() {
         }
         for (key, text) in table {
             if let Some(source) = english.get(key) {
-                if placeholders(source) != placeholders(text) {
+                let differs = match named_placeholders(source) {
+                    Some(mut names) => {
+                        names.sort_unstable();
+                        let mut other = named_placeholders(text).unwrap_or_default();
+                        other.sort_unstable();
+                        other.dedup();
+                        names != other
+                    }
+                    None => placeholders(source) != placeholders(text),
+                };
+                if differs {
                     problems.push(format!(
                         "{code}.toml `{key}` uses placeholders {:?}; en.toml uses {:?}",
                         placeholders(text),
@@ -59,10 +75,26 @@ fn generate_locale_strings() {
          impl crate::lang::Strings {\n",
     );
     for key in english.keys() {
-        let _ = writeln!(
-            code,
-            "    pub fn {key}(&self) -> &'static str {{\n        match self.lang {{"
-        );
+        let names = named_placeholders(&english[key]);
+        match &names {
+            Some(names) => {
+                let params: Vec<String> = names
+                    .iter()
+                    .map(|name| format!(", {name}: impl std::fmt::Display"))
+                    .collect();
+                let _ = writeln!(
+                    code,
+                    "    pub fn {key}(&self{}) -> String {{\n        let template = match self.lang {{",
+                    params.concat()
+                );
+            }
+            None => {
+                let _ = writeln!(
+                    code,
+                    "    pub fn {key}(&self) -> &'static str {{\n        match self.lang {{"
+                );
+            }
+        }
         for ((_, variant), table) in LANGUAGES.iter().zip(&tables) {
             let _ = writeln!(
                 code,
@@ -70,7 +102,20 @@ fn generate_locale_strings() {
                 table[key]
             );
         }
-        code.push_str("        }\n    }\n");
+        match &names {
+            Some(names) => {
+                let values: Vec<String> = names
+                    .iter()
+                    .map(|name| format!("({name:?}, &{name} as &dyn std::fmt::Display)"))
+                    .collect();
+                let _ = writeln!(
+                    code,
+                    "        }};\n        crate::lang::fill_named(template, &[{}])\n    }}",
+                    values.join(", ")
+                );
+            }
+            None => code.push_str("        }\n    }\n"),
+        }
     }
     code.push_str("}\n");
     let out =
@@ -96,6 +141,33 @@ fn flatten(code: &str, table: &toml::Table) -> BTreeMap<String, String> {
         }
     }
     out
+}
+
+/// The distinct placeholder names of a template, in order of first use, when
+/// it has placeholders and every one is a Rust identifier; otherwise `None`.
+fn named_placeholders(text: &str) -> Option<Vec<&str>> {
+    let found = placeholders(text);
+    if found.is_empty() {
+        return None;
+    }
+    let mut names = Vec::new();
+    for holder in found {
+        let name = &holder[1..holder.len() - 1];
+        let identifier = name
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_lowercase() || first == '_')
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if !identifier {
+            return None;
+        }
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    Some(names)
 }
 
 /// The `{...}` placeholders of a template, in order.

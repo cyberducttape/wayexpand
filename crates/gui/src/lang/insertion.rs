@@ -148,44 +148,6 @@ impl Strings {
         }
     }
 
-    pub fn output_uncertain_notice(&self, count: u64) -> String {
-        match self.lang {
-            Language::English => format!(
-                "The result of {count} output transaction(s) is unknown. They were not retried; check the affected text and recent outcomes."
-            ),
-            Language::German => format!(
-                "Das Ergebnis von {count} Ausgabevorgang(en) ist unbekannt. Sie wurden nicht wiederholt; prüfen Sie den betroffenen Text und die letzten Ergebnisse."
-            ),
-            Language::Indonesian => format!(
-                "Hasil {count} transaksi keluaran tidak diketahui. Transaksi tidak diulang; periksa teks dan hasil terbaru."
-            ),
-        }
-    }
-
-    pub fn output_partial_notice(&self, count: u64) -> String {
-        match self.lang {
-            Language::English => format!("Partial insertion detected in {count} transaction(s). Check the target text; WayExpand did not retry."),
-            Language::German => format!("Teilweise Einfügung bei {count} Vorgang/Vorgängen erkannt. Prüfen Sie den Zieltext; WayExpand hat nichts wiederholt."),
-            Language::Indonesian => format!("Penyisipan sebagian terdeteksi pada {count} transaksi. Periksa teks tujuan; WayExpand tidak mengulanginya."),
-        }
-    }
-
-    pub fn output_partial_badge(&self, count: u64) -> String {
-        match self.lang {
-            Language::English => format!("Partial insertion · {count}"),
-            Language::German => format!("Teilweise Einfügung · {count}"),
-            Language::Indonesian => format!("Penyisipan sebagian · {count}"),
-        }
-    }
-
-    pub fn output_uncertain_badge(&self, count: u64) -> String {
-        match self.lang {
-            Language::English => format!("Check output · {count}"),
-            Language::German => format!("Ausgabe prüfen · {count}"),
-            Language::Indonesian => format!("Periksa keluaran · {count}"),
-        }
-    }
-
     pub fn keystroke_limit_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
@@ -196,18 +158,6 @@ impl Strings {
             }
             Language::Indonesian => {
                 "Karakter (1–5000; bawaan 8). Untuk penggantian non-atomik, batas ini berlaku hanya setelah izin kompatibilitas diaktifkan. Nilai lebih tinggi mengizinkan teks lebih panjang tetapi memperbesar waktu penyisipan dapat terhenti dan meninggalkan teks parsial; keluaran keysym libei sekitar 83 karakter/detik. Gunakan nilai pendek sehari-hari; pakai Quick Picker atau Buat File untuk teks panjang."
-            }
-        }
-    }
-
-    pub fn status_keystroke_limit_not_a_number(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("keystroke limit must be a whole number ({detail})"),
-            Language::German => {
-                format!("Tastenanschlag-Limit muss eine ganze Zahl sein ({detail})")
-            }
-            Language::Indonesian => {
-                format!("batas penekanan tombol harus berupa bilangan bulat ({detail})")
             }
         }
     }
