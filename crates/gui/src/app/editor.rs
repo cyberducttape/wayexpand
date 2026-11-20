@@ -186,7 +186,7 @@ impl GuiApp {
             }
             Err(error) => {
                 self.command_preview_result =
-                    Some(Err(self.strings.status_command_invalid(&error.to_string())));
+                    Some(Err(self.strings.status_command_invalid(error.to_string())));
                 return;
             }
         };
@@ -221,7 +221,7 @@ impl GuiApp {
                 // Runs under the daemon's service sandbox when systemd is
                 // available, so the preview behaves like the real expansion.
                 let result = wayexpand_core::run_command_preview(&command, &worker_cancel)
-                    .map_err(|error| strings.status_command_failed(&error.to_string()));
+                    .map_err(|error| strings.status_command_failed(error.to_string()));
                 let _ = sender.send(result);
             });
         if let Err(error) = spawned {

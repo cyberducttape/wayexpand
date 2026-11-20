@@ -11,7 +11,7 @@ impl GuiApp {
                 self.status = Status::success(self.strings.status_import_loaded());
             }
             Err(error) => {
-                self.status = Status::error(self.strings.status_import_failed(&error.to_string()))
+                self.status = Status::error(self.strings.status_import_failed(error.to_string()))
             }
         }
     }
@@ -31,7 +31,7 @@ impl GuiApp {
             (merged, Some(stats))
         };
         if let Err(error) = candidate.validate() {
-            self.status = Status::error(self.strings.status_import_rejected(&error.safe_summary()));
+            self.status = Status::error(self.strings.status_import_rejected(error.safe_summary()));
             self.import_preview = Some((imported, report));
             return;
         }

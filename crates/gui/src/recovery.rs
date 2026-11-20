@@ -53,14 +53,14 @@ impl RecoveryApp {
         match started {
             Ok(_) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Err(error) => {
-                self.status = Some(self.strings.recovery_relaunch_failed(&error.to_string()))
+                self.status = Some(self.strings.recovery_relaunch_failed(error.to_string()))
             }
         }
     }
 
     fn open(&mut self, target: &Path) {
         if let Err(error) = std::process::Command::new("xdg-open").arg(target).spawn() {
-            self.status = Some(self.strings.recovery_open_failed(&error.to_string()));
+            self.status = Some(self.strings.recovery_open_failed(error.to_string()));
         }
     }
 }
@@ -133,7 +133,7 @@ impl eframe::App for RecoveryApp {
                         Ok(()) => self.relaunch(&ctx),
                         Err(error) => {
                             self.status =
-                                Some(self.strings.recovery_action_failed(&error.to_string()))
+                                Some(self.strings.recovery_action_failed(error.to_string()))
                         }
                     }
                 }
@@ -146,7 +146,7 @@ impl eframe::App for RecoveryApp {
                         Ok(_) => self.relaunch(&ctx),
                         Err(error) => {
                             self.status =
-                                Some(self.strings.recovery_action_failed(&error.to_string()))
+                                Some(self.strings.recovery_action_failed(error.to_string()))
                         }
                     }
                 }

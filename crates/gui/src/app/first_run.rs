@@ -265,7 +265,7 @@ impl GuiApp {
             Ok(false) => {}
             Err(error) => {
                 self.status =
-                    Status::error(self.strings.status_picker_open_failed(&error.to_string()));
+                    Status::error(self.strings.status_picker_open_failed(error.to_string()));
                 return;
             }
         }
@@ -274,7 +274,7 @@ impl GuiApp {
             Err(error) => {
                 self.status = Status::error(
                     self.strings
-                        .status_picker_executable_missing(&error.to_string()),
+                        .status_picker_executable_missing(error.to_string()),
                 );
                 return;
             }
@@ -293,7 +293,7 @@ impl GuiApp {
             }
             Err(error) => {
                 self.status =
-                    Status::error(self.strings.status_picker_open_failed(&error.to_string()));
+                    Status::error(self.strings.status_picker_open_failed(error.to_string()));
             }
         }
     }
@@ -720,10 +720,7 @@ impl GuiApp {
                         } else if route_ready {
                             ui.colored_label(
                                 palette.success,
-                                crate::lang::fill(
-                                    self.strings.first_run_connected(),
-                                    &[&route_state_detail],
-                                ),
+                                self.strings.first_run_connected(&route_state_detail),
                             );
                         } else {
                             // One problem and one action: the same answer the
@@ -1040,7 +1037,7 @@ impl GuiApp {
                             (_, Some(keys)) => {
                                 ui.colored_label(
                                     palette.success,
-                                    crate::lang::fill(self.strings.shortcut_ready(), &[keys]),
+                                    self.strings.shortcut_ready(keys),
                                 );
                                 ui.label(
                                     RichText::new(self.strings.shortcut_change_hint())
@@ -1063,10 +1060,9 @@ impl GuiApp {
                                 if ui
                                     .add_enabled(
                                         !running,
-                                        egui::Button::new(crate::lang::fill(
-                                            self.strings.shortcut_use_keys(),
-                                            &[&DEFAULT_PICKER_SHORTCUT],
-                                        )),
+                                        egui::Button::new(
+                                            self.strings.shortcut_use_keys(DEFAULT_PICKER_SHORTCUT),
+                                        ),
                                     )
                                     .clicked()
                                 {

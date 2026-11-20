@@ -109,6 +109,28 @@ pub(crate) fn fill(template: &str, values: &[&dyn std::fmt::Display]) -> String 
     out
 }
 
+/// Replace each `{name}` placeholder with the value given for that name.
+/// Translations may order named placeholders freely. An unknown name is
+/// left as written.
+pub(crate) fn fill_named(template: &str, values: &[(&str, &dyn std::fmt::Display)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(start) = rest.find('{') {
+        let Some(end) = rest[start..].find('}') else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+        let name = &rest[start + 1..start + end];
+        match values.iter().find(|(key, _)| *key == name) {
+            Some((_, value)) => out.push_str(&value.to_string()),
+            None => out.push_str(&rest[start..start + end + 1]),
+        }
+        rest = &rest[start + end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 mod appearance;
 mod diagnostics;
 mod diagnostics_ui;
@@ -122,9 +144,38 @@ mod next_step;
 mod onboarding;
 mod picker;
 mod recovery;
-mod route_fit;
 mod sidebar;
 mod status_messages;
 mod toolbar;
 mod why;
 pub use toolbar::HeaderState;
+
+#[cfg(test)]
+mod fill_tests {
+    use super::*;
+
+    #[test]
+    fn named_placeholders_fill_by_name_in_any_order() {
+        let count = 3;
+        assert_eq!(
+            fill_named(
+                "{app} hat {count} Snippets",
+                &[("count", &count), ("app", &"Kate")]
+            ),
+            "Kate hat 3 Snippets"
+        );
+        assert_eq!(
+            fill_named("keep {unknown}", &[("app", &"x")]),
+            "keep {unknown}"
+        );
+        assert_eq!(fill_named("{a}{a}", &[("a", &1)]), "11");
+    }
+
+    #[test]
+    fn generated_methods_take_named_values() {
+        let strings = Strings::new(Language::German);
+        let text = strings.dg_copy_command("wayexpand doctor");
+        assert!(text.contains("wayexpand doctor"), "{text}");
+        assert!(!text.contains('{'), "{text}");
+    }
+}

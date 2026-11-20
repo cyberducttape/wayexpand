@@ -15,88 +15,6 @@ impl Strings {
         }
     }
 
-    pub fn status_daemon_not_reloaded(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("daemon did not reload: {detail}"),
-            Language::Indonesian => format!("daemon tidak memuat ulang: {detail}"),
-            Language::German => format!("Daemon hat nicht neu geladen: {detail}"),
-        }
-    }
-
-    pub fn status_buffer_limit_not_a_number(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("buffer limit must be a whole number ({detail})")
-            }
-            Language::Indonesian => {
-                format!("batas buffer harus berupa bilangan bulat ({detail})")
-            }
-            Language::German => format!("Puffergrenze muss eine ganze Zahl sein ({detail})"),
-        }
-    }
-
-    pub fn status_settings_invalid(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Settings invalid: {detail}"),
-            Language::Indonesian => format!("Pengaturan tidak valid: {detail}"),
-            Language::German => format!("Einstellungen ungültig: {detail}"),
-        }
-    }
-
-    pub fn status_settings_rejected(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Settings rejected: {detail}"),
-            Language::Indonesian => format!("Pengaturan ditolak: {detail}"),
-            Language::German => format!("Einstellungen abgelehnt: {detail}"),
-        }
-    }
-
-    pub fn status_appearance_save_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Appearance preference could not be saved: {detail}")
-            }
-            Language::Indonesian => {
-                format!("Preferensi tampilan tidak dapat disimpan: {detail}")
-            }
-            Language::German => {
-                format!("Darstellungseinstellung konnte nicht gespeichert werden: {detail}")
-            }
-        }
-    }
-
-    pub fn status_settings_save_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Settings save failed: {detail}"),
-            Language::Indonesian => format!("Gagal menyimpan pengaturan: {detail}"),
-            Language::German => format!("Speichern der Einstellungen fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_import_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Import failed: {detail}"),
-            Language::Indonesian => format!("Impor gagal: {detail}"),
-            Language::German => format!("Import fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_import_rejected(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Import rejected: {detail}"),
-            Language::Indonesian => format!("Impor ditolak: {detail}"),
-            Language::German => format!("Import abgelehnt: {detail}"),
-        }
-    }
-
-    pub fn status_import_save_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Import save failed: {detail}"),
-            Language::Indonesian => format!("Gagal menyimpan impor: {detail}"),
-            Language::German => format!("Speichern des Imports fehlgeschlagen: {detail}"),
-        }
-    }
-
     pub fn status_imported_with_report(
         &self,
         fully_migrated: usize,
@@ -125,42 +43,6 @@ impl Strings {
             Language::German => {
                 "Konfiguration wurde außerhalb von WayExpand geändert; vor dem Speichern neu laden"
             }
-        }
-    }
-
-    pub fn status_reload_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Reload failed: {detail}"),
-            Language::Indonesian => format!("Gagal memuat ulang: {detail}"),
-            Language::German => format!("Neu laden fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_command_invalid(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Command settings invalid: {detail}")
-            }
-            Language::Indonesian => {
-                format!("Pengaturan perintah tidak valid: {detail}")
-            }
-            Language::German => format!("Befehlseinstellungen ungültig: {detail}"),
-        }
-    }
-
-    pub fn status_save_rejected(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Save rejected: {detail}"),
-            Language::Indonesian => format!("Penyimpanan ditolak: {detail}"),
-            Language::German => format!("Speichern abgelehnt: {detail}"),
-        }
-    }
-
-    pub fn status_save_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Save failed: {detail}"),
-            Language::Indonesian => format!("Gagal menyimpan: {detail}"),
-            Language::German => format!("Speichern fehlgeschlagen: {detail}"),
         }
     }
 
@@ -210,94 +92,6 @@ impl Strings {
         }
     }
 
-    pub fn status_undo_save_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Undo save failed: {detail}"),
-            Language::Indonesian => format!("Gagal mengurungkan penyimpanan: {detail}"),
-            Language::German => format!("Rückgängig-Speichern fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_create_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Create failed: {detail}"),
-            Language::Indonesian => format!("Gagal membuat: {detail}"),
-            Language::German => format!("Erstellen fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_duplicate_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Duplicate failed: {detail}"),
-            Language::Indonesian => format!("Gagal menduplikasi: {detail}"),
-            Language::German => format!("Duplizieren fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_deleted(&self, trigger: &str) -> String {
-        match self.lang {
-            Language::English => format!("Deleted {trigger}"),
-            Language::Indonesian => format!("{trigger} dihapus"),
-            Language::German => format!("{trigger} gelöscht"),
-        }
-    }
-
-    pub fn status_delete_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Delete failed: {detail}"),
-            Language::Indonesian => format!("Gagal menghapus: {detail}"),
-            Language::German => format!("Löschen fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_snippet_enabled(&self, trigger: &str) -> String {
-        match self.lang {
-            Language::English => format!("{trigger} enabled"),
-            Language::Indonesian => format!("{trigger} diaktifkan"),
-            Language::German => format!("{trigger} aktiviert"),
-        }
-    }
-
-    pub fn status_snippet_disabled(&self, trigger: &str) -> String {
-        match self.lang {
-            Language::English => format!("{trigger} disabled"),
-            Language::Indonesian => format!("{trigger} dinonaktifkan"),
-            Language::German => format!("{trigger} deaktiviert"),
-        }
-    }
-
-    pub fn status_toggle_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Toggle failed: {detail}"),
-            Language::Indonesian => format!("Gagal mengubah status: {detail}"),
-            Language::German => format!("Umschalten fehlgeschlagen: {detail}"),
-        }
-    }
-
-    pub fn status_control_unavailable(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Daemon control unavailable: {detail}")
-            }
-            Language::Indonesian => {
-                format!("Kontrol daemon tidak tersedia: {detail}")
-            }
-            Language::German => format!("Daemon-Steuerung nicht verfügbar: {detail}"),
-        }
-    }
-
-    pub fn status_app_filter_added(&self, value: &str) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Added \"{value}\" to the app filter")
-            }
-            Language::Indonesian => {
-                format!("\"{value}\" ditambahkan ke filter aplikasi")
-            }
-            Language::German => format!("\"{value}\" zum App-Filter hinzugefügt"),
-        }
-    }
-
     pub fn status_detection_timed_out(&self) -> &'static str {
         match self.lang {
             Language::English => {
@@ -321,14 +115,6 @@ impl Strings {
             Language::German => {
                 "Fenstererkennung ist hier nicht verfügbar (KDE Plasma oder GNOME mit der WayExpand-Erweiterung: `wayexpand setup` ausführen)"
             }
-        }
-    }
-
-    pub fn status_command_failed(&self, detail: &str) -> String {
-        match self.lang {
-            Language::English => format!("Command failed: {detail}"),
-            Language::Indonesian => format!("Perintah gagal: {detail}"),
-            Language::German => format!("Befehl fehlgeschlagen: {detail}"),
         }
     }
 

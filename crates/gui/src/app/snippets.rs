@@ -25,8 +25,7 @@ impl GuiApp {
         let expansion = match draft.to_expansion(id) {
             Ok(expansion) => expansion,
             Err(error) => {
-                self.status =
-                    Status::error(self.strings.status_command_invalid(&error.to_string()));
+                self.status = Status::error(self.strings.status_command_invalid(error.to_string()));
                 return;
             }
         };

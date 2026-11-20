@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- 86 more GUI strings moved from Rust into the locale files: 80 with named
+  placeholders, which translations may now reorder (`{count}`, `{app}`), and
+  6 plain ones. Their output in English, German and Indonesian is unchanged.
 - CI's headless KWin layout checks now include US International with dead
   keys (`us(intl)`): `` don't "say" ~^` `` and `äéñßøå ¡¿` are typed exactly.
 - The lifecycle soak can keep one daemon running for the whole run

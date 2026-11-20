@@ -1,5 +1,7 @@
 # English GUI strings. Keys are Strings method names; every key must exist
 # in de.toml and id.toml with the same {placeholders} (checked by build.rs).
+# Named placeholders ({count}) may be reordered in a translation; unnamed
+# ones ({} or {0}) are filled in order and may not.
 
 [appearance]
 appearance = "Appearance"
@@ -92,6 +94,14 @@ fix_label = "Fix:"
 copy_fix_tooltip = "Copy this fix to the clipboard"
 ranked_routes_title = "Ranked input routes"
 ranked_routes_subtitle = "Based on this session, organization policy, and catalog certification. Experimental routes remain uncertified."
+report_updated_minutes_ago = "Session report updated {minutes} min ago · refresh before relying on it"
+raw_capture_app_scope_notice = "Raw-input matching is assigned to {count} configured applications. This limits where WayExpand matches, not where evdev observes keys; password fields cannot be detected, and browser-field insertion is not verified."
+evdev_quarantine_notice = "{count} captured input events were ignored after output to prevent stale input from triggering again. If a trigger did not expand, type it again after output settles."
+trace_progress = "Confirmed output progress: {erased} erased, {inserted} inserted units"
+cursor_placement = "Cursor placement: character {position}"
+template_error = "Template error: {error}"
+ibus_route_not_ready = "Not ready — fix this first: {failed_check}"
+ibus_field_counts = "{keys} keys · {output_emissions} output emission(s), unverified"
 
 [diagnostics_ui]
 dg_in_inspect_the_field_where_you = "In {}, inspect the field where you attempted to type {}. Do not type the trigger again."
@@ -258,6 +268,7 @@ dg_real_insertion_test_explainer = "A real insertion test verifies text in a tar
 dg_real_app_test_needs_snippet = "A real-app test needs a saved, enabled static snippet. Add the harmless WayExpand test snippet or enable a suitable static snippet; command-backed and templated snippets are excluded."
 dg_restore_confirm = "I reviewed these differences and want to restore this configuration"
 dg_versions_match = "CLI and daemon match"
+dg_installation_components = "Components needing attention: {components}"
 
 [dialogs]
 diagnostics_title = "Diagnostics"
@@ -328,6 +339,7 @@ unsaved_closing = "closing WayExpand"
 save_continue = "Save and continue"
 discard = "Discard"
 delete_button = "Delete snippet"
+profile_automatic_active = "Application-selected profile: {name}"
 
 [editor]
 trigger = "Trigger"
@@ -387,6 +399,11 @@ cache_ms = "Cache ms"
 arguments = "Arguments"
 advanced_options = "Advanced options"
 advanced_options_in_use = "Advanced options (in use)"
+reusable_snippet_tooltip = "Insert the static text from {trigger}"
+reusable_snippet_description = "{trigger}: {description}"
+broker_schema_missing = "Add form fields for: {names}"
+broker_schema_unexpected = "Remove or rename fields not accepted by this action: {names}"
+broker_schema_constraint_mismatch = "Form input may exceed the broker constraints for: {names}"
 
 [editor_chrome]
 preview_app = "Preview app"
@@ -500,12 +517,34 @@ picker_form_preview = "Preview · this is what will be copied"
 picker_review_title = "Automation review"
 picker_copy_output = "Copy output"
 picker_back_to_results = "Back to results"
+pack_catalog_invalid_count = "Skipped {count} invalid catalog entr(y/ies)."
+pack_catalog_verified_signer = "Signature verified by {signer}"
+pack_catalog_signer_file = "Catalog signatures checked with: {path}"
+pack_catalog_signature_reason = "Signature unverified: {reason}"
+pack_review_record = "Review record: {reviewer} · {date} · {summary} (metadata only)"
+pack_action_counts = "Executable entries: {commands} commands · {hotkeys} hotkeys"
+pack_maintainer = "Maintainer: {maintainer}"
+pack_risk = "Risk: {level} — {summary}"
+pack_minimum_version = "Requires WayExpand {version} or newer"
+pack_source_file = "Source file: {file}"
+pack_snippets = "Review snippet contents ({count})"
+pack_signature_identity = "Verified signer: {signer} · trust source: {source} · {path}"
+pack_signature_reason = "Signature verification detail: {reason}"
+pack_install_result = "Install result: {output}"
+picker_copied = "Copied {trigger} · switch to your app and paste with Ctrl+V · return here to close the picker"
+picker_inserting = "Inserting {trigger}…"
+picker_app_scope = "Automatic insertion only in any of: {scope}"
 
 [insertion]
 keystroke_limit = "Synthetic output and replacement limit"
 compatibility_mode_label = "Keystroke routes (compatibility mode)"
 compatibility_mode_risk = "Risk of non-atomic replacement: physical typing can reach the application while WayExpand is erasing and inserting, so the two streams may interleave and corrupt nearby text. Evdev also cannot detect password fields. Keep this Off for strict safety; prefer a verified input-method route when text integrity matters."
 terminal_paste_label = "Terminal paste"
+output_uncertain_notice = "The result of {count} output transaction(s) is unknown. They were not retried; check the affected text and recent outcomes."
+output_partial_notice = "Partial insertion detected in {count} transaction(s). Check the target text; WayExpand did not retry."
+output_partial_badge = "Partial insertion · {count}"
+output_uncertain_badge = "Check output · {count}"
+status_keystroke_limit_not_a_number = "keystroke limit must be a whole number ({detail})"
 refusal_notifications_label = "Notify me when a snippet is not typed"
 refusal_notifications_help = "Shows a desktop notification with the reason when this typing route refuses a snippet, for example because it is too long or contains a character your layout cannot type. The notification never shows the trigger or the text. Its Copy snippet button puts the text on the clipboard for you to paste; nothing is pasted automatically."
 
@@ -516,6 +555,7 @@ upgrade_restart_unmanaged = "The daemon build differs, but no matching managed s
 upgrade_build_current = "The running daemon matches this GUI build. Refresh diagnostics to check the input route."
 upgrade_check_unreadable = "The version check did not return a readable report. Open Diagnostics → Versions and run `wayexpand upgrade --check --json`."
 upgrade_installation_incomplete = "The upgrade check found missing installed components. Open Diagnostics and run `wayexpand install-check --json` to see what needs repair."
+setup_changed_since_test = "Your setup changed since the last confirmed test ({change}). Test it again from Getting started."
 
 [onboarding]
 outcome_working = "Verified in the controlled test field"
@@ -649,6 +689,16 @@ repair_completed = "The missing service links were restored. WayExpand is checki
 repair_already_completed = "No repair remained to apply. WayExpand is refreshing installation and desktop checks."
 repair_check_unreadable = "WayExpand could not verify the repair plan. Open Diagnostics and check the installation report."
 repair_result_unreadable = "The repair result could not be verified. Open Diagnostics and inspect the installation report before retrying."
+setup_unverified_state_unsaved = "WayExpand is configured but unverified. The incomplete first-run state could not be saved, so the guide may not reopen automatically: {error}"
+setup_unverified_fallback = "{fallback} Configuration and service state were not enough to verify a real application insertion; check Diagnostics."
+setup_could_not_check_stages = "Could not check the IBus setup stages: {detail}"
+status_restarting_unit = "Restarting {unit}…"
+status_restart_failed = "Could not start service restart: {error}"
+status_real_app_test_state_unsaved = "A real-app test is still required, but the pending first-run state could not be saved: {error}"
+status_picker_executable_missing = "Could not locate the Quick Picker executable: {error}"
+status_picker_open_failed = "Could not open Quick Picker: {error}"
+confirmed_in_application = "You confirmed the exact test replacement in {application}. This verifies that application and session only."
+machine_verified_in_application = "WayExpand observed the exact replacement in {application}. This verifies that controlled field and session only."
 
 [picker]
 # Names what the main status chip is about, now that the Quick Picker
@@ -698,6 +748,30 @@ unsaved_change_kept = "A change is not saved yet"
 retry_save = "Retry save"
 discard_unsaved_change = "Discard change"
 status_unsaved_change_discarded = "Unsaved change discarded"
+status_daemon_not_reloaded = "daemon did not reload: {detail}"
+status_buffer_limit_not_a_number = "buffer limit must be a whole number ({detail})"
+status_settings_invalid = "Settings invalid: {detail}"
+status_settings_rejected = "Settings rejected: {detail}"
+status_appearance_save_failed = "Appearance preference could not be saved: {detail}"
+status_settings_save_failed = "Settings save failed: {detail}"
+status_import_failed = "Import failed: {detail}"
+status_import_rejected = "Import rejected: {detail}"
+status_import_save_failed = "Import save failed: {detail}"
+status_reload_failed = "Reload failed: {detail}"
+status_command_invalid = "Command settings invalid: {detail}"
+status_save_rejected = "Save rejected: {detail}"
+status_save_failed = "Save failed: {detail}"
+status_undo_save_failed = "Undo save failed: {detail}"
+status_create_failed = "Create failed: {detail}"
+status_duplicate_failed = "Duplicate failed: {detail}"
+status_deleted = "Deleted {trigger}"
+status_delete_failed = "Delete failed: {detail}"
+status_snippet_enabled = "{trigger} enabled"
+status_snippet_disabled = "{trigger} disabled"
+status_toggle_failed = "Toggle failed: {detail}"
+status_control_unavailable = "Daemon control unavailable: {detail}"
+status_app_filter_added = "Added \"{value}\" to the app filter"
+status_command_failed = "Command failed: {detail}"
 
 [status_messages]
 all_changes_saved = "All changes saved"
@@ -782,7 +856,27 @@ evdev_setup_title = "Enable raw keyboard capture — no password-field detection
 evdev_setup_warning = "Evdev reads global keyboard input and cannot detect password fields, password-manager prompts, or other sensitive fields. Keystrokes in those fields may be observed. Use an input-method route when you need sensitive-field protection. This is an explicit opt-in. Device permissions are a separate system-wide change and are never made by this GUI."
 evdev_setup_acknowledge = "I understand evdev cannot detect or protect sensitive fields"
 evdev_setup_steps = "If keyboard-device access is not already configured, first complete the administrator permission step in Getting Started. Then copy the command below into a terminal: it enables the user service, and the desktop may ask you to approve the input portal. Return here, refresh diagnostics, and test in a normal text field."
+onboarding_install_summary = "WayExpand GUI {version} is running. The next step starts its user service."
+onboarding_test_state_save_failed = "The test snippet was added, but its onboarding state could not be saved: {error}"
 
 [why]
 why_title = "Why didn't my trigger expand?"
 why_intro = "A matcher preview only checks whether a rule matches; it does not prove text reached an application. Only a real typing test can verify delivery. Typed text is never recorded."
+why_verified_app_scope = "A real insertion was confirmed in {application}. That confirms the tested application only; run a live typing test in the affected app to verify it there."
+
+[recovery]
+recovery_open_failed = "Could not open it: {error}"
+recovery_relaunch_failed = "Could not restart WayExpand: {error}"
+recovery_action_failed = "That did not work, and nothing was replaced: {error}"
+
+[route_fit]
+# The snippet is longer than the route accepts.
+route_fit_too_long_hint = "This snippet types {chars} characters; your current typing route accepts at most {max}. WayExpand refuses it before changing anything. Shorten it, raise keystroke_max_chars in Settings, or use Quick Picker to paste it."
+# A character the route cannot type, by position only.
+route_fit_cannot_type_hint = "Your current typing route cannot type character {position} of this snippet. WayExpand refuses it before changing anything; use Quick Picker to paste it, or set up a route with full Unicode support."
+route_badge_too_long = "too long"
+route_badge_cannot_type = "won't type"
+route_badge_cursor = "no cursor"
+route_badge_layout = "layout"
+route_fit_layout_hint = "Some characters are typed only if your active keyboard layout has them. If it does not, WayExpand refuses this snippet before changing anything; use Quick Picker to paste it instead."
+route_fit_cursor_hint = "This snippet moves the cursor after typing, which your current typing route cannot do. WayExpand refuses it before changing anything."

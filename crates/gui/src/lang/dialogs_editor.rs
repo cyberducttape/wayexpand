@@ -1,14 +1,6 @@
 use super::{Language, Strings};
 
 impl Strings {
-    pub fn profile_automatic_active(&self, name: &str) -> String {
-        match self.lang {
-            Language::English => format!("Application-selected profile: {name}"),
-            Language::Indonesian => format!("Profil yang dipilih aplikasi: {name}"),
-            Language::German => format!("Von der App ausgewähltes Profil: {name}"),
-        }
-    }
-
     pub fn save_before(&self, action: &str) -> String {
         match self.lang {
             Language::English => format!("Save changes before {}?", action),

@@ -4,20 +4,6 @@ use super::{Language, Strings};
 use wayexpand_core::{MatchingBlock as B, OutcomeKind as K, Verdict as V};
 
 impl Strings {
-    pub(crate) fn why_verified_app_scope(&self, application: &str) -> String {
-        match self.lang {
-            Language::English => format!(
-                "A real insertion was confirmed in {application}. That confirms the tested application only; run a live typing test in the affected app to verify it there."
-            ),
-            Language::German => format!(
-                "Eine echte Einfügung wurde in {application} bestätigt. Das gilt nur für die getestete Anwendung; führen Sie im betroffenen Programm einen Live-Tipptest durch."
-            ),
-            Language::Indonesian => format!(
-                "Penyisipan nyata telah dikonfirmasi di {application}. Konfirmasi ini hanya berlaku untuk aplikasi yang diuji; jalankan tes mengetik langsung di aplikasi yang bermasalah."
-            ),
-        }
-    }
-
     /// The answer, and what to do about it if anything.
     pub(crate) fn why_verdict(
         &self,

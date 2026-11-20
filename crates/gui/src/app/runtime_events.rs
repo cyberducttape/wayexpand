@@ -107,7 +107,7 @@ impl GuiApp {
                             Err(error) => {
                                 self.daemon_reachable = Some(false);
                                 self.status = previous_status.with_caveat(
-                                    self.strings.status_daemon_not_reloaded(&error.to_string()),
+                                    self.strings.status_daemon_not_reloaded(error.to_string()),
                                 )
                             }
                         },
@@ -124,7 +124,7 @@ impl GuiApp {
                             Err(error) => {
                                 self.daemon_reachable = Some(false);
                                 self.status = Status::error(
-                                    self.strings.status_control_unavailable(&error.to_string()),
+                                    self.strings.status_control_unavailable(error.to_string()),
                                 )
                             }
                         },

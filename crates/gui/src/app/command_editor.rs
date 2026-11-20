@@ -215,7 +215,7 @@ impl GuiApp {
                                             ui.colored_label(
                                                 palette.warning,
                                                 self.strings.broker_schema_constraint_mismatch(
-                                                    &incompatible.join(", "),
+                                                    incompatible.join(", "),
                                                 ),
                                             );
                                         }
@@ -224,14 +224,14 @@ impl GuiApp {
                                             ui.colored_label(
                                                 palette.warning,
                                                 self.strings
-                                                    .broker_schema_missing(&missing.join(", ")),
+                                                    .broker_schema_missing(missing.join(", ")),
                                             );
                                         }
                                         if !unexpected.is_empty() {
                                             ui.colored_label(
                                                 palette.warning,
                                                 self.strings.broker_schema_unexpected(
-                                                    &unexpected.join(", "),
+                                                    unexpected.join(", "),
                                                 ),
                                             );
                                         }

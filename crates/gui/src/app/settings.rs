@@ -104,7 +104,7 @@ impl GuiApp {
             Err(error) => {
                 let detail = self
                     .strings
-                    .status_buffer_limit_not_a_number(&error.to_string());
+                    .status_buffer_limit_not_a_number(error.to_string());
                 self.status = Status::error(self.strings.status_settings_invalid(&detail));
                 self.settings_error = Some(detail);
                 return;
@@ -115,7 +115,7 @@ impl GuiApp {
             Err(error) => {
                 let detail = self
                     .strings
-                    .status_keystroke_limit_not_a_number(&error.to_string());
+                    .status_keystroke_limit_not_a_number(error.to_string());
                 self.status = Status::error(self.strings.status_settings_invalid(&detail));
                 self.settings_error = Some(detail);
                 return;
