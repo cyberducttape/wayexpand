@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- CI's headless KWin layout checks now include US International with dead
+  keys (`us(intl)`): `` don't "say" ~^` `` and `äéñßøå ¡¿` are typed exactly.
 - Fixed: when the compositor closed or revoked the libei (EIS) connection, the
   daemon kept the dead connection and refused every later expansion until it
   was restarted. A transport failure found while checking the text is now

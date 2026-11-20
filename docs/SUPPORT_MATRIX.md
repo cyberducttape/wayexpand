@@ -166,12 +166,14 @@ after a runtime switch to `de` (KWin 6.6.6, 2026-11-18). That run found and
 fixed a bug that refused every expansion after the first layout switch. Live
 layout-switch and physical-keyboard certification are still required before
 this combination is certified.
-Single-layout `us`, `de`, `fr`, `us(altgr-intl)`, and `ru` sessions type the
-ASCII each layout can reach exactly, including AltGr symbols on `de` and
-characters that are also dead keys on `us(altgr-intl)` (headless, CI job
+Single-layout `us`, `de`, `fr`, `us(altgr-intl)`, `us(intl)`, and `ru` sessions
+type the ASCII each layout can reach exactly, including AltGr symbols on `de`
+and characters that are also dead keys on `us(altgr-intl)` and `us(intl)`
+(headless, CI job
 `kwin-e2e`). The libei keystroke fallback also types non-ASCII characters the
 active layout produces directly, including through AltGr: `Grüße ß €` on `de`,
-`éèàçù` on `fr`, `äéñßøå` on `us(altgr-intl)`, and Cyrillic on `ru`. A
+`éèàçù` on `fr`, `äéñßøå` on `us(altgr-intl)` and `us(intl)`, and Cyrillic on
+`ru`. A
 character the layout offers only through a dead key (`^`, `` ` `` and `ê` on
 `de`) is refused rather than composed, as are Latin letters on `ru`, before
 anything is erased. The wlroots virtual-keyboard route uploads its own keymap

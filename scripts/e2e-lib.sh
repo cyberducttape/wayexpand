@@ -872,6 +872,18 @@ scenario_layout_altgr_intl_accents() {
     layout_case us:altgr-intl "äéñßøå ¡¿"
 }
 
+# us(intl), "US International with dead keys", is the common choice for
+# typing accents on a US keyboard. Its base-level ' " ` ~ and ^ are dead
+# keys, so everyday text such as "don't" must still arrive exactly.
+scenario_layout_us_intl_punctuation() {
+    layout_case us:intl 'don'"'"'t "say" ~^`'
+}
+
+# us(intl) reaches common accented letters through AltGr.
+scenario_layout_us_intl_accents() {
+    layout_case us:intl "äéñßøå ¡¿"
+}
+
 # A non-Latin layout types its own script and the punctuation and digits it
 # has. The trigger avoids Latin letters, which this layout cannot type.
 scenario_layout_ru_cyrillic() {

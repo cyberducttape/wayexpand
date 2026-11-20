@@ -98,6 +98,7 @@ headless session, so each layout needs its own run. CI runs:
 | `de` | QWERTZ letters, AltGr symbols (`@{}[]\|~\ €`) and `Grüße ÄÖÜ ß` are typed exactly; `^`, `` ` `` and `ê` (dead keys only) are refused with the trigger intact |
 | `fr` | AZERTY letters, shifted digits and `éèàçù` are typed exactly |
 | `us:altgr-intl` | `` ' " ` ~ ^ `` (also dead keys here) and AltGr accents `äéñßøå ¡¿` are typed exactly |
+| `us:intl` | US International with dead keys: `` don't "say" ~^` `` and AltGr accents `äéñßøå ¡¿` are typed exactly |
 | `ru` | Cyrillic, digits and punctuation are typed exactly; Latin letters are refused |
 | `us,de:,` | With two layouts configured, the daemon takes the active group from KWin's layout provider, types correctly, and follows a switch to `de` while it runs |
 

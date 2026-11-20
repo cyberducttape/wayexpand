@@ -72,7 +72,7 @@ safe to recommend for everyday desktop use.
       SUPPORT_MATRIX.md). Confirm in a live session, then raise it with KWin
       or derive the group from another trusted source.
 - [x] Headless layout regressions (`scripts/test-kwin-e2e.sh --layout`, run
-      by CI): `de`, `fr`, `us(altgr-intl)`, `ru`, and a runtime `us,de`
+      by CI): `de`, `fr`, `us(altgr-intl)`, `us(intl)`, `ru`, and a runtime `us,de`
       switch. Remaining for this item: Compose, physical keyboards, and live
       sessions. Keystroke routes type every character the active layout
       produces directly (umlauts, accents, Cyrillic) and still refuse
