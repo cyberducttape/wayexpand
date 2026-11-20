@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The lifecycle soak can keep one daemon running for the whole run
+  (`E2E_SOAK_RESTART_EVERY=0`) and then fails on resident-memory growth
+  beyond `E2E_SOAK_MAX_RSS_GROWTH_KIB`. Nightly CI runs it for 30 minutes
+  under headless KWin.
 - When the typing route refuses a snippet before typing it (too long, a
   character the layout cannot type, a cursor move it cannot make), the daemon
   now shows a desktop notification with the reason instead of silently leaving

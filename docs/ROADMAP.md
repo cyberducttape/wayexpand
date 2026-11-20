@@ -133,6 +133,9 @@ supported end state before broad adoption:
       output, no stale replay, reconnect), and window close/reopen; an
       ordinary key after each expansion detects stuck modifiers. It found and
       fixed a libei bug where a revoked EIS connection was never reconnected.
+- [x] Nightly 30-minute KWin soak with one daemon throughout
+      (`E2E_SOAK_RESTART_EVERY=0`), failing on more than 64 MiB of resident
+      memory growth after the first cycle.
       Remaining: compositor restart, suspend/resume, device reconnects, and
       long runs on real hardware.
 - [x] `scripts/soak-daemon.sh` checks memory and descriptor growth under

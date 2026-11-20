@@ -214,6 +214,9 @@ fi
 printf 'tested-build commit %s\n' "$cli_commit"
 printf 'tested-build source-tree %s\n' "$source_tree_state"
 
+# The whole private session is bounded; a long soak extends the bound by
+# its own duration.
+session_timeout=$((900 + ${E2E_SOAK_SECONDS:-0}))
 session_status=0
 env -i \
     PATH="$PATH" \
@@ -234,8 +237,10 @@ env -i \
     E2E_INPUT_SOURCE="$input_source" \
     E2E_LAYOUT="$layout" \
     E2E_SOAK_SECONDS="${E2E_SOAK_SECONDS:-90}" \
+    E2E_SOAK_RESTART_EVERY="${E2E_SOAK_RESTART_EVERY:-1}" \
+    E2E_SOAK_MAX_RSS_GROWTH_KIB="${E2E_SOAK_MAX_RSS_GROWTH_KIB:-65536}" \
     E2E_SCENARIOS="$*" \
-    timeout 900 dbus-run-session -- \
+    timeout "$session_timeout" dbus-run-session -- \
     kwin_wayland --virtual --no-lockscreen --no-global-shortcuts \
     --width 1280 --height 800 --socket wayexpand-e2e \
     --exit-with-session "$session_driver" \
