@@ -72,7 +72,7 @@ safe to recommend for everyday desktop use.
       SUPPORT_MATRIX.md). Confirm in a live session, then raise it with KWin
       or derive the group from another trusted source.
 - [x] Headless layout regressions (`scripts/test-kwin-e2e.sh --layout`, run
-      by CI): `de`, `fr`, `us(altgr-intl)`, `ru`, and a runtime `us,de`
+      by CI): `de`, `fr`, `us(altgr-intl)`, `us(intl)`, `ru`, and a runtime `us,de`
       switch. Remaining for this item: Compose, physical keyboards, and live
       sessions. Keystroke routes type every character the active layout
       produces directly (umlauts, accents, Cyrillic) and still refuse
@@ -133,6 +133,9 @@ supported end state before broad adoption:
       output, no stale replay, reconnect), and window close/reopen; an
       ordinary key after each expansion detects stuck modifiers. It found and
       fixed a libei bug where a revoked EIS connection was never reconnected.
+- [x] Nightly 30-minute KWin soak with one daemon throughout
+      (`E2E_SOAK_RESTART_EVERY=0`), failing on more than 64 MiB of resident
+      memory growth after the first cycle.
       Remaining: compositor restart, suspend/resume, device reconnects, and
       long runs on real hardware.
 - [x] `scripts/soak-daemon.sh` checks memory and descriptor growth under

@@ -545,6 +545,8 @@ output_partial_notice = "Partial insertion detected in {count} transaction(s). C
 output_partial_badge = "Partial insertion · {count}"
 output_uncertain_badge = "Check output · {count}"
 status_keystroke_limit_not_a_number = "keystroke limit must be a whole number ({detail})"
+refusal_notifications_label = "Notify me when a snippet is not typed"
+refusal_notifications_help = "Shows a desktop notification with the reason when this typing route refuses a snippet, for example because it is too long or contains a character your layout cannot type. The notification never shows the trigger or the text. Its Copy snippet button puts the text on the clipboard for you to paste; nothing is pasted automatically."
 
 [next_step]
 next_step_details = "Details"

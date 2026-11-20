@@ -86,6 +86,21 @@ The report gives the cycle count, verified expansions, revocations, and the
 daemon's resident memory. Compositor restart, suspend/resume, and device
 reconnects are not covered.
 
+`E2E_SOAK_RESTART_EVERY=N` restarts the daemon only every Nth cycle; `0`
+skips step 4 entirely, so a single daemon handles every focus change, reload,
+revocation and reconnect for the whole run. In that mode the soak also fails
+if the daemon's resident memory grows by more than
+`E2E_SOAK_MAX_RSS_GROWTH_KIB` (default 65536) after the first cycle. The
+nightly scheduled CI run does this for 30 minutes under KWin:
+
+```sh
+E2E_SOAK_SECONDS=1800 E2E_SOAK_RESTART_EVERY=0 scripts/test-kwin-e2e.sh lifecycle-soak
+```
+
+A two-minute local run on KWin 6.6.7 (2026-11-19) completed 23 cycles with 92
+verified expansions and 23 revocations, and the daemon's resident memory grew
+by 352 KiB after the first cycle.
+
 ### Keyboard layouts
 
 `scripts/test-kwin-e2e.sh --layout LAYOUTS[:VARIANTS]` starts the private KWin
@@ -98,6 +113,7 @@ headless session, so each layout needs its own run. CI runs:
 | `de` | QWERTZ letters, AltGr symbols (`@{}[]\|~\ €`) and `Grüße ÄÖÜ ß` are typed exactly; `^`, `` ` `` and `ê` (dead keys only) are refused with the trigger intact |
 | `fr` | AZERTY letters, shifted digits and `éèàçù` are typed exactly |
 | `us:altgr-intl` | `` ' " ` ~ ^ `` (also dead keys here) and AltGr accents `äéñßøå ¡¿` are typed exactly |
+| `us:intl` | US International with dead keys: `` don't "say" ~^` `` and AltGr accents `äéñßøå ¡¿` are typed exactly |
 | `ru` | Cyrillic, digits and punctuation are typed exactly; Latin letters are refused |
 | `us,de:,` | With two layouts configured, the daemon takes the active group from KWin's layout provider, types correctly, and follows a switch to `de` while it runs |
 

@@ -172,6 +172,7 @@ if [ -n "${E2E_LAYOUT:-}" ]; then
 layout-de-dead-key-only-ascii-is-refused layout-de-dead-key-letter-is-refused" ;;
         fr) run_scenarios "layout-fr-azerty" ;;
         us:altgr-intl) run_scenarios "layout-altgr-intl-dead-keys layout-altgr-intl-accents" ;;
+        us:intl) run_scenarios "layout-us-intl-punctuation layout-us-intl-accents" ;;
         ru) run_scenarios "layout-ru-cyrillic layout-ru-latin-is-refused" ;;
         us,de:,) run_scenarios "layout-multi-layout-switch" ;;
         *) run_scenarios "expansion-replaces-trigger" ;;

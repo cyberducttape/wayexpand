@@ -624,7 +624,8 @@ jobs:
     needs: change-scope
     if: needs.change-scope.outputs.kwin == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Scheduled and manual runs add a 30-minute soak.
+    timeout-minutes: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 75 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -640,12 +641,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dbus-daemon jq kwin-common kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config wl-clipboard
       - name: Test production output and KWin focus tracking
         run: bash scripts/test-kwin-e2e.sh --keep
-      - name: Test keyboard layouts (de, fr, us altgr-intl, ru, us+de switching)
+      - name: Test keyboard layouts (de, fr, us altgr-intl, us intl, ru, us+de switching)
         run: |
           # KWin applies its layout at start-up, so each layout gets its own
           # private session. ASCII must be typed exactly; text a keystroke
           # route cannot type exactly must be refused before erasing.
-          for layout in de fr us:altgr-intl ru 'us,de:,'; do
+          for layout in de fr us:altgr-intl us:intl ru 'us,de:,'; do
             bash scripts/test-kwin-e2e.sh --keep --layout "$layout"
           done
       - name: Lifecycle soak against real output (2 min)
@@ -653,6 +654,14 @@ jobs:
           # Cycles focus changes, reloads, daemon kills, output revocation
           # and window close/reopen, checking the exact text after each.
           E2E_SOAK_SECONDS=120 bash scripts/test-kwin-e2e.sh --keep lifecycle-soak
+      - name: Long soak with one daemon throughout (nightly, 30 min)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          # The same cycles without daemon restarts, so one daemon handles
+          # every focus change, reload, revocation and reconnect, and its
+          # memory growth after the first cycle is bounded.
+          E2E_SOAK_SECONDS=1800 E2E_SOAK_RESTART_EVERY=0 \
+            bash scripts/test-kwin-e2e.sh --keep lifecycle-soak
       - name: Test terminal paste into Konsole
         run: |
           # qt6-wayland provides the xdg-shell integration Konsole needs.

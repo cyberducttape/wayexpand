@@ -541,6 +541,8 @@ output_partial_notice = "Teilweise Einfügung bei {count} Vorgang/Vorgängen erk
 output_partial_badge = "Teilweise Einfügung · {count}"
 output_uncertain_badge = "Ausgabe prüfen · {count}"
 status_keystroke_limit_not_a_number = "Tastenanschlag-Limit muss eine ganze Zahl sein ({detail})"
+refusal_notifications_label = "Benachrichtigen, wenn ein Snippet nicht eingegeben wird"
+refusal_notifications_help = "Zeigt eine Desktop-Benachrichtigung mit dem Grund, wenn dieser Eingabeweg ein Snippet ablehnt, etwa weil es zu lang ist oder ein Zeichen enthält, das Ihre Tastaturbelegung nicht tippen kann. Die Benachrichtigung zeigt nie das Kürzel oder den Text. Mit „Snippet kopieren“ landet der Text in der Zwischenablage, damit Sie ihn selbst einfügen; es wird nichts automatisch eingefügt."
 
 [next_step]
 next_step_details = "Details"

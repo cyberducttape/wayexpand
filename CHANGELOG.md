@@ -7,6 +7,26 @@ All notable changes to WayExpand are documented here.
 - 86 more GUI strings moved from Rust into the locale files: 80 with named
   placeholders, which translations may now reorder (`{count}`, `{app}`), and
   6 plain ones. Their output in English, German and Indonesian is unchanged.
+- CI's headless KWin layout checks now include US International with dead
+  keys (`us(intl)`): `` don't "say" ~^` `` and `äéñßøå ¡¿` are typed exactly.
+- The lifecycle soak can keep one daemon running for the whole run
+  (`E2E_SOAK_RESTART_EVERY=0`) and then fails on resident-memory growth
+  beyond `E2E_SOAK_MAX_RSS_GROWTH_KIB`. Nightly CI runs it for 30 minutes
+  under headless KWin.
+- When the typing route refuses a snippet before typing it (too long, a
+  character the layout cannot type, a cursor move it cannot make), the daemon
+  now shows a desktop notification with the reason instead of silently leaving
+  the trigger. It never shows the trigger or text. A **Copy snippet** button
+  puts the text on the clipboard for you to paste; nothing is pasted
+  automatically. New setting `refusal_notifications` (on by default), also in
+  the GUI's Engine settings.
+- The daemon now repairs an output route that stays connected but keeps
+  refusing expansions because its keyboard state went stale. After three such
+  refusals in a row (`layout-mismatch`, `active-layout-unavailable`,
+  `keyboard-state-busy`) it reconnects the route once, at most once a minute,
+  instead of refusing until it is restarted. Refused expansions are not
+  replayed, and refusals caused by the snippet itself never trigger this.
+  Status reports `output_last_disconnect_reason=route_state_stale`.
 - Fixed: when the compositor closed or revoked the libei (EIS) connection, the
   daemon kept the dead connection and refused every later expansion until it
   was restarted. A transport failure found while checking the text is now
