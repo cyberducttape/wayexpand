@@ -83,7 +83,10 @@ candidate exists. The older `route_ready` field is a compatibility alias with
 the same meaning; it is not operational readiness. A configured route can be
 available while setup is blocked by missing integration or runtime evidence.
 The top-level `next_action.command` is the first repair supported by current
-evidence. `activation.command` names the backend setup will preserve, while
+evidence. Once nothing needs repair and the selected route is already running,
+it is the real-application test instead (`first_run_test.command`, or
+`wayexpand-gui` when no eligible snippet exists to test with), not another
+`setup --apply`. `activation.command` names the backend setup will preserve, while
 `activation.required` and `activation.active` are derived from live input
 source/engine or daemon-route state. `activation.consent_required` and
 `activation.consent_granted` distinguish a missing explicit replacement
