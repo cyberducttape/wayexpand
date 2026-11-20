@@ -571,6 +571,7 @@ struct GuiApp {
     settings_compatibility_mode: wayexpand_core::CompatibilityMode,
     settings_keystroke_limit: String,
     settings_terminal_paste: wayexpand_core::TerminalPaste,
+    settings_refusal_notifications: bool,
     settings_font_scale: FontScale,
     /// Width the one-row toolbar needed when it was last laid out. The
     /// status chips change with the route, so a fixed breakpoint cannot
@@ -890,6 +891,7 @@ impl GuiApp {
         let settings_compatibility_mode = config.settings.compatibility_mode;
         let settings_keystroke_limit = config.settings.keystroke_max_chars.to_string();
         let settings_terminal_paste = config.settings.terminal_paste;
+        let settings_refusal_notifications = config.settings.refusal_notifications;
         let prefs = load_gui_prefs();
         let onboarding_completed = prefs.onboarding_completed;
         let onboarding_test_snippet_created_for = prefs.onboarding_test_snippet_created_for;
@@ -1034,6 +1036,7 @@ impl GuiApp {
             settings_compatibility_mode,
             settings_keystroke_limit,
             settings_terminal_paste,
+            settings_refusal_notifications,
             settings_font_scale,
             toolbar_row_width: 0.0,
             settings_error: None,

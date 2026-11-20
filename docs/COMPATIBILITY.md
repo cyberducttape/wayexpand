@@ -1143,6 +1143,14 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 **New fields** (1.0.1+ and later 1.x releases):
 - `Settings::usage_stats` (bool, default `true`, omitted when `true`) —
   record local usage statistics; see `wayexpand stats`.
+- `Settings::refusal_notifications` (bool, default `true`, omitted when
+  `true`) — show a desktop notification with the reason when the daemon's
+  typing route refuses a snippet before typing it (`too-long`, a character the
+  layout cannot type, a cursor move, an unsettled layout, or a too-slow keysym
+  fallback). It never contains the trigger or text. Its "Copy snippet" action
+  puts the refused text on the clipboard over `ext-data-control-v1` only when
+  pressed, and only within two minutes of the refusal; nothing is pasted
+  automatically. The IBus engine's own refusals are not covered.
 - `Settings::template_env` and `Settings::allow_clipboard`, and
   `OrganizationPolicy::disable_template_env` / `disable_clipboard` — see
   [TEMPLATES.md](TEMPLATES.md).

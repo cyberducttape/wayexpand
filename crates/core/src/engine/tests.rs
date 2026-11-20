@@ -4591,6 +4591,8 @@ fn folding_typed_delimiters_keeps_the_cursor_inside_the_replacement() {
     assert_eq!(result.insert, "AB .");
     // Still between A and B: three characters left of the end.
     assert_eq!(result.cursor_offset, Some(3));
+    // The snippet's own text leaves out what the user typed after it.
+    assert_eq!(result.replacement_text(), "AB");
 }
 
 #[test]

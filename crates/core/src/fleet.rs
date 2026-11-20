@@ -136,6 +136,7 @@ fn setting_fields_from_non_defaults(settings: &crate::Settings) -> BTreeSet<Stri
         raw_capture_apps,
         raw_capture_fallback_enabled,
         terminal_paste,
+        refusal_notifications,
     );
     fields
 }
@@ -196,6 +197,7 @@ fn resolve_setting_candidates(
                 raw_capture_apps,
                 raw_capture_fallback_enabled,
                 terminal_paste,
+                refusal_notifications,
             );
             sources.insert(field.clone(), candidate.provenance.clone());
         }
@@ -229,6 +231,7 @@ fn resolve_setting_candidates(
         "raw_capture_apps",
         "raw_capture_fallback_enabled",
         "terminal_paste",
+        "refusal_notifications",
     ] {
         sources
             .entry(field.to_owned())

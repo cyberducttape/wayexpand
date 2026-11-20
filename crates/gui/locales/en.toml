@@ -506,6 +506,8 @@ keystroke_limit = "Synthetic output and replacement limit"
 compatibility_mode_label = "Keystroke routes (compatibility mode)"
 compatibility_mode_risk = "Risk of non-atomic replacement: physical typing can reach the application while WayExpand is erasing and inserting, so the two streams may interleave and corrupt nearby text. Evdev also cannot detect password fields. Keep this Off for strict safety; prefer a verified input-method route when text integrity matters."
 terminal_paste_label = "Terminal paste"
+refusal_notifications_label = "Notify me when a snippet is not typed"
+refusal_notifications_help = "Shows a desktop notification with the reason when this typing route refuses a snippet, for example because it is too long or contains a character your layout cannot type. The notification never shows the trigger or the text. Its Copy snippet button puts the text on the clipboard for you to paste; nothing is pasted automatically."
 
 [next_step]
 next_step_details = "Details"
