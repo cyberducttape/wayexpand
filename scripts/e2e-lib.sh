@@ -1093,6 +1093,11 @@ EOF
 # disconnect, and no stuck modifier (an ordinary key typed after every
 # expansion must arrive unchanged). Output revocation needs a session
 # driver that defines revoke_output and restore_output.
+#
+# E2E_SOAK_RESTART_EVERY (default 1) restarts the daemon every Nth cycle;
+# 0 never restarts it, so one daemon runs the whole soak and its memory
+# growth is measured: resident memory may grow by at most
+# E2E_SOAK_MAX_RSS_GROWTH_KIB (default 65536) after the first cycle.
 
 status_field() {
     printf '%s\n' "$1" | sed -n "s/^$2=//p"
@@ -1164,6 +1169,9 @@ soak_open_sinks() {
 
 scenario_lifecycle_soak() {
     seconds=${E2E_SOAK_SECONDS:-90}
+    restart_every=${E2E_SOAK_RESTART_EVERY:-1}
+    max_rss_growth=${E2E_SOAK_MAX_RSS_GROWTH_KIB:-65536}
+    rss_baseline=
     soak_cycle=0
     soak_events=0
     soak_replacement=R0
@@ -1193,13 +1201,15 @@ scenario_lifecycle_soak() {
         soak_expand e2e-b reload || return $?
 
         # The daemon is killed and started again.
-        kill -9 "$daemon_pid" 2>/dev/null
-        wait "$daemon_pid" 2>/dev/null
-        exec 3>&-
-        stdin_open=0
-        daemon_pid=
-        start_daemon || { printf 'cycle %s: the daemon did not restart' "$soak_cycle"; return 2; }
-        soak_expand e2e-b daemon-restart || return $?
+        if [ "$restart_every" -gt 0 ] && [ $((soak_cycle % restart_every)) -eq 0 ]; then
+            kill -9 "$daemon_pid" 2>/dev/null
+            wait "$daemon_pid" 2>/dev/null
+            exec 3>&-
+            stdin_open=0
+            daemon_pid=
+            start_daemon || { printf 'cycle %s: the daemon did not restart' "$soak_cycle"; return 2; }
+            soak_expand e2e-b daemon-restart || return $?
+        fi
 
         # Output access is revoked while a trigger is in flight. Nothing may
         # be typed (the trigger never reached the window, so erasing it would
@@ -1232,12 +1242,27 @@ scenario_lifecycle_soak() {
         # The target windows close and new ones open.
         soak_close_sinks
         soak_open_sinks || { printf 'cycle %s: could not reopen the windows' "$soak_cycle"; return 2; }
+
+        # One cycle has warmed up every path; later growth is measured
+        # against that.
+        if [ -z "$rss_baseline" ]; then
+            rss_baseline=$(status_field "$(daemon_status)" memory_rss_kib)
+        fi
     done
     status=$(daemon_status)
+    rss=$(status_field "$status" memory_rss_kib)
     printf '%s cycles, %s verified expansions in %ss, %s output revocations; rss_kib=%s high_water_kib=%s' \
         "$soak_cycle" "$soak_events" "$seconds" "$revocation" \
-        "$(status_field "$status" memory_rss_kib)" "$(status_field "$status" memory_high_water_kib)"
-    [ "$soak_cycle" -gt 0 ]
+        "$rss" "$(status_field "$status" memory_high_water_kib)"
+    [ "$soak_cycle" -gt 0 ] || return 1
+    if [ "$restart_every" -eq 0 ] && [ -n "$rss_baseline" ] && [ -n "$rss" ]; then
+        growth=$((rss - rss_baseline))
+        printf '; one daemon throughout, rss growth after cycle 1: %s KiB' "$growth"
+        [ "$growth" -le "$max_rss_growth" ] || {
+            printf ' (limit %s KiB)' "$max_rss_growth"
+            return 1
+        }
+    fi
 }
 
 # --- clipboard and forms -----------------------------------------------

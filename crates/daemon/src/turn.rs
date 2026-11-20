@@ -574,6 +574,7 @@ impl Daemon {
                 }
                 self.output_retry_at = None;
                 self.output_retry_delay = Duration::from_millis(250);
+                crate::route_refresh::note_healthy();
                 // The output session has been renegotiated and is usable.
                 self.connection_state = "connected";
                 self.publish_status(self.config.engine.command_metrics());
@@ -625,6 +626,9 @@ impl Daemon {
                 insert_bytes = error.result.insert.len(),
                 "output backend rejected expansion; continuing"
             );
+            if self.route_state_went_stale(&error) {
+                self.refresh_stale_output_route()?;
+            }
             return Ok(());
         }
         if !error.retryable() {
@@ -637,28 +641,7 @@ impl Daemon {
             insert_bytes = error.result.insert.len(),
             "output failed; current expansion is not replayed"
         );
-        self.retire_output_injector();
-        process_event(
-            &mut self.config.engine,
-            InputEvent::EndOfInput,
-            None,
-            &self.policy,
-            self.active_backend,
-        )?;
-        self.connection_state = "reconnecting";
-        set_daemon_status_with_config_state(
-            &mut self.status_publisher,
-            &self.control,
-            self.active_source,
-            self.active_backend,
-            self.connection_state,
-            self.config.path(),
-            self.config.status_state(),
-        );
-        self.output_retry_at = Some(Instant::now());
-        self.output_retry_delay = Duration::from_millis(250);
-        crate::counters::note_output_backoff(self.output_retry_delay);
-        Ok(())
+        self.reconnect_output_now()
     }
 
     /// Handle a failed explicit insert. It is a user action, so a failure is
@@ -729,19 +712,77 @@ impl Daemon {
         );
     }
 
+    /// Whether this refusal completes a run of route-state refusals that a
+    /// reconnect should clear; see `route_refresh`.
+    fn route_state_went_stale(&self, error: &EventError) -> bool {
+        !self.input_method_mode
+            && self.injector.is_some()
+            && error
+                .source
+                .source()
+                .and_then(|source| backend_refusal_category(&source.message))
+                .is_some_and(crate::route_refresh::is_route_state_refusal)
+            && crate::route_refresh::note_state_refusal()
+    }
+
+    /// Reconnect an output route that is connected but keeps refusing
+    /// expansions because its keyboard state is stale. Nothing is replayed.
+    fn refresh_stale_output_route(&mut self) -> Result<()> {
+        warn!(
+            backend = self.backend_name,
+            "output route kept refusing expansions on stale keyboard state; reconnecting it"
+        );
+        crate::counters::note_output_disconnected("route_state_stale");
+        self.reconnect_output_now()
+    }
+
+    /// Retire the output actor, drop matcher context, and reconnect on the
+    /// next turn. The expansion that led here is never replayed.
+    fn reconnect_output_now(&mut self) -> Result<()> {
+        self.retire_output_injector();
+        process_event(
+            &mut self.config.engine,
+            InputEvent::EndOfInput,
+            None,
+            &self.policy,
+            self.active_backend,
+        )?;
+        self.connection_state = "reconnecting";
+        set_daemon_status_with_config_state(
+            &mut self.status_publisher,
+            &self.control,
+            self.active_source,
+            self.active_backend,
+            self.connection_state,
+            self.config.path(),
+            self.config.status_state(),
+        );
+        self.output_retry_at = Some(Instant::now());
+        self.output_retry_delay = Duration::from_millis(250);
+        crate::counters::note_output_backoff(self.output_retry_delay);
+        Ok(())
+    }
+
     /// Count an expansion the route refused because it could not type it.
     pub(crate) fn note_unsupported_output(&self, error: &EventError) {
-        if let Some(source) = error.source.source() {
-            if let Some(reason) = backend_refusal_category(&source.message) {
-                crate::counters::note_output_unsupported_reason(reason);
-                return;
-            }
-        }
-        if let Some(limit) = self
+        let reason = if let Some(category) = error
+            .source
+            .source()
+            .and_then(|source| backend_refusal_category(&source.message))
+        {
+            crate::counters::note_output_unsupported_reason(category);
+            crate::refusal_notice::Reason::from_backend_category(category)
+        } else if let Some(limit) = self
             .output_capabilities()
             .and_then(|capabilities| error.route_limit(&capabilities))
         {
             crate::counters::note_output_unsupported(limit);
+            Some(crate::refusal_notice::Reason::from_route_limit(limit))
+        } else {
+            None
+        };
+        if let Some(reason) = reason.filter(|_| self.config.engine.refusal_notifications()) {
+            crate::refusal_notice::announce(reason, error.result.replacement_text());
         }
     }
 

@@ -58,6 +58,11 @@ impl ExpansionEngine {
         self.config.settings.terminal_paste
     }
 
+    /// Whether refused snippets are announced with a desktop notification.
+    pub fn refusal_notifications(&self) -> bool {
+        self.config.settings.refusal_notifications
+    }
+
     /// Whether keystroke routes may erase text they cannot verify.
     pub fn compatibility_mode(&self) -> crate::CompatibilityMode {
         self.compatibility_mode_override

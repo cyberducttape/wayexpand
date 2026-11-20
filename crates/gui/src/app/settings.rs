@@ -11,6 +11,7 @@ impl GuiApp {
         self.settings_compatibility_mode = self.config.settings.compatibility_mode;
         self.settings_keystroke_limit = self.config.settings.keystroke_max_chars.to_string();
         self.settings_terminal_paste = self.config.settings.terminal_paste;
+        self.settings_refusal_notifications = self.config.settings.refusal_notifications;
         self.settings_error = None;
         self.settings_open = true;
     }
@@ -128,6 +129,7 @@ impl GuiApp {
             (!undo_chord_input.is_empty()).then(|| undo_chord_input.to_owned());
         candidate.settings.compatibility_mode = self.settings_compatibility_mode;
         candidate.settings.terminal_paste = self.settings_terminal_paste;
+        candidate.settings.refusal_notifications = self.settings_refusal_notifications;
         if let Err(error) = candidate.validate() {
             let detail = error.safe_summary();
             self.status = Status::error(self.strings.status_settings_rejected(&detail));
@@ -392,6 +394,20 @@ impl GuiApp {
         ui.add(
             egui::Label::new(
                 RichText::new(self.strings.terminal_paste_help())
+                    .small()
+                    .color(palette.muted),
+            )
+            .wrap(),
+        );
+
+        ui.add_space(10.0);
+        ui.checkbox(
+            &mut self.settings_refusal_notifications,
+            self.strings.refusal_notifications_label(),
+        );
+        ui.add(
+            egui::Label::new(
+                RichText::new(self.strings.refusal_notifications_help())
                     .small()
                     .color(palette.muted),
             )

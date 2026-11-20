@@ -311,6 +311,76 @@ pub(super) enum PasteEvent {
     Restored,
 }
 
+/// A data-control device bound on its own Wayland connection.
+struct DataDevice {
+    connection: Connection,
+    queue: EventQueue<State>,
+    state: State,
+    manager: ExtDataControlManagerV1,
+    device: ExtDataControlDeviceV1,
+}
+
+impl DataDevice {
+    fn open(deadline: Instant) -> Result<Self, &'static str> {
+        if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            return Err("no Wayland display");
+        }
+        let Ok(connection) = Connection::connect_to_env() else {
+            return Err("cannot connect to the Wayland display");
+        };
+        let mut queue = connection.new_event_queue();
+        let handle = queue.handle();
+        let display = connection.display();
+        let registry = display.get_registry(&handle, ());
+        display.sync(&handle, ());
+        let mut state = State::default();
+        if !dispatch_until(&connection, &mut queue, &mut state, deadline, |state| {
+            state.synced
+        }) {
+            return Err("the compositor did not answer");
+        }
+        let (Some((seat_name, seat_version)), Some((manager_name, _))) =
+            (state.seat, state.manager)
+        else {
+            return Err("the compositor does not offer ext-data-control-v1");
+        };
+        let seat: wl_seat::WlSeat = registry.bind(seat_name, seat_version.min(1), &handle, ());
+        let manager: ExtDataControlManagerV1 = registry.bind(manager_name, 1, &handle, ());
+        let device = manager.get_data_device(&seat, &handle, ());
+        Ok(Self {
+            connection,
+            queue,
+            state,
+            manager,
+            device,
+        })
+    }
+}
+
+/// Make `text` the clipboard selection at the user's explicit request and
+/// keep serving it on this thread until another client takes the clipboard.
+/// Unlike a paste, nothing is restored afterwards: the user asked to copy.
+pub(super) fn copy_session(text: zeroize::Zeroizing<String>) -> Result<(), &'static str> {
+    let DataDevice {
+        connection,
+        mut queue,
+        mut state,
+        manager,
+        device,
+    } = DataDevice::open(Instant::now() + std::time::Duration::from_secs(1))?;
+    let (sender, _events) = std::sync::mpsc::channel();
+    restore(
+        &connection,
+        &mut queue,
+        &mut state,
+        &manager,
+        &device,
+        Some(text),
+        &sender,
+    );
+    Ok(())
+}
+
 /// Run one paste session on this thread: save the current clipboard text,
 /// offer `text`, serve the application's request, then restore the saved
 /// text and keep serving it until another client takes the clipboard.
@@ -324,34 +394,18 @@ pub(super) fn paste_session(
     let unavailable = |reason| {
         let _ = events.send(PasteEvent::Unavailable(reason));
     };
-    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
-        return unavailable("no Wayland display");
-    }
-    let Ok(connection) = Connection::connect_to_env() else {
-        return unavailable("cannot connect to the Wayland display");
+    let DataDevice {
+        connection,
+        mut queue,
+        mut state,
+        manager,
+        device,
+    } = match DataDevice::open(prepare_deadline) {
+        Ok(opened) => opened,
+        Err(reason) => return unavailable(reason),
     };
-    let mut queue = connection.new_event_queue();
     let handle = queue.handle();
     let display = connection.display();
-    let registry = display.get_registry(&handle, ());
-    display.sync(&handle, ());
-    let mut state = State::default();
-    if !dispatch_until(
-        &connection,
-        &mut queue,
-        &mut state,
-        prepare_deadline,
-        |state| state.synced,
-    ) {
-        return unavailable("the compositor did not answer");
-    }
-    let (Some((seat_name, seat_version)), Some((manager_name, _))) = (state.seat, state.manager)
-    else {
-        return unavailable("the compositor does not offer ext-data-control-v1");
-    };
-    let seat: wl_seat::WlSeat = registry.bind(seat_name, seat_version.min(1), &handle, ());
-    let manager: ExtDataControlManagerV1 = registry.bind(manager_name, 1, &handle, ());
-    let device = manager.get_data_device(&seat, &handle, ());
     let announced = dispatch_until(
         &connection,
         &mut queue,

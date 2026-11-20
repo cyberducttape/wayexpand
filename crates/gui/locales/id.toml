@@ -504,6 +504,8 @@ keystroke_limit = "Batas keluaran sintetis dan penggantian"
 compatibility_mode_label = "Jalur penekanan tombol (mode kompatibilitas)"
 compatibility_mode_risk = "Risiko penggantian non-atomik: ketikan fisik dapat mencapai aplikasi saat WayExpand menghapus dan menyisipkan teks. Kedua aliran input dapat bercampur dan merusak teks di sekitarnya. Evdev juga tidak dapat mendeteksi kolom kata sandi. Biarkan nonaktif untuk keselamatan ketat; gunakan rute metode input terverifikasi bila integritas teks penting."
 terminal_paste_label = "Tempel di terminal"
+refusal_notifications_label = "Beri tahu saya saat cuplikan tidak diketik"
+refusal_notifications_help = "Menampilkan notifikasi desktop beserta alasannya saat rute pengetikan ini menolak cuplikan, misalnya karena terlalu panjang atau berisi karakter yang tidak dapat diketik oleh tata letak Anda. Notifikasi tidak pernah menampilkan pemicu atau teksnya. Tombol Salin cuplikan menaruh teks di papan klip agar Anda dapat menempelkannya; tidak ada yang ditempel otomatis."
 
 [next_step]
 next_step_details = "Detail"

@@ -504,6 +504,8 @@ keystroke_limit = "Limit für synthetische Ausgabe und Ersetzungen"
 compatibility_mode_label = "Tastenanschlag-Wege (Kompatibilitätsmodus)"
 compatibility_mode_risk = "Risiko einer nicht atomaren Ersetzung: Physische Tasten können die Anwendung erreichen, während WayExpand löscht und einfügt. Beide Eingabeströme können sich überlagern und benachbarten Text beschädigen. Evdev erkennt außerdem keine Passwortfelder. Für strikte Sicherheit deaktiviert lassen; wenn Textintegrität wichtig ist, eine verifizierte Eingabemethoden-Route verwenden."
 terminal_paste_label = "Einfügen im Terminal"
+refusal_notifications_label = "Benachrichtigen, wenn ein Snippet nicht eingegeben wird"
+refusal_notifications_help = "Zeigt eine Desktop-Benachrichtigung mit dem Grund, wenn dieser Eingabeweg ein Snippet ablehnt, etwa weil es zu lang ist oder ein Zeichen enthält, das Ihre Tastaturbelegung nicht tippen kann. Die Benachrichtigung zeigt nie das Kürzel oder den Text. Mit „Snippet kopieren“ landet der Text in der Zwischenablage, damit Sie ihn selbst einfügen; es wird nichts automatisch eingefügt."
 
 [next_step]
 next_step_details = "Details"
