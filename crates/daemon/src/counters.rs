@@ -50,6 +50,7 @@ fn disconnect_reason(code: u8) -> &'static str {
         2 => "authorization_revoked",
         3 => "connect_failed",
         4 => "output_transaction_failed",
+        5 => "route_state_stale",
         _ => "none",
     }
 }
@@ -123,6 +124,7 @@ fn reason_code(reason: &str) -> u8 {
         "authorization_revoked" => 2,
         "connect_failed" => 3,
         "output_transaction_failed" => 4,
+        "route_state_stale" => 5,
         _ => 0,
     }
 }

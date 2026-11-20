@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The daemon now repairs an output route that stays connected but keeps
+  refusing expansions because its keyboard state went stale. After three such
+  refusals in a row (`layout-mismatch`, `active-layout-unavailable`,
+  `keyboard-state-busy`) it reconnects the route once, at most once a minute,
+  instead of refusing until it is restarted. Refused expansions are not
+  replayed, and refusals caused by the snippet itself never trigger this.
+  Status reports `output_last_disconnect_reason=route_state_stale`.
 - Fixed: when the compositor closed or revoked the libei (EIS) connection, the
   daemon kept the dead connection and refused every later expansion until it
   was restarted. A transport failure found while checking the text is now
