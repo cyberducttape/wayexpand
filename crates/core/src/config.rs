@@ -242,6 +242,14 @@ pub struct Settings {
     /// running each line as it is typed. Omitted when off.
     #[serde(skip_serializing_if = "TerminalPaste::is_off")]
     pub terminal_paste: TerminalPaste,
+    /// Show a desktop notification when the typing route refuses a snippet
+    /// it cannot type here (too long, a character the layout lacks, a cursor
+    /// move it cannot make). The notification names only the reason, never
+    /// the trigger or text, and offers to copy the snippet; nothing is put on
+    /// the clipboard unless that button is pressed. On by default; omitted
+    /// when on.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub refusal_notifications: bool,
 }
 
 /// When replacements in terminal apps are pasted rather than typed.
@@ -350,6 +358,10 @@ fn default_usage_stats() -> bool {
     true
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn is_true(value: &bool) -> bool {
     *value
 }
@@ -407,6 +419,7 @@ impl Default for Settings {
             raw_capture_apps: Vec::new(),
             raw_capture_fallback_enabled: false,
             terminal_paste: TerminalPaste::Off,
+            refusal_notifications: true,
         }
     }
 }

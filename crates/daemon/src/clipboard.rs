@@ -112,6 +112,25 @@ pub(crate) fn paste_text<E>(
     Ok(outcome)
 }
 
+/// Put `text` on the clipboard because the user asked to copy it, and keep
+/// offering it on a background thread until another client takes the
+/// clipboard. Never logs the text.
+pub(crate) fn copy_text(text: zeroize::Zeroizing<String>) {
+    let spawned = std::thread::Builder::new()
+        .name("wayexpand-copy".into())
+        .spawn(move || {
+            if let Err(reason) = data_control::copy_session(text) {
+                tracing::warn!(
+                    reason,
+                    "could not copy the refused snippet to the clipboard"
+                );
+            }
+        });
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "could not start the clipboard copy thread");
+    }
+}
+
 /// How long a paste waits for the previous session to restore the clipboard.
 const PASTE_RESTORE_WAIT: Duration = Duration::from_secs(1);
 

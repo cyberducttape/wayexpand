@@ -18,6 +18,7 @@ mod paste;
 mod pending_output;
 mod policy;
 mod reactor;
+mod refusal_notice;
 mod reload;
 mod route_refresh;
 mod session_context;

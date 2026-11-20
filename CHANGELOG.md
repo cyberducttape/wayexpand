@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- When the typing route refuses a snippet before typing it (too long, a
+  character the layout cannot type, a cursor move it cannot make), the daemon
+  now shows a desktop notification with the reason instead of silently leaving
+  the trigger. It never shows the trigger or text. A **Copy snippet** button
+  puts the text on the clipboard for you to paste; nothing is pasted
+  automatically. New setting `refusal_notifications` (on by default), also in
+  the GUI's Engine settings.
 - The daemon now repairs an output route that stays connected but keeps
   refusing expansions because its keyboard state went stale. After three such
   refusals in a row (`layout-mismatch`, `active-layout-unavailable`,
