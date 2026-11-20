@@ -132,6 +132,9 @@ if [ -z "$wayland_socket" ] || [ -z "$ipc_socket" ]; then
     exit 2
 fi
 
+# The whole private session is bounded; a long soak extends the bound by
+# its own duration.
+session_timeout=$((900 + ${E2E_SOAK_SECONDS:-0}))
 session_status=0
 env -i "${session_env[@]}" \
     WAYLAND_DISPLAY="$wayland_socket" \
@@ -141,7 +144,9 @@ env -i "${session_env[@]}" \
     E2E_RESULTS="$results" \
     E2E_SCENARIOS="$*" \
     E2E_SOAK_SECONDS="${E2E_SOAK_SECONDS:-90}" \
-    timeout 900 "$project_dir/scripts/sway-e2e-session.sh" \
+    E2E_SOAK_RESTART_EVERY="${E2E_SOAK_RESTART_EVERY:-1}" \
+    E2E_SOAK_MAX_RSS_GROWTH_KIB="${E2E_SOAK_MAX_RSS_GROWTH_KIB:-65536}" \
+    timeout "$session_timeout" "$project_dir/scripts/sway-e2e-session.sh" \
     >"$work/session.out" 2>&1 || session_status=$?
 
 if [ "$session_status" -eq 124 ] || [ "$session_status" -eq 137 ]; then

@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The lifecycle soak can keep one daemon running for the whole run
+  (`E2E_SOAK_RESTART_EVERY=0`) and then fails on resident-memory growth
+  beyond `E2E_SOAK_MAX_RSS_GROWTH_KIB`. Nightly CI runs it for 30 minutes
+  under headless KWin.
 - Fixed: when the compositor closed or revoked the libei (EIS) connection, the
   daemon kept the dead connection and refused every later expansion until it
   was restarted. A transport failure found while checking the text is now
