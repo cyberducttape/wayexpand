@@ -135,8 +135,10 @@ build_dependency_hint() {
     esac
 }
 missing_native_build_dependencies=0
-if ! command -v cc >/dev/null 2>&1; then
-    printf '%s\n' 'error: no C compiler (cc) was found; a source build requires native build tools' >&2
+c_compiler=${CC:-cc}
+c_compiler=${c_compiler%%[[:space:]]*}
+if [ -z "$c_compiler" ] || ! command -v "$c_compiler" >/dev/null 2>&1; then
+    printf '%s\n' "error: no C compiler was found (${CC:-cc}); a source build requires native build tools" >&2
     missing_native_build_dependencies=1
 fi
 if ! command -v pkg-config >/dev/null 2>&1; then
