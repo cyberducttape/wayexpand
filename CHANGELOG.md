@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Launchpad PPA builds pass again. The GUI's font-coverage test loaded
+  whatever system fonts the build machine had, so DejaVu on developer and
+  GitHub machines hid that the setup page's `✗` mark is not in egui's bundled
+  fonts; Launchpad's minimal builders failed every daily build since it was
+  added. The test now checks the bundled fonts only, and `✗` is listed with
+  `✓` as a mark supplied by the system symbol font.
 - 86 more GUI strings moved from Rust into the locale files: 80 with named
   placeholders, which translations may now reorder (`{count}`, `{app}`), and
   6 plain ones. Their output in English, German and Indonesian is unchanged.

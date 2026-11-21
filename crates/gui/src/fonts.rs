@@ -149,12 +149,15 @@ mod tests {
         assert_eq!(proportional.last().map(String::as_str), Some("symbols"));
     }
 
-    /// Every symbol the GUI draws must come from the fonts actually installed
-    /// by the application, except arrows and status marks supplied by the
-    /// `wayexpand-system-symbols` fallback group.
+    /// Every symbol the GUI draws must come from egui's bundled fonts, except
+    /// arrows and status marks supplied by the `wayexpand-system-symbols`
+    /// fallback group. Only the bundled fonts are loaded here: system fonts
+    /// differ between machines (Launchpad's builders have none of the
+    /// fallback candidates), so loading them would let a developer's DejaVu
+    /// hide a gap that a minimal system shows.
     #[test]
     fn bundled_fonts_cover_every_symbol_in_the_interface() {
-        const SYSTEM_FALLBACK_SYMBOLS: &str = "↑→↓⊘◌●✓";
+        const SYSTEM_FALLBACK_SYMBOLS: &str = "↑→↓⊘◌●✓✗";
         fn collect(directory: &Path, symbols: &mut std::collections::BTreeSet<char>) {
             for entry in std::fs::read_dir(directory).unwrap() {
                 let path = entry.unwrap().path();
@@ -179,7 +182,7 @@ mod tests {
         assert!(symbols.contains(&'⏵'), "source scan found no symbols");
 
         let context = egui::Context::default();
-        install(&context);
+        context.set_fonts(definitions_from(Vec::new()));
         let mut output = context.run_ui(egui::RawInput::default(), |_| {});
         output.textures_delta.clear();
         let missing: Vec<String> = context.fonts_mut(|fonts| {
