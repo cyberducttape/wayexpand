@@ -59,6 +59,11 @@ const PICKER_FOCUS_ACK_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_PICKER_FOCUS_CLIENTS: usize = 16;
 const PICKER_FOCUS_ACK: u8 = 0x06;
 const PICKER_FOCUS_REJECTED: u8 = 0x15;
+/// The live picker accepted the request and asked the compositor for focus,
+/// but focus was not confirmed in time. Wayland compositors may refuse focus
+/// without an activation token, so this still means "a picker is open"; the
+/// second launch must exit instead of reporting an error or starting another.
+const PICKER_FOCUS_UNCONFIRMED: u8 = 0x16;
 
 /// Owns the one picker instance for this login session. Its lifetime also
 /// anchors Wayland clipboard ownership; closing the picker releases both.
@@ -285,14 +290,17 @@ fn serve_focus_request(
             }
         }
     }
-    let confirmed = accepted
-        && acknowledged
-            .recv_timeout(PICKER_FOCUS_ACK_TIMEOUT)
-            .is_ok_and(|focused| focused);
-    let response = if confirmed {
-        PICKER_FOCUS_ACK
-    } else {
+    let response = if !accepted {
         PICKER_FOCUS_REJECTED
+    } else {
+        match acknowledged.recv_timeout(PICKER_FOCUS_ACK_TIMEOUT) {
+            Ok(true) => PICKER_FOCUS_ACK,
+            // Focus was requested but not granted, or the UI was slow to
+            // report it; the picker is still running either way.
+            Ok(false) | Err(mpsc::RecvTimeoutError::Timeout) => PICKER_FOCUS_UNCONFIRMED,
+            // The picker dropped the request while closing.
+            Err(mpsc::RecvTimeoutError::Disconnected) => PICKER_FOCUS_REJECTED,
+        }
     };
     let _ = stream.write_all(&[response]);
 }
@@ -380,7 +388,7 @@ fn request_existing_picker(socket_path: &Path) -> anyhow::Result<bool> {
             let mut response = [0u8; 1];
             stream.read_exact(&mut response)?;
             match response[0] {
-                PICKER_FOCUS_ACK => Ok(true),
+                PICKER_FOCUS_ACK | PICKER_FOCUS_UNCONFIRMED => Ok(true),
                 PICKER_FOCUS_REJECTED => {
                     anyhow::bail!("the existing picker is shutting down and could not accept the focus request; try opening it again")
                 }
@@ -2446,7 +2454,7 @@ mod tests {
             let _ = acknowledgement.send(true);
         }
         for response in responses {
-            assert_eq!(response.recv().unwrap(), true);
+            assert!(response.recv().unwrap());
         }
         assert!(primary.take_focus_request().is_empty());
         drop(primary);
@@ -2484,6 +2492,22 @@ mod tests {
         assert!(error
             .to_string()
             .contains("could not accept the focus request"));
+        worker.join().unwrap();
+
+        // A live picker that the compositor would not focus is still the
+        // one picker: the second launch succeeds without starting another.
+        let worker = {
+            fs::remove_file(&socket).unwrap();
+            let listener = UnixListener::bind(&socket).unwrap();
+            thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                assert!(super::read_focus_request(&mut stream));
+                stream
+                    .write_all(&[super::PICKER_FOCUS_UNCONFIRMED])
+                    .unwrap();
+            })
+        };
+        assert!(super::request_existing_picker(&socket).unwrap());
         worker.join().unwrap();
         fs::remove_file(&socket).unwrap();
         fs::remove_dir(&dir).unwrap();
