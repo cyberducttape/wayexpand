@@ -8,7 +8,9 @@
 
 | What is wrong? | First step |
 | --- | --- |
-| The command or app is missing, or installation did not finish | Run `"$HOME/.local/bin/wayexpand" install-check`; this works even when `~/.local/bin` is not on `PATH`. |
+| `wayexpand` is not found in this terminal | If `"$HOME/.local/bin/wayexpand"` exists, run it directly or add `~/.local/bin` to `PATH`. |
+| The installer failed, or `~/.local/bin/wayexpand` is missing | Repeat the install method from [Install](../README.md#install); `install-check` needs an installed CLI. |
+| WayExpand opens but setup or integration is incomplete | Run `"$HOME/.local/bin/wayexpand" install-check` to see which installed components need repair. |
 | WayExpand opens, but a trigger does not expand | Type the trigger once in the affected field, then run `wayexpand why`. |
 | You need help from someone else | Open **Diagnostics → Export support report**, preview it, then save and review the redacted report before sharing. |
 
