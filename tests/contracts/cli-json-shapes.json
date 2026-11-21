@@ -30,6 +30,8 @@
     "physical_input_interruption_observable",
     "physical_input_interruption_verified",
     "recovery_outcome_known",
+    "production_integrity_ready",
+    "production_integrity_gaps",
     "sensitive_field_detection"
   ],
   "doctor_route": [
@@ -49,6 +51,8 @@
     "physical_input_interruption_observable",
     "physical_input_interruption_verified",
     "recovery_outcome_known",
+    "production_integrity_ready",
+    "production_integrity_gaps",
     "sensitive_field_protection",
     "assessment"
   ],

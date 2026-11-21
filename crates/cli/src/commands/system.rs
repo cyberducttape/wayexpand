@@ -1602,6 +1602,14 @@ fn backend_list_command(arguments: Vec<String>) -> Result<()> {
                 "  recovery_outcome_known={}",
                 route["recovery_outcome_known"].as_bool().unwrap_or(false),
             );
+            for gap in route["production_integrity_gaps"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+            {
+                println!("  production-integrity gap: {gap}");
+            }
             for limitation in assessment["limitations"].as_array().into_iter().flatten() {
                 if let Some(limitation) = limitation.as_str() {
                     println!("  limitation: {limitation}");
@@ -1616,6 +1624,7 @@ fn backend_list_command(arguments: Vec<String>) -> Result<()> {
 fn backend_route_json(planned: &wayexpand_backend_selection::PlannedRoute) -> serde_json::Value {
     let contract = planned.contract;
     let assessment = &planned.assessment;
+    let integrity_gaps = contract.production_integrity_gaps();
     serde_json::json!({
         "id": contract.id,
         "label": contract.label,
@@ -1643,6 +1652,8 @@ fn backend_route_json(planned: &wayexpand_backend_selection::PlannedRoute) -> se
         "physical_input_interruption_observable": contract.physical_input_interruption_observable,
         "physical_input_interruption_verified": contract.physical_input_interruption_verified,
         "recovery_outcome_known": contract.recovery_outcome_known,
+        "production_integrity_ready": integrity_gaps.is_empty(),
+        "production_integrity_gaps": integrity_gaps,
         "sensitive_field_detection": contract.sensitive_fields,
     })
 }

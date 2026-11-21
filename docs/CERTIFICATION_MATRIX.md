@@ -213,7 +213,9 @@ outcome. A backend acknowledgement is not a known application recovery
 outcome; the application must report whether the transaction was applied or
 rejected. Accordingly, a production route's `application_result` must be
 `observable` and `recovery_outcome_known` must be true; a successful protocol
-write alone does not satisfy either requirement.
+write alone does not satisfy either requirement. `wayexpand backend list` and
+`wayexpand doctor --json` report the unsatisfied integrity requirements for
+each route so a missing guarantee has a concrete explanation.
 
 <!-- generated:route-contract:start -->
 | Route | Capture | Injection | Trigger precondition | Output transaction | Application result | Destination identity (available / verified) | Physical-input interruption (observable / verified) | Recovery outcome known | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replacement | App identity | Status |

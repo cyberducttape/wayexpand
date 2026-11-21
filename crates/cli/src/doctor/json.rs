@@ -277,6 +277,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
 
 fn route_plan_entry(planned: &wayexpand_backend_selection::PlannedRoute) -> serde_json::Value {
     let contract = planned.contract;
+    let integrity_gaps = contract.production_integrity_gaps();
     serde_json::json!({
         "id": contract.id,
         "label": contract.label,
@@ -294,6 +295,8 @@ fn route_plan_entry(planned: &wayexpand_backend_selection::PlannedRoute) -> serd
         "physical_input_interruption_observable": contract.physical_input_interruption_observable,
         "physical_input_interruption_verified": contract.physical_input_interruption_verified,
         "recovery_outcome_known": contract.recovery_outcome_known,
+        "production_integrity_ready": integrity_gaps.is_empty(),
+        "production_integrity_gaps": integrity_gaps,
         "sensitive_field_protection": contract.sensitive_field_support.certified,
         "assessment": &planned.assessment,
     })

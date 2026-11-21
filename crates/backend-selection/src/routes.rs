@@ -106,6 +106,48 @@ impl RouteContract {
         self.status == "certified"
     }
 
+    /// Requirements this route has not yet demonstrated for production
+    /// replacement. Keep each guarantee independent so operators can see
+    /// whether the gap is destination binding, transaction behavior,
+    /// interruption handling, sensitive-field protection, or recovery.
+    pub fn production_integrity_gaps(&self) -> Vec<&'static str> {
+        let mut gaps = Vec::new();
+        if !self.destination_identity_available {
+            gaps.push("destination identity unavailable");
+        }
+        if !self.destination_identity_verified {
+            gaps.push("destination identity not verified on a real compositor");
+        }
+        if !self.atomic_replace {
+            gaps.push("atomic replacement unavailable");
+        }
+        if !self.physical_input_interruption_observable {
+            gaps.push("physical-input interruption not observable");
+        }
+        if !self.physical_input_interruption_verified {
+            gaps.push("physical-input interruption not verified on a real compositor");
+        }
+        if !self.sensitive_field_support.implemented {
+            gaps.push("sensitive-field state not observable");
+        }
+        if !self.sensitive_field_support.certified {
+            gaps.push("sensitive-field handling not certified");
+        }
+        if self.application_result != "observable" {
+            gaps.push("application result unobservable");
+        }
+        if !self.recovery_outcome_known {
+            gaps.push("recovery outcome unknown");
+        }
+        if self.trigger_precondition != "surrounding_text_matches_trigger" {
+            gaps.push("trigger not verified against target text");
+        }
+        if self.status != "supported" {
+            gaps.push("route not production-supported");
+        }
+        gaps
+    }
+
     pub fn capture_backend(&self) -> Option<RouteBackend> {
         RouteBackend::parse(&self.capture)
     }
