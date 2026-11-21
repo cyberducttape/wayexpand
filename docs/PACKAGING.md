@@ -314,6 +314,18 @@ bash scripts/publish-launchpad-branch.sh --output /tmp/wayexpand-lp
 The recipe must point at `launchpad-vendored`, not `main`: a clean `main`
 checkout has no `vendor/`, and `debian/rules` stops the build.
 
+Launchpad does not report failed builds, so the Launchpad Builds workflow
+(`.github/workflows/launchpad-builds.yml`) checks the PPA's public build
+records every night at 23:40 UTC, after the daily recipe has built. It fails
+when the newest finished build of any series still being built did not
+succeed, and prints the failing lines of its build log. Series with no build
+within 14 days of the newest one (jammy, noble) count as retired and are
+listed but not judged. To check by hand:
+
+```bash
+python3 scripts/check-launchpad-builds.py
+```
+
 **Note:** See [RELEASING.md](RELEASING.md) for the authoritative release version workflow
 (it is the single source of truth for version numbers across all distributions).
 
