@@ -20,6 +20,76 @@ impl Strings {
             }
         }
     }
+
+    pub(crate) fn desktop_compatibility_heading(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Desktop compatibility before setup",
+            Language::German => "Desktop-Kompatibilität vor der Einrichtung",
+            Language::Indonesian => "Kompatibilitas desktop sebelum penyiapan",
+        }
+    }
+
+    /// Current likely routes and evidence, shown before setup can request
+    /// desktop integration or permissions. Headless coverage is never labeled
+    /// as real-session certification.
+    pub(crate) fn desktop_compatibility_rows(&self) -> [(&'static str, &'static str); 4] {
+        match self.lang {
+            Language::English => [
+                (
+                    "GNOME 46, 48, 50, 51",
+                    "IBus + WayExpand extension; headless-tested, not certified on a real desktop.",
+                ),
+                (
+                    "GNOME 49 and other majors",
+                    "Extension support is undeclared (GNOME 49 layout switching is unresolved); GNOME integration is unverified. Quick Picker can copy for manual paste.",
+                ),
+                (
+                    "KDE Plasma / Wayland",
+                    "IBus setup is available; verify in each target app. No route is production-certified.",
+                ),
+                (
+                    "Sway, Hyprland, other desktops",
+                    "Experimental or session-dependent. Setup checks what is available; Quick Picker can copy for manual paste.",
+                ),
+            ],
+            Language::German => [
+                (
+                    "GNOME 46, 48, 50, 51",
+                    "IBus + WayExpand-Erweiterung; headless getestet, nicht auf einem echten Desktop zertifiziert.",
+                ),
+                (
+                    "GNOME 49 und andere Hauptversionen",
+                    "Erweiterungsunterstützung ist nicht deklariert (Layoutwechsel unter GNOME 49 ist ungeklärt); die GNOME-Integration ist ungeprüft. Der Schnellwähler kann zum manuellen Einfügen kopieren.",
+                ),
+                (
+                    "KDE Plasma / Wayland",
+                    "IBus-Einrichtung ist verfügbar; testen Sie jede Zielanwendung. Kein Eingabeweg ist produktionszertifiziert.",
+                ),
+                (
+                    "Sway, Hyprland, andere Desktops",
+                    "Experimentell oder sitzungsabhängig. Die Einrichtung prüft verfügbare Wege; der Schnellwähler kann zum manuellen Einfügen kopieren.",
+                ),
+            ],
+            Language::Indonesian => [
+                (
+                    "GNOME 46, 48, 50, 51",
+                    "IBus + ekstensi WayExpand; diuji headless, belum tersertifikasi pada desktop nyata.",
+                ),
+                (
+                    "GNOME 49 dan versi utama lainnya",
+                    "Dukungan ekstensi belum dinyatakan (pergantian tata letak pada GNOME 49 belum terselesaikan); integrasi GNOME belum terverifikasi. Quick Picker dapat menyalin untuk ditempel manual.",
+                ),
+                (
+                    "KDE Plasma / Wayland",
+                    "Penyiapan IBus tersedia; uji di setiap aplikasi tujuan. Belum ada rute yang tersertifikasi untuk produksi.",
+                ),
+                (
+                    "Sway, Hyprland, desktop lain",
+                    "Eksperimental atau bergantung pada sesi. Penyiapan memeriksa rute yang tersedia; Quick Picker dapat menyalin untuk ditempel manual.",
+                ),
+            ],
+        }
+    }
 }
 
 impl Strings {

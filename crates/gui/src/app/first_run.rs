@@ -595,6 +595,26 @@ impl GuiApp {
                     ui.label(RichText::new(self.strings.welcome_intro()).color(palette.muted));
                 });
                 ui.add_space(14.0);
+                theme::card(ui, palette, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(
+                        RichText::new(self.strings.desktop_compatibility_heading())
+                            .strong()
+                            .color(ui.visuals().strong_text_color()),
+                    );
+                    ui.add_space(4.0);
+                    egui::Grid::new("first_run_desktop_compatibility")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (desktop, route) in self.strings.desktop_compatibility_rows() {
+                                ui.label(RichText::new(desktop).strong());
+                                ui.label(route);
+                                ui.end_row();
+                            }
+                        });
+                });
+                ui.add_space(10.0);
                 if self.gnome_setup_resume_pending {
                     theme::card(ui, palette, |ui| {
                         ui.set_width(ui.available_width());
