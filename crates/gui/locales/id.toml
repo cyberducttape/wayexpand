@@ -249,6 +249,7 @@ dg_report_saved_with_owner_only_permissions = "Laporan disimpan dengan izin khus
 dg_save_as = "Simpan sebagai"
 dg_desktop_test_2 = "Uji desktop…"
 dg_choose_a_report_path_first = "Pilih jalur laporan terlebih dahulu."
+dg_report_path_already_exists = "Berkas sudah ada di jalur ini. Pilih nama lain; laporan yang ada tidak pernah ditimpa."
 dg_preview_the_report_before_saving = "Pratinjau laporan sebelum menyimpan."
 dg_could_not_create_report_file_error = "Berkas laporan tidak dapat dibuat: {error}"
 dg_could_not_write_report_error = "Laporan tidak dapat ditulis: {error}"

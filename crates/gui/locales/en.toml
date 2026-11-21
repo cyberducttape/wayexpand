@@ -252,6 +252,7 @@ dg_report_saved_with_owner_only_permissions = "Report saved with owner-only perm
 dg_save_as = "Save as"
 dg_desktop_test_2 = "Desktop test…"
 dg_choose_a_report_path_first = "Choose a report path first."
+dg_report_path_already_exists = "A file already exists at this path. Choose another name; existing reports are never overwritten."
 dg_preview_the_report_before_saving = "Preview the report before saving."
 dg_could_not_create_report_file_error = "Could not create report file: {error}"
 dg_could_not_write_report_error = "Could not write report: {error}"

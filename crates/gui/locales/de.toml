@@ -249,6 +249,7 @@ dg_report_saved_with_owner_only_permissions = "Bericht nur für den Besitzer les
 dg_save_as = "Speichern unter"
 dg_desktop_test_2 = "Desktop-Test…"
 dg_choose_a_report_path_first = "Wählen Sie zuerst einen Pfad für den Bericht."
+dg_report_path_already_exists = "An diesem Pfad ist bereits eine Datei vorhanden. Wählen Sie einen anderen Namen; vorhandene Berichte werden nie überschrieben."
 dg_preview_the_report_before_saving = "Zeigen Sie den Bericht vor dem Speichern als Vorschau an."
 dg_could_not_create_report_file_error = "Die Berichtsdatei konnte nicht angelegt werden: {error}"
 dg_could_not_write_report_error = "Der Bericht konnte nicht geschrieben werden: {error}"

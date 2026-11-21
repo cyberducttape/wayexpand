@@ -2646,7 +2646,13 @@ impl GuiApp {
             .create_new(true)
             .mode(0o600)
             .open(&path)
-            .map_err(|error| self.strings.dg_could_not_create_report_file_error(&error))?;
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    self.strings.dg_report_path_already_exists().to_owned()
+                } else {
+                    self.strings.dg_could_not_create_report_file_error(&error)
+                }
+            })?;
         if let Err(error) = file
             .write_all(report.as_bytes())
             .and_then(|()| file.sync_all())
