@@ -599,7 +599,7 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
             if let Some(hint) = failure_hint {
                 bail!("doctor found an unhealthy selected IBus route: {hint}");
             }
-            bail!("doctor reported unhealthy host readiness or runtime health; inspect the JSON checks for details");
+            bail!("doctor reported unhealthy host readiness or runtime health; run `wayexpand why` for the prioritized next action, or inspect the JSON checks for detail");
         }
         return Ok(());
     }
