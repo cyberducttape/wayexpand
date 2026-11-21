@@ -161,9 +161,7 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
             line.starts_with("Next:") || line.starts_with("Fix:") || line.starts_with("Remedy:")
         })
         .map(str::trim)
-        .unwrap_or(
-            "Run `wayexpand setup --check` and address the reported prerequisite. For a per-user install when `wayexpand` is not on PATH, run `\"$HOME/.local/bin/wayexpand\" setup --check`.",
-        );
+        .unwrap_or("Run `wayexpand setup --check` and address the reported prerequisite.");
     let cli_missing = combined.contains("could not find the `wayexpand` CLI");
     let (summary, stage, problem_id, remedy) = if cli_missing {
         (
@@ -174,6 +172,13 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
             )
     } else {
         (summary, stage, problem_id, remedy)
+    };
+    let remedy = if cli_missing {
+        remedy.to_owned()
+    } else {
+        format!(
+            "{remedy} If a suggested command starts with `wayexpand` and this is a per-user install without PATH configured, replace that first word with `\"$HOME/.local/bin/wayexpand\"`."
+        )
     };
     let lower = combined.to_ascii_lowercase();
     let rollback = if lower.contains("rollback was incomplete")
@@ -201,7 +206,7 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
         redact_setup_text(summary.trim()),
         redact_setup_text(stage),
         problem_id,
-        redact_setup_text(remedy),
+        redact_setup_text(&remedy),
         rollback,
         redact_setup_text(stdout.trim()),
         redact_setup_text(stderr.trim()),
