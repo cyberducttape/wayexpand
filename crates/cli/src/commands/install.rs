@@ -1258,7 +1258,12 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
             })
         );
     } else {
-        println!("WayExpand Setup Check\n\nInstalled artifacts:");
+        println!("WayExpand Setup Check\n\nNext action: {next_action}");
+        println!(
+            "{}\n",
+            crate::help::wrap(&next_action_reason, 8, crate::help::WIDTH)
+        );
+        println!("Evidence: installed artifacts:");
         for r in &rows {
             print!("{}", check_row(r.status, r.component, &r.path));
         }
@@ -1392,11 +1397,6 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
         ] {
             print!("{}", labelled_row(label, &value));
         }
-        println!("\nNext: {next_action}");
-        println!(
-            "{}\n",
-            crate::help::wrap(&next_action_reason, 6, crate::help::WIDTH)
-        );
         print!(
             "{}",
             crate::help::wrap(
