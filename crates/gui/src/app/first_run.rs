@@ -763,11 +763,31 @@ impl GuiApp {
                                         self.strings.problem_text(problem),
                                     );
                                     let help = match problem {
+                                        super::Problem::InstallationIncomplete
+                                            if !self
+                                                .installation_audit
+                                                .failed_components
+                                                .is_empty() =>
+                                        {
+                                            let components = self
+                                                .installation_audit
+                                                .failed_components
+                                                .iter()
+                                                .map(|component| {
+                                                    self.strings.dg_installation_component(component)
+                                                })
+                                                .collect::<Vec<_>>()
+                                                .join(", ");
+                                            Some(
+                                                self.strings
+                                                    .dg_installation_components(&components),
+                                            )
+                                        }
                                         super::Problem::InputSourceNotSetUp => {
-                                            Some(self.strings.gnome_register_help())
+                                            Some(self.strings.gnome_register_help().to_owned())
                                         }
                                         super::Problem::InputSourceNotSelected => {
-                                            Some(self.strings.gnome_select_help())
+                                            Some(self.strings.gnome_select_help().to_owned())
                                         }
                                         _ => None,
                                     };
