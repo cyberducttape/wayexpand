@@ -32,6 +32,16 @@ def complete_report():
                 "keyboard_profile": profile,
                 "result": "pass",
                 "evidence_ref": f"artifacts/{application}-{scenario}-{profile}.json",
+                **(
+                    {
+                        "trigger_captured": True,
+                        "original_trigger_removed": True,
+                        "replacement_occurrences": 1,
+                        "intended_field_retained_focus": True,
+                    }
+                    if scenario == "real-trigger-replacement"
+                    else {}
+                ),
             }
             for application in PLAN["application_classes"]
             for scenario in PLAN["required_application_scenarios"]

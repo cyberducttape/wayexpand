@@ -30,6 +30,12 @@ REQUIRED_SCENARIOS = {
     "password-field-refusal",
     "focus-change-during-replacement",
 }
+REQUIRED_TRIGGER_OBSERVATIONS = {
+    "trigger_captured",
+    "original_trigger_removed",
+    "replacement_occurrences",
+    "intended_field_retained_focus",
+}
 REQUIRED_KEYBOARD_PROFILES = {"us", "de", "fr", "altgr", "multi-layout-switching"}
 REQUIRED_LIFECYCLE = {
     "clean-user-install",
@@ -74,6 +80,7 @@ def validate_plan(plan):
     lifecycle = set(plan.get("required_lifecycle_scenarios", []))
     scenarios = set(plan.get("required_application_scenarios", []))
     keyboard_profiles = set(plan.get("required_keyboard_profiles", []))
+    trigger_observations = set(plan.get("real_trigger_observations", []))
     platforms = {item.get("id") for item in plan.get("platforms", [])}
     if missing := REQUIRED_APPLICATIONS - applications:
         errors.append(f"matrix omits application classes: {', '.join(sorted(missing))}")
@@ -83,6 +90,8 @@ def validate_plan(plan):
         errors.append(f"matrix omits application scenarios: {', '.join(sorted(missing))}")
     if missing := REQUIRED_KEYBOARD_PROFILES - keyboard_profiles:
         errors.append(f"matrix omits keyboard profiles: {', '.join(sorted(missing))}")
+    if missing := REQUIRED_TRIGGER_OBSERVATIONS - trigger_observations:
+        errors.append(f"matrix omits real-trigger observations: {', '.join(sorted(missing))}")
     if missing := REQUIRED_PLATFORMS - platforms:
         errors.append(f"matrix omits supported platforms: {', '.join(sorted(missing))}")
     if plan.get("initial_status") != "not-tested":
@@ -127,6 +136,38 @@ def validate_report(plan, report):
             value = item.get(field)
             if not value:
                 errors.append(f"{key} lacks {field}")
+        if item.get("scenario") == "real-trigger-replacement":
+            observations = {
+                "trigger_captured": bool,
+                "original_trigger_removed": bool,
+                "intended_field_retained_focus": bool,
+            }
+            for field, expected_type in observations.items():
+                value = item.get(field)
+                if value is not None and type(value) is not expected_type:
+                    errors.append(f"{key} has invalid {field}: expected true, false, or null")
+                if field not in item:
+                    errors.append(f"{key} lacks {field}")
+            replacement_count = item.get("replacement_occurrences")
+            if replacement_count is not None and (
+                type(replacement_count) is not int or replacement_count < 0
+            ):
+                errors.append(
+                    f"{key} has invalid replacement_occurrences: "
+                    "expected a non-negative integer or null"
+                )
+            if "replacement_occurrences" not in item:
+                errors.append(f"{key} lacks replacement_occurrences")
+            if item.get("result") == "pass" and (
+                item.get("trigger_captured") is not True
+                or item.get("original_trigger_removed") is not True
+                or replacement_count != 1
+                or item.get("intended_field_retained_focus") is not True
+            ):
+                errors.append(
+                    f"{key} cannot pass unless the trigger was captured and removed, "
+                    "replacement appeared once, and focus stayed in the intended field"
+                )
     if missing := expected - observed:
         errors.append(f"missing application cells: {len(missing)}")
 

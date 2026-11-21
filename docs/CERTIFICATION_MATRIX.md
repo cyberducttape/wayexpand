@@ -121,7 +121,12 @@ plan retains every required cell and validates reviewed per-platform JSON
 reports without accepting missing or unsupported cells as passes. Each
 application result is a separate scenario × keyboard-profile cell and links to
 reviewable evidence. Report validation rejects headless sessions and requires
-a physical keyboard and reviewer identity. CI runs the headless GNOME IBus
+a physical keyboard and reviewer identity. Every `real-trigger-replacement`
+cell separately records whether WayExpand captured the trigger, removed the
+original trigger, inserted the replacement occurrence count, and retained
+focus in the intended field. A cell cannot pass unless those observations are
+`true`, `true`, `1`, and `true`, respectively; `null` means the observation
+could not be made and leaves the report incomplete. CI runs the headless GNOME IBus
 acceptance test on Ubuntu 24.04/GNOME 46, Debian 13/GNOME 48,
 Ubuntu 26.04/GNOME 50, and Fedora 45/GNOME 51. GNOME 49 (Fedora 43, RHEL 10.2)
 passes everything except the German and French layout cases, where its
