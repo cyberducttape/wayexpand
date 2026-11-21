@@ -231,7 +231,9 @@ pub(crate) const COMMANDS: &[Command] = &[
         ("wayexpand debug --live --seconds 30", "Watch the service while you type"),
     ]),
     command("health", Troubleshoot, "Report readiness with a stable monitoring exit code", &["health [--json]"]).advanced(),
-    command("install-check", Troubleshoot, "Check that WayExpand's components are installed", &["install-check [--json] [--config PATH]"]).advanced(),
+    command("install-check", Troubleshoot, "Check that WayExpand's components are installed", &["install-check [--json] [--config PATH]"])
+        .details("Read-only audit of the installed files, desktop integration, services, and active configuration. It identifies missing components without changing the installation; use `repair --check` to review safe repairs.")
+        .examples(&[("wayexpand install-check", "Check whether the installation is complete")]),
     command("repair", Troubleshoot, "Show or apply installation repairs", &["repair --check|--apply [--json]", "repair --gnome-input-source [--json]"]),
     command("reset", Troubleshoot, "Preview and apply a scoped recovery reset", &["reset --integration|--services|--preferences [--check|--apply --yes] [--json]"]).advanced(),
     command("support-bundle", Troubleshoot, "Write a redacted report to attach to a bug report", &["support-bundle [--gnome] [--output FILE]"])
