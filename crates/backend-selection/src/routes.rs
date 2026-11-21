@@ -53,11 +53,28 @@ pub struct RouteContract {
     /// How deletion and insertion are submitted to the client/compositor.
     pub output_transaction: String,
     /// Whether this route can observe that the application applied the text.
-    /// Current routes cannot; user-confirmed desktop tests are separate.
+    /// User-confirmed desktop tests are separate from route-level evidence.
     pub application_result: String,
     pub atomic_replace: bool,
+    /// Whether this route has a stable target identity while replacement is
+    /// in flight. This does not imply that the identity is certified on a
+    /// particular compositor.
+    pub destination_identity_available: bool,
+    /// Whether target identity has been demonstrated on a real compositor.
+    pub destination_identity_verified: bool,
+    /// Whether new physical input can interrupt an output transaction.
+    pub physical_input_interruption_observable: bool,
+    /// Whether interruption observation has been demonstrated on a real
+    /// compositor session.
+    pub physical_input_interruption_verified: bool,
+    /// Whether the route can determine the outcome applied to the target,
+    /// rather than only observing backend/protocol acknowledgement.
+    pub recovery_outcome_known: bool,
     pub app_identity: String,
     pub focus_tracking: bool,
+    /// Route maturity from the reviewed catalog. The production certification
+    /// gate promotes a route to `supported`; `experimental` remains the
+    /// default until that evidence is accepted.
     pub status: String,
     pub setup_backend: String,
     pub setup_detail: String,
@@ -88,8 +105,53 @@ pub struct SensitiveFieldSupport {
 }
 
 impl RouteContract {
+    /// The production certification validator promotes reviewed routes to
+    /// `supported`. Use that same catalog value when ranking routes and
+    /// describing certification readiness.
     pub fn is_certified(&self) -> bool {
-        self.status == "certified"
+        self.status == "supported"
+    }
+
+    /// Requirements this route has not yet demonstrated for production
+    /// replacement. Keep each guarantee independent so operators can see
+    /// whether the gap is destination binding, transaction behavior,
+    /// interruption handling, sensitive-field protection, or recovery.
+    pub fn production_integrity_gaps(&self) -> Vec<&'static str> {
+        let mut gaps = Vec::new();
+        if !self.destination_identity_available {
+            gaps.push("destination identity unavailable");
+        }
+        if !self.destination_identity_verified {
+            gaps.push("destination identity not verified on a real compositor");
+        }
+        if !self.atomic_replace {
+            gaps.push("atomic replacement unavailable");
+        }
+        if !self.physical_input_interruption_observable {
+            gaps.push("physical-input interruption not observable");
+        }
+        if !self.physical_input_interruption_verified {
+            gaps.push("physical-input interruption not verified on a real compositor");
+        }
+        if !self.sensitive_field_support.implemented {
+            gaps.push("sensitive-field state not observable");
+        }
+        if !self.sensitive_field_support.certified {
+            gaps.push("sensitive-field handling not certified");
+        }
+        if self.application_result != "observable" {
+            gaps.push("application result unobservable");
+        }
+        if !self.recovery_outcome_known {
+            gaps.push("recovery outcome unknown");
+        }
+        if self.trigger_precondition != "surrounding_text_matches_trigger" {
+            gaps.push("trigger not verified against target text");
+        }
+        if !self.is_certified() {
+            gaps.push("route not production-supported");
+        }
+        gaps
     }
 
     pub fn capture_backend(&self) -> Option<RouteBackend> {

@@ -5,6 +5,15 @@ use crate::args::take_flag;
 use crate::*;
 use std::io::IsTerminal;
 
+fn runnable_cli_command(subcommand: &str) -> String {
+    crate::commands::install::make_cli_command_runnable(format!("wayexpand {subcommand}"))
+}
+
+fn runnable_cli_text(text: &str) -> String {
+    let cli = crate::commands::install::make_cli_command_runnable("wayexpand".into());
+    text.replace("`wayexpand ", &format!("`{cli} "))
+}
+
 fn setup_plan_actions(
     backend: &str,
     is_gnome_wayland: bool,
@@ -212,7 +221,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     if resume_pending {
         println!("Resuming the GNOME IBus setup prepared before the previous logout.");
     } else if resume_marker_exists {
-        println!("A GNOME IBus setup continuation is stale, unsupported, or belongs to another session; it will not affect backend selection. Use `wayexpand setup --cancel-resume` to discard it.");
+        println!("{}", runnable_cli_text("A GNOME IBus setup continuation is stale, unsupported, or belongs to another session; it will not affect backend selection. Use `wayexpand setup --cancel-resume` to discard it."));
     }
     let capabilities = probe_capabilities();
     let policy = load_policy()?;
@@ -401,8 +410,8 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let mut desktop_test_result = crate::commands::debug::DesktopTestResult::NotTested;
     if let Some(test_trigger) = test_trigger.as_deref() {
         let quoted_trigger = crate::commands::shell_single_quote(test_trigger);
-        let preview_command = format!("wayexpand preview {quoted_trigger}");
-        let test_command = format!("wayexpand debug --test {quoted_trigger}");
+        let preview_command = runnable_cli_command(&format!("preview {quoted_trigger}"));
+        let test_command = runnable_cli_command(&format!("debug --test {quoted_trigger}"));
         if assume_yes {
             println!("Activation completed. Real application insertion: NOT TESTED.");
             println!("Review the expected text first with `{preview_command}`.");
@@ -426,7 +435,9 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         }
     } else {
         println!("Activation completed. No enabled, safe-to-test expansion is configured; real application insertion remains NOT TESTED.");
-        println!("Setup is configured, but insertion is unverified. In the GUI, open Test Expansion to create a dedicated harmless snippet and verify it. From the CLI, review a static snippet with `wayexpand preview TRIGGER`, then run `wayexpand debug --test TRIGGER` in a disposable field.");
+        let preview_command = runnable_cli_command("preview 'TRIGGER'");
+        let test_command = runnable_cli_command("debug --test 'TRIGGER'");
+        println!("Setup is configured, but insertion is unverified. In the GUI, open Test Expansion to create a dedicated harmless snippet and verify it. From the CLI, replace `TRIGGER` below with the exact trigger and keep the quotes so punctuation such as `;` is passed safely: `{preview_command}`, then `{test_command}` in a disposable field.");
     }
     if desktop_test_result == crate::commands::debug::DesktopTestResult::Failed {
         println!("SETUP RESULT: ACTION REQUIRED");
@@ -443,10 +454,10 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         if test_trigger.is_some() {
             if let Some(test_trigger) = test_trigger.as_deref() {
                 let quoted_trigger = crate::commands::shell_single_quote(test_trigger);
-                println!(
-                    "Review the expected text first with `wayexpand preview {quoted_trigger}`."
-                );
-                println!("Next: run `wayexpand debug --test {quoted_trigger}` in a disposable text field and confirm the replacement.");
+                let preview_command = runnable_cli_command(&format!("preview {quoted_trigger}"));
+                let test_command = runnable_cli_command(&format!("debug --test {quoted_trigger}"));
+                println!("Review the expected text first with `{preview_command}`.");
+                println!("Next: run `{test_command}` in a disposable text field and confirm the replacement.");
             }
         }
     }
@@ -481,7 +492,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
         } else if terminals_requested || evdev_apps_requested {
             println!("The evdev app fallback was not configured because a real IBus insertion was not verified.");
-            println!("After verifying a harmless expansion in a disposable text field, configure settings.raw_capture_apps and rerun `wayexpand setup --backend ibus --evdev-apps`.");
+            println!("{}", runnable_cli_text("After verifying a harmless expansion in a disposable text field, configure settings.raw_capture_apps and rerun `wayexpand setup --backend ibus --evdev-apps`."));
         }
     }
     Ok(())
@@ -594,9 +605,12 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         .transpose()?
         .unwrap_or_else(default_config_path);
     if requested_json {
-        let healthy = print_json_diagnostics(&config_path)?;
+        let (healthy, failure_hint) = print_json_diagnostics(&config_path)?;
         if !healthy {
-            bail!("doctor reported unhealthy host readiness or runtime health; inspect the JSON checks for details");
+            if let Some(hint) = failure_hint {
+                bail!("doctor found an unhealthy selected IBus route: {hint}");
+            }
+            bail!("{}", runnable_cli_text("doctor reported unhealthy host readiness or runtime health; run `wayexpand why` for the prioritized next action, or inspect the JSON checks for detail"));
         }
         return Ok(());
     }
@@ -604,6 +618,11 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         "WayExpand {} (commit {})",
         build_info::VERSION,
         build_info::COMMIT
+    );
+    let quick_diagnosis =
+        crate::commands::install::make_cli_command_runnable("wayexpand why".into());
+    println!(
+        "Quick answer for a missed expansion: run `{quick_diagnosis}`; this command shows the full readiness details."
     );
     println!("Session: {}", session_description());
     println!("Feature limits: WayExpand does not observe another IME's active preedit; commit or cancel composition before typing a trigger. Local dead-key/Compose guards and committed-Unicode support depend on the selected route. App-filter window tracking requires KWin or the WayExpand GNOME Shell extension and fails closed when unavailable.");
@@ -623,7 +642,7 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         || !evdev_consent_ok
         || !capture_ready
     {
-        bail!("doctor found configuration, runtime, or backend problems");
+        bail!("doctor found configuration, runtime, or backend problems; follow the failed check's Next guidance above");
     }
     Ok(())
 }
@@ -1050,14 +1069,15 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                     "invalid or missing"
                 }
             );
-            println!(
-                "Installed components: {}",
-                if installation_ready {
-                    "self-check passed"
-                } else {
-                    "required component missing; run `wayexpand install-check`"
-                }
-            );
+            let component_status = if installation_ready {
+                "self-check passed".to_owned()
+            } else {
+                format!(
+                    "required component missing; run `{}`",
+                    runnable_cli_command("install-check")
+                )
+            };
+            println!("Installed components: {component_status}");
             println!(
                 "Daemon: {}",
                 daemon_version.or(daemon_commit).unwrap_or("not responding")
@@ -1127,16 +1147,15 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
     }
     if action == "--rollback" {
         let target = restore_previous_install(&library, &current, &rollback_file, service)?;
-        println!(
-            "Restored payload {target}; run `wayexpand upgrade --check` to verify runtime health."
-        );
+        let check_command = runnable_cli_command("upgrade --check");
+        println!("Restored payload {target}; run `{check_command}` to verify runtime health.");
         return Ok(());
     }
     if !config_valid {
         bail!("configuration is invalid; refusing to restart against the new payload")
     }
     if status_snapshot.is_none() {
-        bail!("no daemon is responding; start the chosen route with `wayexpand setup --apply`, then rerun `wayexpand upgrade --check`")
+        bail!("{}", runnable_cli_text("no daemon is responding; start the chosen route with `wayexpand setup --apply`, then rerun `wayexpand upgrade --check`"))
     }
     if !mismatch {
         let broker = "wayexpand-action-broker.service";
@@ -1160,10 +1179,10 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         }
         let failures = installation_check_failures();
         if !failures.is_empty() {
-            bail!(
+            bail!("{}", runnable_cli_text(&format!(
                 "post-upgrade installation self-check failed for {}. Run `wayexpand install-check --json` for details",
                 failures.join(", ")
-            )
+            )))
         }
         if !stale_ibus_processes.is_empty() {
             print_ibus_engine_restart_guidance(&stale_ibus_processes);
@@ -1171,19 +1190,22 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         return Ok(());
     }
     let Some(unit) = service else {
-        bail!("daemon route is not mapped to a managed user service; restart it using its owner, then run `wayexpand upgrade --check`")
+        bail!("{}", runnable_cli_text("daemon route is not mapped to a managed user service; restart it using its owner, then run `wayexpand upgrade --check`"))
     };
     let status = crate::setup::run_setup_command("systemctl", &["--user", "restart", unit])?;
     if !status.success() {
         if rollback_file.is_file() {
             let restored = restore_previous_install(&library, &current, &rollback_file, Some(unit));
             bail!(
-                "{unit} restart failed; automatic rollback {}",
-                if restored.is_ok() {
-                    "restored the previous payload"
-                } else {
-                    "also failed; inspect the service and run `wayexpand upgrade --rollback`"
-                }
+                "{}",
+                runnable_cli_text(&format!(
+                    "{unit} restart failed; automatic rollback {}",
+                    if restored.is_ok() {
+                        "restored the previous payload"
+                    } else {
+                        "also failed; inspect the service and run `wayexpand upgrade --rollback`"
+                    }
+                ))
             )
         }
         bail!("{unit} restart failed; no saved payload is available for automatic rollback")
@@ -1210,19 +1232,25 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
     if !build_matches || !compatible {
         if rollback_file.is_file() {
             let restored = restore_previous_install(&library, &current, &rollback_file, Some(unit));
-            bail!(upgrade_health_failure(
+            bail!(
+                "{}",
+                runnable_cli_text(&upgrade_health_failure(
+                    cli_version,
+                    restarted_build,
+                    health.is_ok(),
+                    restored.is_ok()
+                ))
+            )
+        }
+        bail!(
+            "{}",
+            runnable_cli_text(&upgrade_health_failure(
                 cli_version,
                 restarted_build,
                 health.is_ok(),
-                restored.is_ok()
+                false
             ))
-        }
-        bail!(upgrade_health_failure(
-            cli_version,
-            restarted_build,
-            health.is_ok(),
-            false
-        ))
+        )
     }
     let broker = "wayexpand-action-broker.service";
     if crate::setup::run_setup_command("systemctl", &["--user", "is-active", "--quiet", broker])
@@ -1242,12 +1270,15 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                 let restored =
                     restore_previous_install(&library, &current, &rollback_file, Some(unit));
                 bail!(
-                    "action broker health check failed; automatic rollback {}",
-                    if restored.is_ok() {
-                        "restored the previous payload"
-                    } else {
-                        "also failed; inspect services and run `wayexpand upgrade --rollback`"
-                    }
+                    "{}",
+                    runnable_cli_text(&format!(
+                        "action broker health check failed; automatic rollback {}",
+                        if restored.is_ok() {
+                            "restored the previous payload"
+                        } else {
+                            "also failed; inspect services and run `wayexpand upgrade --rollback`"
+                        }
+                    ))
                 )
             }
             bail!("action broker health check failed; no saved payload is available for automatic rollback")
@@ -1257,7 +1288,7 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
     if !installation_failures.is_empty() {
         let restored = rollback_file.is_file()
             && restore_previous_install(&library, &current, &rollback_file, Some(unit)).is_ok();
-        bail!(
+        bail!("{}", runnable_cli_text(&format!(
             "post-upgrade installation self-check failed for {}; automatic rollback {}. Run `wayexpand install-check --json` for details",
             installation_failures.join(", "),
             if restored {
@@ -1265,7 +1296,7 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
             } else {
                 "was unavailable or failed; inspect the installation before using it"
             }
-        )
+        )))
     }
     println!("Restarted {unit}; daemon build {restarted_build} now matches this CLI.");
     let stale_ibus_processes = crate::setup_ibus::stale_engine_processes();
@@ -1386,9 +1417,9 @@ fn print_ibus_engine_restart_guidance(processes: &[crate::setup_ibus::StaleEngin
             process.executable.display()
         );
     }
-    println!(
+    println!("{}", runnable_cli_text(
         "Restart IBus to load the updated engine: `wayexpand ibus restart` (input pauses briefly)."
-    );
+    ));
 }
 
 fn wait_for_daemon_build() -> (Result<serde_json::Value>, Option<String>) {
@@ -1584,6 +1615,32 @@ fn backend_list_command(arguments: Vec<String>) -> Result<()> {
                 route["output_transaction"].as_str().unwrap_or("unknown"),
                 route["application_result"].as_str().unwrap_or("unknown"),
             );
+            println!(
+                "  destination_identity_available={} destination_identity_verified={}",
+                route["destination_identity_available"]
+                    .as_bool()
+                    .unwrap_or(false),
+                route["destination_identity_verified"]
+                    .as_bool()
+                    .unwrap_or(false),
+            );
+            println!(
+                "  physical_input_interruption_observable={} physical_input_interruption_verified={}",
+                route["physical_input_interruption_observable"].as_bool().unwrap_or(false),
+                route["physical_input_interruption_verified"].as_bool().unwrap_or(false),
+            );
+            println!(
+                "  recovery_outcome_known={}",
+                route["recovery_outcome_known"].as_bool().unwrap_or(false),
+            );
+            for gap in route["production_integrity_gaps"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+            {
+                println!("  production-integrity gap: {gap}");
+            }
             for limitation in assessment["limitations"].as_array().into_iter().flatten() {
                 if let Some(limitation) = limitation.as_str() {
                     println!("  limitation: {limitation}");
@@ -1598,6 +1655,7 @@ fn backend_list_command(arguments: Vec<String>) -> Result<()> {
 fn backend_route_json(planned: &wayexpand_backend_selection::PlannedRoute) -> serde_json::Value {
     let contract = planned.contract;
     let assessment = &planned.assessment;
+    let integrity_gaps = contract.production_integrity_gaps();
     serde_json::json!({
         "id": contract.id,
         "label": contract.label,
@@ -1620,6 +1678,14 @@ fn backend_route_json(planned: &wayexpand_backend_selection::PlannedRoute) -> se
         "output_transaction": contract.output_transaction,
         "application_result": contract.application_result,
         "atomic_replace": contract.atomic_replace,
+        "destination_identity_available": contract.destination_identity_available,
+        "destination_identity_verified": contract.destination_identity_verified,
+        "physical_input_interruption_observable": contract.physical_input_interruption_observable,
+        "physical_input_interruption_verified": contract.physical_input_interruption_verified,
+        "recovery_outcome_known": contract.recovery_outcome_known,
+        "production_integrity_ready": integrity_gaps.is_empty(),
+        "production_integrity_gaps": integrity_gaps,
+        "sensitive_field_state_observable": contract.sensitive_field_support.implemented,
         "sensitive_field_detection": contract.sensitive_fields,
     })
 }
@@ -1705,9 +1771,9 @@ fn backend_profile_command(arguments: Vec<String>) -> Result<()> {
                 profile.id, profile.desktop, profile.recommended_route_id
             );
         }
-        println!(
+        println!("{}", runnable_cli_text(
             "Use `wayexpand backend profile --current` to inspect the detected desktop profile."
-        );
+        ));
     }
     Ok(())
 }

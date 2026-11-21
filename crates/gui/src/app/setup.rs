@@ -150,18 +150,54 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
         })
         .map(str::trim)
         .unwrap_or("Setup command execution");
-    let problem_id = combined
-        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
-        .find(|part| part.starts_with("WX-") && part.len() > 3)
-        .unwrap_or("WX-SETUP-001");
-    let remedy = combined
-        .lines()
-        .find(|line| {
-            let line = line.trim_start();
-            line.starts_with("Next:") || line.starts_with("Fix:") || line.starts_with("Remedy:")
-        })
-        .map(str::trim)
-        .unwrap_or("Run `wayexpand setup --check` and address the reported prerequisite.");
+    let find_problem_id = |output: &str| {
+        output
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
+            .find(|part| part.starts_with("WX-") && part.len() > 3)
+            .map(str::to_owned)
+    };
+    let problem_id = find_problem_id(summary)
+        .or_else(|| find_problem_id(&stderr))
+        .or_else(|| find_problem_id(&stdout))
+        .unwrap_or_else(|| "WX-SETUP-001".to_owned());
+    let find_remedy = |output: &str| {
+        output
+            .lines()
+            .rev()
+            .find(|line| {
+                let line = line.trim_start();
+                line.starts_with("Next:") || line.starts_with("Fix:") || line.starts_with("Remedy:")
+            })
+            .map(str::trim)
+            .map(str::to_owned)
+    };
+    // CLI diagnostics commonly write their specific Fix/Next guidance to
+    // stderr while stdout contains generic progress hints. Prefer the
+    // actionable error stream, and within it the last hint, so the report
+    // does not send users to an earlier, less specific step.
+    let remedy = find_remedy(&stderr)
+        .or_else(|| find_remedy(&stdout))
+        .unwrap_or_else(|| {
+            "Run `wayexpand setup --check` and address the reported prerequisite.".to_owned()
+        });
+    let cli_missing = combined.contains("could not find the `wayexpand` CLI");
+    let (summary, stage, problem_id, remedy) = if cli_missing {
+        (
+                "The WayExpand command-line component is missing from this installation.",
+                "Starting the WayExpand command-line component",
+                "WX-INSTALL-001".to_owned(),
+                "Reinstall WayExpand using the same package, release archive, or per-user installer as this GUI, then reopen it.".to_owned(),
+            )
+    } else {
+        (summary, stage, problem_id, remedy)
+    };
+    let remedy = if !cli_missing && remedy.contains("wayexpand") {
+        format!(
+            "{remedy} If a suggested command starts with `wayexpand` and this is a per-user install without PATH configured, replace that first word with `\"$HOME/.local/bin/wayexpand\"`."
+        )
+    } else {
+        remedy.to_owned()
+    };
     let lower = combined.to_ascii_lowercase();
     let rollback = if lower.contains("rollback was incomplete")
         || lower.contains("rollback failed")
@@ -188,7 +224,7 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
         redact_setup_text(summary.trim()),
         redact_setup_text(stage),
         problem_id,
-        redact_setup_text(remedy),
+        redact_setup_text(&remedy),
         rollback,
         redact_setup_text(stdout.trim()),
         redact_setup_text(stderr.trim()),
@@ -468,11 +504,20 @@ impl GuiApp {
         let repairs_applied =
             valid_apply_report && repairs.is_some_and(|repairs| !repairs.is_empty());
         let no_repairs_remained = valid_apply_report && repairs.is_some_and(Vec::is_empty);
+        let repaired_components = repairs
+            .into_iter()
+            .flatten()
+            .filter_map(|repair| repair.get("component").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>()
+            .join(", ");
         self.installation_repair_preview = None;
         self.installation_repair_dialog_open = false;
         if repairs_applied {
             self.refresh_diagnostics(false);
-            Status::info(self.strings.repair_completed())
+            Status::info(
+                self.strings
+                    .repair_completed_components(&repaired_components),
+            )
         } else if no_repairs_remained {
             self.refresh_diagnostics(false);
             Status::info(self.strings.repair_already_completed())
@@ -599,6 +644,7 @@ impl GuiApp {
         if is_setup {
             self.setup_failure_report = None;
             self.setup_failure_report_open = false;
+            self.setup_failure_report_copied = false;
         }
         self.cli_task_kind = None;
         let (sender, receiver) = mpsc::channel();
@@ -726,6 +772,7 @@ impl GuiApp {
                     let summary = setup_failure_summary(&report);
                     self.setup_failure_report = Some(report);
                     self.setup_failure_report_open = true;
+                    self.setup_failure_report_copied = false;
                     self.diagnostics_open = true;
                     self.status = Status::error(self.strings.status_setup_failed(&summary));
                 } else {
@@ -1205,6 +1252,7 @@ impl GuiApp {
                             );
                             self.setup_failure_report = Some(report);
                             self.setup_failure_report_open = true;
+                            self.setup_failure_report_copied = false;
                             self.diagnostics_open = open_diagnostics;
                             outcome
                         } else if task_kind.as_deref() == Some("picker-shortcut") {
@@ -1243,6 +1291,7 @@ impl GuiApp {
                             .0;
                             self.setup_failure_report = Some(report);
                             self.setup_failure_report_open = true;
+                            self.setup_failure_report_copied = false;
                             self.diagnostics_open = true;
                             outcome
                         } else {
@@ -1268,6 +1317,7 @@ impl GuiApp {
                     let summary = setup_failure_summary(&report);
                     self.setup_failure_report = Some(report);
                     self.setup_failure_report_open = true;
+                    self.setup_failure_report_copied = false;
                     self.diagnostics_open = true;
                     self.status = Status::error(self.strings.status_setup_failed(&summary));
                 } else if task_kind.as_deref() == Some("setup-preflight") {

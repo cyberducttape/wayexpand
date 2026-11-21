@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- A nightly Launchpad Builds workflow reads the PPA's public build records and
+  fails, with the build log's failure lines, when the newest daily build of a
+  supported Ubuntu series failed (`scripts/check-launchpad-builds.py`).
 - Launchpad PPA builds pass again. The GUI's font-coverage test loaded
   whatever system fonts the build machine had, so DejaVu on developer and
   GitHub machines hid that the setup page's `✗` mark is not in egui's bundled

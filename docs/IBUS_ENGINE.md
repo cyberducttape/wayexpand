@@ -183,7 +183,8 @@ distinguish `replacement-context-observed` from `output-emitted-unverified`;
 neither means the target document was changed. Run `wayexpand debug --test`
 and confirm the result in the application. This uses the known harmless
 tutorial snippet when configured. Otherwise, review an enabled static snippet
-with `wayexpand preview TRIGGER`, then test that exact trigger with
+by replacing `TRIGGER` with the exact trigger (keep the quotes for
+punctuation) in `wayexpand preview 'TRIGGER'`, then test it with
 `wayexpand debug --test 'TRIGGER'`. Setup and verification do not require
 `;;hello`.
 `wayexpand repair --gnome-input-source` repairs the GNOME source list, asks
@@ -222,8 +223,9 @@ If IBus is configured but a required route check fails, setup returns a
 nonzero result with `SETUP RESULT: ACTION REQUIRED` and a stable finding ID;
 the valid configuration is retained for diagnosis. A second unrestricted
 capture route beside IBus is also an action-required condition because it can
-expand the same trigger twice. Run `wayexpand help finding <WX-ID>` for the
-repair and retest steps. A route with no hard failure but no user-confirmed
+expand the same trigger twice. Replace `WX-ID` with the finding ID shown, then
+run `wayexpand help finding 'WX-ID'` for the repair and retest steps. A route
+with no hard failure but no user-confirmed
 application insertion is reported as configured and awaiting test.
 
 ```sh

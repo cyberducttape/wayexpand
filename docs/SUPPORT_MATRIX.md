@@ -101,12 +101,12 @@ not test their combined replacement behavior or certify the desktop route.
 Evdev remains explicit opt-in because it has no sensitive-field signal.
 
 <!-- generated:route-contract:start -->
-| Route | Capture | Injection | Trigger precondition | Output transaction | Application result | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | App identity | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ibus` (IBus) | ibus | ibus | surrounding_text_matches_trigger | separate_delete_and_commit | unobservable | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
-| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | focus_checked_with_compatibility_consent | separate_delete_and_key_events | unobservable | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
-| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | none | separate_delete_and_key_events | unobservable | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
-| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | surrounding_text_matches_trigger | atomic_protocol_batch | unobservable | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
+| Route | Capture | Injection | Trigger precondition | Output transaction | Application result | Destination identity (available / verified) | Physical-input interruption (observable / verified) | Recovery outcome known | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replacement | App identity | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ibus` (IBus) | ibus | ibus | surrounding_text_matches_trigger | separate_delete_and_commit | unobservable | no / not verified | no / not verified | no | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
+| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | focus_checked_with_compatibility_consent | separate_delete_and_key_events | unobservable | yes / not verified | yes / not verified | no | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | none | separate_delete_and_key_events | unobservable | no / not verified | yes / not verified | no | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
+| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | surrounding_text_matches_trigger | atomic_protocol_batch | unobservable | yes / not verified | no / not verified | no | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
 The route table separates `trigger_precondition`, `output_transaction`, and

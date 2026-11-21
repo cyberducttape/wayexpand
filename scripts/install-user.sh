@@ -2,6 +2,7 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+. "$project_dir/scripts/desktop-compatibility.sh"
 enable_service=0
 service_name=
 for argument in "$@"; do
@@ -32,7 +33,7 @@ for argument in "$@"; do
 done
 if [ "$enable_service" -eq 1 ] && [ -z "$service_name" ]; then
     printf '%s\n' "error: --enable requires an explicit --service selection" >&2
-    printf '%s\n' "choose a service only after reviewing wayexpand doctor and accepting its documented limitations" >&2
+    printf '%s\n' "choose a service only after reviewing \"$HOME/.local/bin/wayexpand\" doctor and accepting its documented limitations" >&2
     exit 2
 fi
 if [ "$enable_service" -eq 1 ] && ! command -v systemctl >/dev/null 2>&1; then
@@ -47,6 +48,7 @@ if [ "$(id -u)" -eq 0 ]; then
     fi
     exit 1
 fi
+wayexpand_print_desktop_compatibility
 cargo_bin=$(command -v cargo 2>/dev/null || true)
 if [ -z "$cargo_bin" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
     cargo_bin="$HOME/.cargo/bin/cargo"
@@ -67,31 +69,80 @@ cargo_version=$(cd "$project_dir" && "$cargo_bin" --version 2>/dev/null | awk '{
 if [ -n "$required_rust" ] && [ -n "$cargo_version" ]; then
     oldest=$(printf '%s\n%s\n' "$required_rust" "${cargo_version%%-*}" | sort -V | head -n1)
     if [ "$oldest" != "$required_rust" ]; then
-        printf '%s\n' "error: Rust $required_rust or newer is required; $cargo_bin is $cargo_version" >&2
-        printf '%s\n' "install a current toolchain with rustup (https://rustup.rs); this checkout then selects the right version itself" >&2
-        exit 1
+        rustup_cargo="$HOME/.cargo/bin/cargo"
+        rustup_version=
+        if [ -x "$rustup_cargo" ] && [ "$cargo_bin" != "$rustup_cargo" ]; then
+            rustup_version=$(cd "$project_dir" && "$rustup_cargo" --version 2>/dev/null | awk '{print $2}' || true)
+            if [ -n "$rustup_version" ]; then
+                rustup_oldest=$(printf '%s\n%s\n' "$required_rust" "${rustup_version%%-*}" | sort -V | head -n1)
+                if [ "$rustup_oldest" = "$required_rust" ]; then
+                    printf '%s\n' "Using rustup Cargo at $rustup_cargo ($rustup_version); PATH Cargo at $cargo_bin ($cargo_version) was too old."
+                    cargo_bin=$rustup_cargo
+                    cargo_version=$rustup_version
+                    oldest=$required_rust
+                fi
+            fi
+        fi
+        if [ "$oldest" != "$required_rust" ]; then
+            printf '%s\n' "error: Rust $required_rust or newer is required; $cargo_bin is $cargo_version" >&2
+            if [ -n "$rustup_version" ]; then
+                printf '%s\n' "rustup Cargo at $rustup_cargo is $rustup_version, which is also too old" >&2
+            else
+                printf '%s\n' "install a current toolchain with rustup (https://rustup.rs); this checkout then selects the right version itself" >&2
+            fi
+            exit 1
+        fi
     fi
 fi
 
-# Print the command that installs the native build dependencies on this
-# distribution; used when the build fails.
+# Print an installation command only when the distribution family is known.
+# Guessing apt on an unknown distribution sends users toward the wrong fix.
 build_dependency_hint() {
     os_ids=
     if [ -r /etc/os-release ]; then
         # shellcheck source=/dev/null
-        os_ids=$(. /etc/os-release && printf '%s %s' "${ID:-}" "${ID_LIKE:-}")
+        os_ids=$( . /etc/os-release && printf '%s %s' "${ID:-}" "${ID_LIKE:-}" )
     fi
     case " $os_ids " in
-        *" fedora "*|*" rhel "*|*" centos "*)
+        *" fedora "*|*" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*)
             printf '%s\n' "  sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel" ;;
-        *" arch "*)
+        *" arch "*|*" manjaro "*|*" endeavouros "*)
             printf '%s\n' "  sudo pacman -S --needed base-devel wayland libxkbcommon" ;;
-        *" opensuse"*|*" suse "*)
+        *" opensuse "*|*" opensuse-leap "*|*" opensuse-tumbleweed "*|*" suse "*)
             printf '%s\n' "  sudo zypper install gcc pkg-config wayland-devel libxkbcommon-devel" ;;
-        *)
+        *" debian "*|*" ubuntu "*|*" linuxmint "*|*" pop "*|*" kali "*)
             printf '%s\n' "  sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev" ;;
+        *" alpine "*)
+            printf '%s\n' "  sudo apk add build-base pkgconf wayland-dev libxkbcommon-dev" ;;
+        *)
+            printf '%s\n' "  Could not identify a supported package manager for '${os_ids:-unknown distribution}'."
+            printf '%s\n' "  See docs/DEVELOPMENT.md for native build dependencies, or use a published release archive:"
+            printf '%s\n' "  https://github.com/cyberducttape/wayexpand/releases" ;;
     esac
 }
+missing_native_build_dependencies=0
+c_compiler=${CC:-cc}
+c_compiler=${c_compiler%%[[:space:]]*}
+if [ -z "$c_compiler" ] || ! command -v "$c_compiler" >/dev/null 2>&1; then
+    printf '%s\n' "error: no C compiler was found (${CC:-cc}); a source build requires native build tools" >&2
+    missing_native_build_dependencies=1
+fi
+if ! command -v pkg-config >/dev/null 2>&1; then
+    printf '%s\n' 'error: pkg-config was not found; it is needed to locate Wayland and xkbcommon headers and libraries' >&2
+    missing_native_build_dependencies=1
+else
+    for module in wayland-client xkbcommon; do
+        if ! pkg-config --exists "$module"; then
+            printf '%s\n' "error: pkg-config cannot find the $module development files" >&2
+            missing_native_build_dependencies=1
+        fi
+    done
+fi
+if [ "$missing_native_build_dependencies" -ne 0 ]; then
+    printf '%s\n' 'Install the native build dependencies, then rerun this script:' >&2
+    build_dependency_hint >&2
+    exit 1
+fi
 printf '%s\n' "Developer source install: compiling the application from this checkout."
 printf '%s\n' "For ordinary desktop installation, use a published .deb/.rpm or release archive; no local Rust toolchain is needed."
 bin_dir="$HOME/.local/bin"
@@ -166,7 +217,7 @@ if ! CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     -p wayexpand-gui \
     -p wayexpand-backend-ibus; then
     printf '%s\n' "error: the build failed; nothing was installed" >&2
-    printf '%s\n' "the most common cause is missing native build dependencies; install them with:" >&2
+    printf '%s\n' "If the error names missing native build dependencies, install them with:" >&2
     build_dependency_hint >&2
     printf '%s\n' "then run this script again" >&2
     exit 1
@@ -353,14 +404,22 @@ printf '%s\n' "Installed desktop entry in $application_dir"
 printf '%s\n' "Staged IBus component in $library_dir/current/ibus (not registered with the system IBus daemon)"
 printf '%s\n' "Installed application icon in $icon_base"
 printf '%s\n' ""
-printf '%s\n' "=== NEXT STEPS ==="
+printf '%s\n' "=== OPTIONAL COMMAND-LINE SETUP ==="
 printf '%s\n' ""
-printf '%s\n' "1. Add to PATH:"
+printf '%s\n' "Add to PATH to use the short 'wayexpand' command:"
 printf '%s\n' "   export PATH=\"$bin_dir:\$PATH\""
+case "${SHELL##*/}" in
+    bash)
+        printf '%s\n' "For future Bash terminals, run once: printf '\\nexport PATH=\"$bin_dir:\$PATH\"\\n' >> \"$HOME/.bashrc\"" ;;
+    zsh)
+        printf '%s\n' "For future Zsh terminals, run once: printf '\\nexport PATH=\"$bin_dir:\$PATH\"\\n' >> \"$HOME/.zshrc\"" ;;
+    fish)
+        printf '%s\n' "For future Fish terminals, run once: fish_add_path \"$bin_dir\"" ;;
+    *)
+        printf '%s\n' "To keep this PATH in future terminals, see $project_dir/README.md" ;;
+esac
 printf '%s\n' ""
-printf '%s\n' "2. Reload systemd:"
-printf '%s\n' "   systemctl --user daemon-reload"
-printf '%s\n' "   # If named actions are configured, edit $broker_config and enable:"
+printf '%s\n' "If you use named actions, edit $broker_config and enable the action service:"
 printf '%s\n' "   systemctl --user enable --now wayexpand-action-broker.service"
 if [ -f "$project_dir/polkit/org.wayexpand.action.policy" ] &&
     [ ! -f /usr/share/polkit-1/actions/org.wayexpand.action.policy ]; then
@@ -368,19 +427,14 @@ if [ -f "$project_dir/polkit/org.wayexpand.action.policy" ] &&
     printf '%s\n' "   sudo install -m 0644 \"$project_dir/polkit/org.wayexpand.action.policy\" /usr/share/polkit-1/actions/"
 fi
 printf '%s\n' ""
-printf '%s\n' "3. Check which backend your compositor supports:"
-printf '%s\n' "   wayexpand doctor"
+printf '%s\n' "For the shortest troubleshooting answer, run:"
+printf '%s\n' "   \"$bin_dir/wayexpand\" why"
+printf '%s\n' "It reports the likely cause and one next action. For all readiness checks, run:"
+printf '%s\n' "   \"$bin_dir/wayexpand\" doctor"
+printf '%s\n' "The desktop setup guide handles route activation and asks before any sensitive permission."
 printf '%s\n' ""
-printf '%s\n' "4. Run guided setup (it selects a safe detected compatibility mode):"
-printf '%s\n' "   wayexpand setup"
-printf '%s\n' "   If you choose IBus and its manifest is missing, setup explains the one-time administrator authorization before installing it."
-printf '%s\n' "   For scripted IBus setup, explicitly authorize that step with: wayexpand setup --backend ibus --yes --install-system-integration"
-printf '%s\n' "   wayexpand status"
-printf '%s\n' "   wayexpand doctor"
-printf '%s\n' "   (setup never grants raw-input permissions or portal consent)"
-printf '%s\n' ""
-printf '%s\n' "5. Edit snippets:"
-printf '%s\n' "   wayexpand edit"
+printf '%s\n' "To edit snippets:"
+printf '%s\n' "   \"$bin_dir/wayexpand\" edit"
 printf '%s\n' ""
 printf '%s\n' "The stdin test harness is not installed as a user service; wayexpand-control.service provides the control socket beside IBus."
 
@@ -398,7 +452,7 @@ if command -v systemctl >/dev/null 2>&1; then
             case "$runtime_check_output" in
                 *'Action: restart the affected service'*|*'Action: restart the active Action Broker service'*)
                     printf '%s\n' 'After reviewing the process details above, apply the restart and health check with:'
-                    printf '  %s/wayexpand upgrade --apply\n' "$bin_dir"
+                    printf '  "%s/wayexpand" upgrade --apply\n' "$bin_dir"
                     ;;
                 *)
                     printf '%s\n' 'The runtime check did not identify a managed daemon version mismatch; inspect the status above before restarting anything.'
@@ -406,7 +460,7 @@ if command -v systemctl >/dev/null 2>&1; then
             esac
         else
             printf '%s\n' "$runtime_check_output"
-            printf '%s\n' 'Could not complete the runtime check. Inspect the check output and rerun wayexpand upgrade --check before applying.'
+            printf '%s\n' "Could not complete the runtime check. Inspect the output and rerun \"$bin_dir/wayexpand\" upgrade --check before applying."
         fi
     fi
 fi
@@ -449,3 +503,8 @@ for entry in "$library_dir"/*; do
     fi
     rm -rf -- "$entry"
 done
+
+printf '%s\n' ""
+printf '%s\n' "=== INSTALLATION COMPLETE ==="
+printf '%s\n' "Next action: open the setup guide with: \"$bin_dir/wayexpand-gui\""
+printf '%s\n' "You can also launch WayExpand from your desktop application menu."

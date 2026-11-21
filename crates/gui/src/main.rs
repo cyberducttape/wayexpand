@@ -501,10 +501,12 @@ struct GuiApp {
     last_cli_task_output: Option<String>,
     setup_failure_report: Option<String>,
     setup_failure_report_open: bool,
+    setup_failure_report_copied: bool,
     support_export_open: bool,
     support_preview_loading: bool,
     support_preview: Option<String>,
     support_preview_error: Option<String>,
+    support_preview_copied: bool,
     support_output_path: String,
     evdev_setup_open: bool,
     evdev_setup_acknowledged: bool,
@@ -962,10 +964,12 @@ impl GuiApp {
             last_cli_task_output: None,
             setup_failure_report: None,
             setup_failure_report_open: false,
+            setup_failure_report_copied: false,
             support_export_open: false,
             support_preview_loading: false,
             support_preview: None,
             support_preview_error: None,
+            support_preview_copied: false,
             support_output_path: std::env::var_os("HOME")
                 .map(|home| {
                     PathBuf::from(home)

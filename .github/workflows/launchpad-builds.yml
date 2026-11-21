@@ -1,0 +1,31 @@
+name: Launchpad Builds
+
+# Launchpad does not report failed recipe builds anywhere we look, and the PPA
+# once failed every daily build for five days unnoticed. Check the PPA's
+# public build records after the daily recipe has built (about 21:15-22:00
+# UTC) and fail with the build log's failure lines when the newest finished
+# build of a series failed.
+
+on:
+  schedule:
+    - cron: '40 23 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launchpad-builds-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check Launchpad PPA builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Unit-test the build check
+        run: python3 scripts/test-launchpad-builds.py
+      - name: Check the newest build of every series
+        run: python3 scripts/check-launchpad-builds.py

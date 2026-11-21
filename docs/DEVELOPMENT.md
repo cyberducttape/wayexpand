@@ -8,10 +8,19 @@ WayExpand is designed for small, reviewable changes with explicit safety propert
 
 ## Setting Up Your Environment
 
-**System dependencies** (Debian/Ubuntu):
+**Native build packages** (install the command for your distribution):
 ```sh
-sudo apt install libwayland-dev libxkbcommon-dev pkg-config
+sudo apt install git build-essential pkg-config libwayland-dev libxkbcommon-dev # Debian, Ubuntu
+sudo dnf install git gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel # Fedora, RHEL-family
+sudo pacman -S --needed git base-devel wayland libxkbcommon # Arch, Manjaro
+sudo zypper install git gcc pkg-config wayland-devel libxkbcommon-devel # openSUSE
+sudo apk add git build-base pkgconf wayland-dev libxkbcommon-dev # Alpine
 ```
+
+The source installer checks for a C compiler, `pkg-config`, and the
+`wayland-client` and `xkbcommon` development modules before starting Cargo. If
+your distribution is not listed, consult its package database for those
+dependencies or install a published release archive instead.
 
 **Clone the repository:**
 ```sh
