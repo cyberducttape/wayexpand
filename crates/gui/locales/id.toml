@@ -555,7 +555,7 @@ upgrade_restart_available = "Pemeriksaan versi menemukan layanan WayExpand yang 
 upgrade_restart_unmanaged = "Build daemon berbeda, tetapi layanan terkelola yang sesuai tidak ditemukan. Jangan mulai ulang layanan lain; periksa Diagnostik → Layanan."
 upgrade_build_current = "Daemon yang berjalan cocok dengan build GUI ini. Perbarui diagnostik untuk memeriksa rute input."
 upgrade_check_unreadable = "Pemeriksaan versi tidak menghasilkan laporan yang dapat dibaca. Buka Diagnostik → Versi dan jalankan `wayexpand upgrade --check --json`."
-upgrade_installation_incomplete = "Pemeriksaan upgrade menemukan komponen terpasang yang hilang. Buka Diagnostik dan jalankan `wayexpand install-check --json` untuk melihat perbaikannya."
+upgrade_installation_incomplete = "Pemeriksaan upgrade menemukan komponen terpasang yang hilang. Buka Diagnostik → Instalasi dan periksa komponen yang tercantum. Jika Tinjau perbaikan instalasi tersedia, periksa rencananya sebelum menerapkan."
 setup_changed_since_test = "Penyiapan Anda berubah sejak uji terakhir yang dipastikan ({change}). Uji lagi dari Memulai."
 
 [onboarding]

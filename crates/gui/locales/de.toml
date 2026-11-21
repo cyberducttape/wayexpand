@@ -555,7 +555,7 @@ upgrade_restart_available = "Die Versionsprüfung hat den passenden WayExpand-Di
 upgrade_restart_unmanaged = "Der Daemon-Build unterscheidet sich, aber es wurde kein passender verwalteter Dienst gefunden. Starten Sie keinen anderen Dienst neu; prüfen Sie Diagnose → Dienste."
 upgrade_build_current = "Der laufende Daemon entspricht diesem GUI-Build. Aktualisieren Sie die Diagnose, um den Eingabeweg zu prüfen."
 upgrade_check_unreadable = "Die Versionsprüfung lieferte keinen lesbaren Bericht. Öffnen Sie Diagnose → Versionen und führen Sie `wayexpand upgrade --check --json` aus."
-upgrade_installation_incomplete = "Die Upgrade-Prüfung hat fehlende installierte Komponenten gefunden. Öffnen Sie Diagnose und führen Sie `wayexpand install-check --json` aus, um die nötige Reparatur zu sehen."
+upgrade_installation_incomplete = "Die Upgrade-Prüfung hat fehlende installierte Komponenten gefunden. Öffnen Sie Diagnose → Installation und prüfen Sie die aufgelisteten Komponenten. Falls „Installationsreparatur prüfen“ angeboten wird, sehen Sie sich den Plan vor der Anwendung an."
 setup_changed_since_test = "Ihre Einrichtung hat sich seit dem letzten bestätigten Test geändert ({change}). Testen Sie erneut über „Erste Schritte“."
 
 [onboarding]

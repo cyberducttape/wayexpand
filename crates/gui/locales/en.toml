@@ -559,7 +559,7 @@ upgrade_restart_available = "The version check found the matching WayExpand serv
 upgrade_restart_unmanaged = "The daemon build differs, but no matching managed service was identified. Do not restart another service; inspect Diagnostics → Services."
 upgrade_build_current = "The running daemon matches this GUI build. Refresh diagnostics to check the input route."
 upgrade_check_unreadable = "The version check did not return a readable report. Open Diagnostics → Versions and run `wayexpand upgrade --check --json`."
-upgrade_installation_incomplete = "The upgrade check found missing installed components. Open Diagnostics and run `wayexpand install-check --json` to see what needs repair."
+upgrade_installation_incomplete = "The upgrade check found missing installed components. Open Diagnostics → Installation and review the listed components. If Review safe repairs is offered, inspect the plan before applying it."
 setup_changed_since_test = "Your setup changed since the last confirmed test ({change}). Test it again from Getting started."
 
 [onboarding]
