@@ -16,19 +16,15 @@ local, offline, no account, no telemetry.
 ### What makes it different
 
 - **See it work before you set anything up.** The *Matcher preview* panel
-  expands your saved snippets as you type with the daemon's own matching
-  engine — no daemon, permission, or desktop integration needed — and counts
-  the keystrokes you saved. It does not exercise desktop capture or insertion;
-  `wayexpand doctor` explains the route's current readiness, while the GUI's
-  *Test in a real application* flow is what checks visible insertion. A
-  successful preview alone never means desktop expansion is working.
+  expands your snippets as you type, using the service's own matching engine,
+  and counts the keystrokes you saved. It checks matching only; the guide's
+  *Test in a real application* step is what checks typing into your apps.
 - **Quick-insert picker.** Press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> +
   <kbd>Space</kbd> (set up by the first-run guide or `wayexpand shortcut set`
   on KDE Plasma and GNOME), type a few letters, and press Enter. No trigger to
-  remember. The picker types the snippet into the app you came from only on a
-  route that is atomic and identifies that exact window; none of today's
-  standard routes combines both, so Enter usually copies the snippet for you to
-  paste, even with the service running. The footer always says which.
+  remember. Today Enter usually copies the snippet for you to paste: the
+  picker types it directly only on a route that can guarantee the right
+  window, and none of the standard routes can yet. The footer always says which.
 
   ![The quick-insert picker in the Terminal Blue color pack: a search box above the snippet list, each entry showing its trigger, description, category, and a preview](docs/images/wayexpand-quick-insert-picker.png)
 
@@ -180,29 +176,17 @@ out and back in before resuming.
 
 ### After installing
 
-If your terminal says `wayexpand: command not found`, run the installed CLI
-directly as `"$HOME/.local/bin/wayexpand"`, or add its directory to this
-terminal's PATH with the command below; then the short-name examples later in
-this guide will work in this terminal. If you keep PATH unchanged, prefix
-each example with `"$HOME/.local/bin/wayexpand"` instead:
+Open **WayExpand** from your application menu. Its guide connects your
+desktop, makes a test snippet, and asks you to confirm one real expansion
+before it calls setup done. It never turns on raw keyboard access by itself.
+
+Installed for your user and `wayexpand` is not found in a terminal? Add
+`~/.local/bin` to PATH (put the same line in `~/.bashrc` or `~/.zshrc` to keep
+it, or run `fish_add_path ~/.local/bin` in Fish):
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
-
-To keep that path in future terminals, run the one command for your shell
-once: Bash, `printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.bashrc"`;
-Zsh, `printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.zshrc"`;
-Fish, `fish_add_path "$HOME/.local/bin"`.
-
-Launch **WayExpand** from the desktop application menu or run `wayexpand-gui`.
-For a per-user installation when `~/.local/bin` is not on PATH, run
-`"$HOME/.local/bin/wayexpand-gui"`.
-Its first-run guide checks the installation and route, then asks you to verify
-an exact insertion in a real application before it records setup as working.
-`wayexpand setup --check` reports missing integration dependencies without
-enabling raw keyboard capture. If automatic expansion cannot be verified yet,
-the guide offers a copy-only Quick Picker for manual paste.
 
 ## Your first minute
 
@@ -231,31 +215,21 @@ Otherwise it copies the snippet for you to paste.
 *Troubleshooting details* under the steps holds the route, permission and
 certification notes, with *Open diagnostics* for the full report.
 
-Useful commands:
+If something does not expand, run:
 
 ```sh
 wayexpand why              # the most likely cause, with one next step
-wayexpand install-check    # are the installed files and integrations present?
-wayexpand doctor           # is an input route available in this desktop session?
-wayexpand debug            # detailed, content-free route diagnostics
-wayexpand debug --test     # test a harmless expansion in a disposable text field
-wayexpand test ';sig'      # check matching only; does not test desktop typing
 ```
 
-If setup or expansion is stuck, start with `wayexpand why` and follow its
-suggested next step. Use `wayexpand install-check` for an installation
-problem, or `wayexpand doctor` for a desktop-session problem. After applying a
-fix, run `wayexpand debug --test` in a disposable text field to check the
-actual route. For the full symptom-by-symptom guide, see
-[Troubleshooting](docs/TROUBLESHOOTING.md).
+It is usually the only command you need. For more detail, `wayexpand doctor`
+checks this desktop session, `wayexpand install-check` checks the installed
+files, and `wayexpand debug --test` tries a harmless expansion in a
+disposable text field. The [Troubleshooting](docs/TROUBLESHOOTING.md) guide
+goes symptom by symptom.
 
-If you need to ask for help, open **Diagnostics → Export support report** to
-preview the redacted report before saving it; GNOME sessions include GNOME
-Shell, IBus source, and extension checks automatically. From a terminal, run
-`wayexpand support-bundle --output wayexpand-support.json`; GNOME checks are
-included automatically on GNOME. Use `--gnome` to request them on another
-desktop. The report includes the likely cause and one suggested next action.
-Review it before sharing.
+To ask for help, use **Diagnostics → Export support report** in the GUI or
+`wayexpand support-bundle --output wayexpand-support.json`. The report never
+contains your snippet text; review it before sharing.
 
 For a sysadmin first task, see the [HTTP 503 incident triage
 walkthrough](docs/HTTP503_WALKTHROUGH.md). It generates a validated,
