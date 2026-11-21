@@ -115,7 +115,7 @@ rustPlatform.buildRustPackage rec {
   src = fetchFromGitHub {
     owner = "cyberducttape";
     repo = "wayexpand";
-    rev = "v${version}";
+    rev = version; # canonical release tags are bare versions, such as 1.3.6
     sha256 = "sha256-xxxxxxxxxxxxx="; # Run nix flake update to fill this
   };
 

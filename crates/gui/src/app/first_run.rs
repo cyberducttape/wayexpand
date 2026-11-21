@@ -1342,6 +1342,26 @@ mod guided_setup_tests {
     }
 
     #[test]
+    fn visible_status_evidence_names_the_tested_application_and_method() {
+        for language in [
+            crate::lang::Language::English,
+            crate::lang::Language::German,
+            crate::lang::Language::Indonesian,
+        ] {
+            let strings = crate::lang::Strings::new(language);
+            let observed = strings.verification_badge("GTK 3 test field", true, false);
+            let confirmed = strings.verification_badge("Firefox", false, false);
+            let stale = strings.verification_badge("Terminal", true, true);
+            assert!(observed.contains("GTK 3 test field"));
+            assert!(confirmed.contains("Firefox"));
+            assert!(stale.contains("Terminal"));
+            assert!(!strings.verification_scope().is_empty());
+            assert!(!strings.picker_action_copy().is_empty());
+            assert!(!strings.picker_action_insert().is_empty());
+        }
+    }
+
+    #[test]
     fn compatibility_replacement_is_distinguished_from_atomic_and_copy_only_routes() {
         assert!(compatibility_replacement_is_active(
             true,

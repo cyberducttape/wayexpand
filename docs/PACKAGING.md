@@ -61,8 +61,8 @@ and desktop certification are separate: no currently published package has
 passed the physical-desktop certification gate.
 
 The earlier Rust 1.93 build failure was resolved by synchronizing the
-vendored source branch. The current `1.3.3` daily package built successfully
-for amd64 on Resolute and Stonking on 2026-11-07 ([Resolute build
+vendored source branch. On 2026-11-07, a `1.3.3` daily package built
+successfully for amd64 on Resolute and Stonking ([Resolute build
 33926583](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33926583),
 [Stonking build
 33926582](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33926582)).
@@ -131,7 +131,7 @@ makepkg -si
 ```bash
 # Debian packaging expects the vendored release archive for offline builds.
 # Do not build the clean Git checkout: Launchpad builders cannot fetch crates.io.
-# Replace ${VERSION} with the current release version (e.g., 1.3.3)
+# Replace ${VERSION} with the release version you are building.
 tar -xzf wayexpand-${VERSION}-vendored.tar.gz
 cd wayexpand-${VERSION}
 
@@ -300,7 +300,7 @@ directory, then sign and upload the changes file with the Launchpad-upload GPG
 key:
 
 ```bash
-source_version=1.3.3-2 # use the version shown in the .dsc filename
+source_version="<SOURCE_VERSION_FROM_DSC>" # copy the exact version shown in the .dsc filename
 debsign "wayexpand_${source_version}_source.changes"
 dput ppa:cyberducttape/ppa "wayexpand_${source_version}_source.changes"
 ```

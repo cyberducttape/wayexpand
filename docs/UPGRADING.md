@@ -303,6 +303,9 @@ systemctl --user is-active wayexpand-input-method.service
 
 | Version | Release Date | Major Changes |
 |---------|--------------|---------------|
+| 1.3.6 | 2026-11-15 | Scoped first-run insertion verification to the tested app, session, build, and route |
+| 1.3.5 | 2026-11-14 | Added native IBus integration and expanded GNOME support |
+| 1.3.3 | 2026-10-03 | Release tag created; release binaries were not published |
 | 1.2.0 | 2026-09-23 | Backend correctness, policy enforcement, and release hardening |
 | 1.1.2 | 2026-09-18 | Security hardening (P0 fixes), diagnostics improvements |
 | 1.1.1 | 2026-09-18 | GUI themes, font scaling, sysadmin examples |

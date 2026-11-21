@@ -740,6 +740,41 @@ impl GuiApp {
                 open_diagnostics = true;
             }
         }
+        if let Some((record, stale)) = self.verification_status() {
+            if let Some(application) = record.application.as_deref() {
+                let machine_observed = record.verification_method
+                    == Some(crate::setup_record::VerificationMethod::MachineObserved);
+                let label =
+                    self.strings
+                        .verification_badge(application, machine_observed, stale.is_some());
+                let mut detail = record
+                    .verified_at_unix
+                    .map(crate::setup_record::date)
+                    .map(|date| {
+                        self.strings
+                            .last_test_result(application, &date, machine_observed)
+                    })
+                    .unwrap_or_default();
+                if !detail.is_empty() {
+                    detail.push(' ');
+                }
+                detail.push_str(self.strings.verification_scope());
+                if let Some(change) = stale.as_ref() {
+                    detail.push(' ');
+                    detail.push_str(
+                        &self
+                            .strings
+                            .setup_changed_since_test(self.strings.setup_change(&change)),
+                    );
+                }
+                let color = if stale.is_some() {
+                    palette.warning
+                } else {
+                    palette.muted
+                };
+                theme::status_chip(ui, &label, color).on_hover_text(detail);
+            }
+        }
         let state_label = self.strings.header_state(state);
         let chip = theme::status_chip(ui, state_label, state_color);
         // Screen readers get the same details sighted users see on hover,

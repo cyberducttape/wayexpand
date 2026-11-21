@@ -1,8 +1,8 @@
 # WayExpand Compositor Certification Matrix
 
 **WayExpand version scope:** 1.3.6 release line
-**Matrix revision:** 2026-11-19.1
-**Last Updated:** 2026-11-19
+**Matrix revision:** 2026-11-21.1
+**Last Updated:** 2026-11-21
 **Status:** No compositor route is production-certified
 
 ## Overview
@@ -126,7 +126,12 @@ cell separately records whether WayExpand captured the trigger, removed the
 original trigger, inserted the replacement occurrence count, and retained
 focus in the intended field. A cell cannot pass unless those observations are
 `true`, `true`, `1`, and `true`, respectively; `null` means the observation
-could not be made and leaves the report incomplete. CI runs the headless GNOME IBus
+could not be made and leaves the report incomplete. Compositor acceptance also
+requires `picker-focus-return-and-clipboard-lifetime`: verify that direct mode
+waits for the exact original window to regain focus, and that copy-only mode
+keeps clipboard ownership while the user returns to the chosen field and
+pastes. These picker checks need a live session; the private KWin driver marks
+them unverified. CI runs the headless GNOME IBus
 acceptance test on Ubuntu 24.04/GNOME 46, Debian 13/GNOME 48,
 Ubuntu 26.04/GNOME 50, and Fedora 45/GNOME 51. GNOME 49 (Fedora 43, RHEL 10.2)
 passes everything except the German and French layout cases, where its
@@ -157,7 +162,7 @@ session being evaluated. For example:
 python3 scripts/new-gnome-acceptance-report.py \
   --platform ubuntu-24.04-gnome \
   --output evidence/ubuntu-24.04-gnome.json \
-  --package-identity 'WayExpand 1.2.3 release archive sha256:…' \
+  --package-identity 'WayExpand <VERSION> release archive sha256:<CHECKSUM>' \
   --physical-keyboard 'lab keyboard asset KBD-014' \
   --reviewed-by 'Reviewer Name' \
   --confirm-physical-session

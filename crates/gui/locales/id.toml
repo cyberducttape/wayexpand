@@ -534,6 +534,8 @@ pack_signature_identity = "Penanda tangan terverifikasi: {signer} · sumber kepe
 pack_signature_reason = "Detail verifikasi tanda tangan: {reason}"
 pack_install_result = "Hasil pemasangan: {output}"
 picker_copied = "{trigger} disalin · pindah ke aplikasi dan tempel dengan Ctrl+V · kembali ke sini untuk menutup pemilih"
+picker_action_copy = "Tujuan: pilih kolom teks. Memilih cuplikan akan menyalinnya; pindah ke kolom tersebut dan tempel dengan Ctrl+V. Biarkan picker terbuka sampai selesai menempel."
+picker_action_insert = "Tujuan: jendela asal yang terverifikasi. Setelah memilih, WayExpand menunggu sampai jendela itu kembali fokus, lalu mengetik teks."
 picker_inserting = "Menyisipkan {trigger}…"
 picker_app_scope = "Penyisipan otomatis hanya di salah satu: {scope}"
 
@@ -781,6 +783,11 @@ no_selection = "Tidak ada cuplikan yang dipilih"
 
 [toolbar]
 header_status_details_hint = "Klik untuk diagnostik"
+verification_badge_machine = "Tes: {application} · diamati"
+verification_badge_user = "Tes: {application} · Anda konfirmasi"
+verification_badge_stale_machine = "Tes sebelumnya: {application} · diamati"
+verification_badge_stale_user = "Tes sebelumnya: {application} · Anda konfirmasi"
+verification_scope = "Hasil ini hanya berlaku untuk aplikasi dan sesi ini; aplikasi lain belum diverifikasi."
 title = "Pustaka cuplikan"
 unsaved_changes = "● Perubahan belum disimpan"
 settings = "Pengaturan"
