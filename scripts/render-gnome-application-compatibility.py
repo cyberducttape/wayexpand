@@ -103,12 +103,21 @@ def main():
     errors = checker["validate_plan"](plan)
     reports = {}
     for report_path in args.report:
-        with report_path.open(encoding="utf-8") as stream:
-            report = json.load(stream)
-        if report["platform_id"] in reports:
-            errors.append(f"duplicate report for platform {report['platform_id']}")
-        errors.extend(checker["validate_report"](plan, report))
-        reports[report["platform_id"]] = report
+        try:
+            with report_path.open(encoding="utf-8") as stream:
+                report = json.load(stream)
+        except (OSError, json.JSONDecodeError) as error:
+            errors.append(f"could not read report {report_path}: {error}")
+            continue
+        report_errors = checker["validate_report"](plan, report)
+        if report_errors:
+            errors.extend(f"{report_path}: {error}" for error in report_errors)
+            continue
+        platform_id = report["platform_id"]
+        if platform_id in reports:
+            errors.append(f"duplicate report for platform {platform_id}")
+            continue
+        reports[platform_id] = report
     if errors:
         for error in errors:
             print(f"FAIL: {error}", file=sys.stderr)

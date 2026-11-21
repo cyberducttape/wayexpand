@@ -163,9 +163,11 @@ python3 scripts/new-gnome-acceptance-report.py \
   --confirm-physical-session
 ```
 
-The command checks for a Wayland session, records the current commit and GNOME
-Shell version when available, and creates the report without overwriting an
-existing file. `--confirm-physical-session` is an operator attestation; the
+The command checks for a Wayland session, records the current commit only when
+the checkout is clean, detects the GNOME Shell version when available, and
+creates the report without overwriting an existing file. A dirty checkout
+requires `--wayexpand-commit` with the full commit used to build the tested
+package. `--confirm-physical-session` is an operator attestation; the
 environment cannot prove that a physical keyboard is connected. Override the
 commit or Shell version when recording a separately built package with
 `--wayexpand-commit` or `--gnome-shell-version`. The generated template starts

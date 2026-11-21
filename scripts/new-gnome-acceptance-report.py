@@ -41,7 +41,7 @@ def main():
     parser.add_argument(
         "--wayexpand-commit",
         default="",
-        help="tested source commit (defaults to this checkout's HEAD)",
+        help="full tested source commit (required if this checkout is dirty)",
     )
     parser.add_argument(
         "--gnome-shell-version",
@@ -78,6 +78,18 @@ def main():
     commit = args.wayexpand_commit.strip()
     if not commit:
         try:
+            status = subprocess.run(
+                ["git", "-C", str(ROOT), "status", "--porcelain"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+            if status.strip():
+                parser.error(
+                    "checkout has uncommitted changes; pass --wayexpand-commit with "
+                    "the full commit used to build the tested package"
+                )
             commit = subprocess.run(
                 ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
                 check=True,
@@ -87,6 +99,10 @@ def main():
             ).stdout.strip()
         except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             parser.error("cannot determine WayExpand commit; pass --wayexpand-commit")
+    if len(commit) not in {40, 64} or any(
+        character not in "0123456789abcdefABCDEF" for character in commit
+    ):
+        parser.error("--wayexpand-commit must be a full 40- or 64-character hexadecimal commit ID")
 
     version = args.gnome_shell_version.strip() or shell_version()
     if not version:

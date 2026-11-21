@@ -7,6 +7,7 @@ real-session evidence collected separately on each supported distribution.
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -101,17 +102,28 @@ def validate_plan(plan):
 
 def validate_report(plan, report):
     errors = []
+    if not isinstance(report, dict):
+        return ["report must be a JSON object"]
     platform_id = report.get("platform_id")
     platforms = {item["id"]: item for item in plan["platforms"]}
-    platform = platforms.get(platform_id)
+    platform = platforms.get(platform_id) if isinstance(platform_id, str) else None
     if platform is None:
         return [f"unknown platform_id: {platform_id!r}"]
     for field in IDENTITY_FIELDS:
         if not isinstance(report.get(field), str) or not report[field].strip():
             errors.append(f"missing evidence identity: {field}")
+    commit = report.get("wayexpand_commit")
+    if isinstance(commit, str) and not re.fullmatch(
+        r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit, re.IGNORECASE
+    ):
+        errors.append("wayexpand_commit must be a full 40- or 64-character hexadecimal commit ID")
     if report.get("distribution_release") != platform["release"]:
         errors.append("reported distribution release does not match the matrix")
-    if platform_id == "fedora-45-gnome51" and not report.get("gnome_shell_version", "").startswith("51."):
+    reported_shell_version = report.get("gnome_shell_version")
+    if platform_id == "fedora-45-gnome51" and (
+        not isinstance(reported_shell_version, str)
+        or not reported_shell_version.startswith("51.")
+    ):
         errors.append("Fedora 45 report must identify GNOME Shell 51.x")
     if report.get("session_kind") != "physical-wayland-session":
         errors.append("evidence must come from a real Wayland session with a physical keyboard")
@@ -123,18 +135,31 @@ def validate_report(plan, report):
         for profile in plan["required_keyboard_profiles"]
     }
     observed = set()
-    for item in report.get("application_results", []):
-        key = (item.get("application_class"), item.get("scenario"), item.get("keyboard_profile"))
+    application_results = report.get("application_results", [])
+    if not isinstance(application_results, list):
+        errors.append("application_results must be an array")
+        application_results = []
+    for index, item in enumerate(application_results):
+        if not isinstance(item, dict):
+            errors.append(f"application result {index} must be a JSON object")
+            continue
+        fields = ("application_class", "scenario", "keyboard_profile")
+        if any(not isinstance(item.get(field), str) for field in fields):
+            errors.append(
+                f"application result {index} must identify its app, scenario, and keyboard profile as strings"
+            )
+            continue
+        key = tuple(item[field] for field in fields)
         if key in observed:
             errors.append(f"duplicate application result: {key}")
         observed.add(key)
         if key not in expected:
             errors.append(f"unexpected application result: {key}")
-        if item.get("result") not in APPLICATION_STATUSES:
+        if not isinstance(item.get("result"), str) or item["result"] not in APPLICATION_STATUSES:
             errors.append(f"invalid result for {key}: {item.get('result')!r}")
         for field in ("application_id", "application_version", "input_route", "evidence_ref"):
             value = item.get(field)
-            if not value:
+            if not isinstance(value, str) or not value.strip():
                 errors.append(f"{key} lacks {field}")
         if item.get("scenario") == "real-trigger-replacement":
             observations = {
@@ -172,16 +197,26 @@ def validate_report(plan, report):
         errors.append(f"missing application cells: {len(missing)}")
 
     lifecycle_seen = set()
-    for item in report.get("lifecycle_results", []):
+    lifecycle_results = report.get("lifecycle_results", [])
+    if not isinstance(lifecycle_results, list):
+        errors.append("lifecycle_results must be an array")
+        lifecycle_results = []
+    for index, item in enumerate(lifecycle_results):
+        if not isinstance(item, dict):
+            errors.append(f"lifecycle result {index} must be a JSON object")
+            continue
         scenario = item.get("scenario")
+        if not isinstance(scenario, str):
+            errors.append(f"lifecycle result {index} must identify its scenario as a string")
+            continue
         if scenario in lifecycle_seen:
             errors.append(f"duplicate lifecycle result: {scenario}")
         lifecycle_seen.add(scenario)
         if scenario not in REQUIRED_LIFECYCLE:
             errors.append(f"unexpected lifecycle scenario: {scenario}")
-        if item.get("result") not in APPLICATION_STATUSES:
+        if not isinstance(item.get("result"), str) or item["result"] not in APPLICATION_STATUSES:
             errors.append(f"invalid lifecycle result for {scenario}: {item.get('result')!r}")
-        if not item.get("evidence_ref"):
+        if not isinstance(item.get("evidence_ref"), str) or not item["evidence_ref"].strip():
             errors.append(f"{scenario} lacks an evidence_ref")
     if missing := REQUIRED_LIFECYCLE - lifecycle_seen:
         errors.append(f"missing lifecycle cells: {', '.join(sorted(missing))}")
@@ -210,7 +245,16 @@ def main():
             print(f"FAIL: {error}", file=sys.stderr)
         return 1
     if args.report:
-        print(f"PASS: reviewed GNOME evidence report is complete for {load(args.report)['platform_id']}")
+        report = load(args.report)
+        print(
+            "PASS: GNOME evidence coverage is structurally complete for "
+            f"{report['platform_id']} (report status: {report['status']})"
+        )
+        if report["status"] != "passed":
+            print(
+                "NOTE: the report contains failed, unsupported, or untested results; "
+                "this is not a compatibility pass."
+            )
     else:
         print("PASS: GNOME acceptance plan covers Fedora 45/GNOME 51 and Ubuntu 24.04/26.04")
     return 0
