@@ -512,5 +512,5 @@ done
 
 printf '%s\n' ""
 printf '%s\n' "=== INSTALLATION COMPLETE ==="
-printf '%s\n' "Next action: open WayExpand from your desktop application menu and follow its setup guide."
-printf '%s\n' "If the menu entry is not visible yet, start it with: \"$bin_dir/wayexpand-gui\""
+printf '%s\n' "Next action: open the setup guide with: \"$bin_dir/wayexpand-gui\""
+printf '%s\n' "You can also launch WayExpand from your desktop application menu."
