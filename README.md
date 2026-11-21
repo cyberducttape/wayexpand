@@ -71,6 +71,12 @@ local, offline, no account, no telemetry.
 **Package availability (audited 2026-11-18):** GitHub release 1.3.6 has prebuilt binaries with checksums (`.tar.gz`, `.deb`, `.rpm`). PPA experimental daily builds for Ubuntu 26.04 (Resolute) (amd64), Ubuntu 26.10 (Stonking) (amd64). PPA packages for Ubuntu 24.04 (Noble) (0.2.0, stale), Ubuntu 22.04 (Jammy) (0.2.0, stale) lag behind; prefer the GitHub release there. Fedora Copr: not published yet. Package availability is separate from desktop certification.
 <!-- generated-install-status:end -->
 
+This guide follows the current source checkout; published packages may not yet
+include newer commands or fixes. Check the installed build with
+`wayexpand --version` (source builds include `-dev+<commit>`). If an option in
+this guide is unavailable, run `wayexpand help <command>` to see what your
+installed version supports.
+
 None of these channels is compositor-certified yet; see the
 [packaging status](docs/PACKAGING.md) and the
 [certification matrix](docs/CERTIFICATION_MATRIX.md).
