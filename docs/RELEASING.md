@@ -214,7 +214,8 @@ Download both binary archives and their checksums, then verify and inspect
 each architecture:
 
 ```sh
-read -r -p 'Release version (without v): ' version
+printf 'Release version (without v): '
+read -r version
 for arch in x86_64 aarch64; do
   archive="wayexpand-${version}-linux-${arch}.tar.gz"
   sha256sum --check "${archive}.sha256"
