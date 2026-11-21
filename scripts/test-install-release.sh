@@ -156,9 +156,15 @@ for failure_stage in binaries services dropins desktop metadata icons configurat
     [ ! -e "$failure_home/.local/lib/wayexpand/current" ]
     [ ! -e "$failure_home/.local/bin/wayexpand" ]
     [ ! -e "$failure_config/systemd/user/wayexpand-input-method.service" ]
+    [ ! -e "$failure_config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]
     [ ! -e "$failure_data/applications/wayexpand.desktop" ]
+    [ ! -e "$failure_data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
+    [ ! -e "$failure_data/man/man1/wayexpand.1" ]
+    [ ! -e "$failure_data/icons/hicolor/16x16/apps/wayexpand.png" ]
     [ ! -e "$failure_config/wayexpand/expansions.toml" ]
     [ ! -e "$failure_config/wayexpand/broker.toml" ]
+    [ ! -e "$failure_data/ibus/component/wayexpand.xml" ]
+    [ ! -e "$failure_state/wayexpand/previous-install" ]
     if [ -d "$failure_state/wayexpand" ] &&
         find "$failure_state/wayexpand" -maxdepth 1 -name '.install-rollback-*' -print | grep . >/dev/null; then
         printf '%s\n' "installer left rollback snapshots after recovery from $failure_stage" >&2
