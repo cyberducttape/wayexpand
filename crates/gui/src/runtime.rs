@@ -780,13 +780,21 @@ fn run_support_preview() -> Result<String, String> {
         }
     };
     let mut supervisor = ChildSupervisor::new(child);
-    let deadline = Instant::now() + Duration::from_secs(25);
+    // The CLI collects doctor, certification, and `why` reports sequentially
+    // (each has a 10-second bound), then may run GNOME-specific checks. Leave
+    // enough time for the complete redacted report instead of timing out after
+    // the first two slower diagnostics.
+    const SUPPORT_REPORT_TIMEOUT: Duration = Duration::from_secs(60);
+    let deadline = Instant::now() + SUPPORT_REPORT_TIMEOUT;
     let status = loop {
         if Instant::now() >= deadline {
             supervisor.kill_group();
             let _ = supervisor.reap();
             let _ = fs::remove_dir_all(&directory);
-            return Err("support report collection exceeded its 25 second limit".into());
+            return Err(format!(
+                "support report collection exceeded its {} second limit",
+                SUPPORT_REPORT_TIMEOUT.as_secs()
+            ));
         }
         match supervisor.has_exited() {
             Ok(true) => match supervisor.reap() {
