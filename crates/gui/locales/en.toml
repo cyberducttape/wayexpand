@@ -247,6 +247,7 @@ dg_the_background_diagnostics_queue_is_busy = "The background diagnostics queue 
 dg_background_diagnostics_are_unavailable = "Background diagnostics are unavailable."
 dg_collecting_sanitized_report = "Collecting sanitized report…"
 dg_save_report = "Save Report"
+dg_report_copied = "Report Copied"
 dg_report_saved_with_owner_only_permissions = "Report saved with owner-only permissions."
 dg_save_as = "Save as"
 dg_desktop_test_2 = "Desktop test…"

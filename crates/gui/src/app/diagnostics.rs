@@ -2534,6 +2534,7 @@ impl GuiApp {
                     {
                         self.support_preview_loading = true;
                         self.support_preview_error = None;
+                        self.support_preview_copied = false;
                         if let Some(sender) = self.diagnostics_sender.as_ref() {
                             if sender.try_send(runtime::Request::SupportPreview).is_err() {
                                 self.support_preview_loading = false;
@@ -2555,6 +2556,22 @@ impl GuiApp {
                     if self.support_preview_loading {
                         ui.spinner();
                         ui.label(self.strings.dg_collecting_sanitized_report());
+                    }
+                    if ui
+                        .add_enabled(
+                            self.support_preview.is_some(),
+                            egui::Button::new(if self.support_preview_copied {
+                                self.strings.dg_report_copied()
+                            } else {
+                                self.strings.dg_copy_report()
+                            }),
+                        )
+                        .clicked()
+                    {
+                        if let Some(report) = self.support_preview.as_ref() {
+                            ui.ctx().copy_text(report.clone());
+                            self.support_preview_copied = true;
+                        }
                     }
                     if ui
                         .add_enabled(

@@ -244,6 +244,7 @@ dg_the_background_diagnostics_queue_is_busy = "Die Warteschlange der Hintergrund
 dg_background_diagnostics_are_unavailable = "Die Hintergrunddiagnose ist nicht verfügbar."
 dg_collecting_sanitized_report = "Bereinigter Bericht wird erstellt…"
 dg_save_report = "Bericht speichern"
+dg_report_copied = "Bericht kopiert"
 dg_report_saved_with_owner_only_permissions = "Bericht nur für den Besitzer lesbar gespeichert."
 dg_save_as = "Speichern unter"
 dg_desktop_test_2 = "Desktop-Test…"

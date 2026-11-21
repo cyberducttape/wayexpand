@@ -244,6 +244,7 @@ dg_the_background_diagnostics_queue_is_busy = "Antrean diagnostik latar belakang
 dg_background_diagnostics_are_unavailable = "Diagnostik latar belakang tidak tersedia."
 dg_collecting_sanitized_report = "Mengumpulkan laporan yang dibersihkan…"
 dg_save_report = "Simpan laporan"
+dg_report_copied = "Laporan disalin"
 dg_report_saved_with_owner_only_permissions = "Laporan disimpan dengan izin khusus pemilik."
 dg_save_as = "Simpan sebagai"
 dg_desktop_test_2 = "Uji desktop…"
