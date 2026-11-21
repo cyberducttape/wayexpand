@@ -104,9 +104,7 @@ impl CommandCgroup {
                 "the service cgroup is shared with other processes; escaped-process cleanup will require per-process ownership evidence"
             );
         }
-        if let Err(error) = std::fs::create_dir(&path) {
-            return Err(error);
-        }
+        std::fs::create_dir(&path)?;
         let procs_path = path.join("cgroup.procs");
         let procs = match std::fs::OpenOptions::new().write(true).open(&procs_path) {
             Ok(file) => file,
@@ -174,8 +172,7 @@ impl CommandCgroup {
     fn kill_and_remove(&mut self) -> io::Result<()> {
         #[cfg(target_os = "linux")]
         {
-            let result = cleanup_cgroup(&self.path, &mut self.cleanup);
-            result
+            cleanup_cgroup(&self.path, &mut self.cleanup)
         }
         #[cfg(not(target_os = "linux"))]
         {
