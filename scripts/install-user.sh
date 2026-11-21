@@ -73,23 +73,29 @@ if [ -n "$required_rust" ] && [ -n "$cargo_version" ]; then
     fi
 fi
 
-# Print the command that installs the native build dependencies on this
-# distribution; used when the build fails.
+# Print an installation command only when the distribution family is known.
+# Guessing apt on an unknown distribution sends users toward the wrong fix.
 build_dependency_hint() {
     os_ids=
     if [ -r /etc/os-release ]; then
         # shellcheck source=/dev/null
-        os_ids=$(. /etc/os-release && printf '%s %s' "${ID:-}" "${ID_LIKE:-}")
+        os_ids=$( . /etc/os-release && printf '%s %s' "${ID:-}" "${ID_LIKE:-}" )
     fi
     case " $os_ids " in
-        *" fedora "*|*" rhel "*|*" centos "*)
+        *" fedora "*|*" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*)
             printf '%s\n' "  sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel" ;;
-        *" arch "*)
+        *" arch "*|*" manjaro "*|*" endeavouros "*)
             printf '%s\n' "  sudo pacman -S --needed base-devel wayland libxkbcommon" ;;
-        *" opensuse"*|*" suse "*)
+        *" opensuse "*|*" opensuse-leap "*|*" opensuse-tumbleweed "*|*" suse "*)
             printf '%s\n' "  sudo zypper install gcc pkg-config wayland-devel libxkbcommon-devel" ;;
-        *)
+        *" debian "*|*" ubuntu "*|*" linuxmint "*|*" pop "*|*" kali "*)
             printf '%s\n' "  sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev" ;;
+        *" alpine "*)
+            printf '%s\n' "  sudo apk add build-base pkgconf wayland-dev libxkbcommon-dev" ;;
+        *)
+            printf '%s\n' "  Could not identify a supported package manager for '${os_ids:-unknown distribution}'."
+            printf '%s\n' "  See docs/DEVELOPMENT.md for native build dependencies, or use a published release archive:"
+            printf '%s\n' "  https://github.com/cyberducttape/wayexpand/releases" ;;
     esac
 }
 printf '%s\n' "Developer source install: compiling the application from this checkout."
@@ -166,7 +172,7 @@ if ! CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     -p wayexpand-gui \
     -p wayexpand-backend-ibus; then
     printf '%s\n' "error: the build failed; nothing was installed" >&2
-    printf '%s\n' "the most common cause is missing native build dependencies; install them with:" >&2
+    printf '%s\n' "If the error names missing native build dependencies, install them with:" >&2
     build_dependency_hint >&2
     printf '%s\n' "then run this script again" >&2
     exit 1
