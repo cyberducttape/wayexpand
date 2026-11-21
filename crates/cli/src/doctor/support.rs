@@ -71,12 +71,24 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
     }
 
     if let Some(path) = output_path {
-        let mut file = fs::OpenOptions::new()
+        let open_result = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(&path)
-            .with_context(|| format!("creating support report {}", path.display()))?;
+            .open(&path);
+        let mut file = match open_result {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                bail!(
+                    "support report path {} already exists; choose a different --output path (existing reports are never overwritten)",
+                    path.display()
+                );
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("creating support report {}", path.display()));
+            }
+        };
         if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
             drop(file);
             let _ = fs::remove_file(&path);
