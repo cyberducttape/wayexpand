@@ -131,12 +131,14 @@ fi
 ```
 
 **Binary archive** (for end users):
-- `wayexpand-<version>-linux-x86_64.tar.gz` containing prebuilt binaries,
-  systemd units, the desktop entry, application icon, example configuration,
-  current operational documentation, license, security policy, and installation
-  scripts. Only current documentation is shipped.
-- SHA256 checksum: `wayexpand-<version>-linux-x86_64.tar.gz.sha256`
-- Cargo dependency inventory: `wayexpand-<version>-linux-x86_64.cargo-metadata.json`
+- `wayexpand-<version>-linux-<arch>.tar.gz` for `x86_64` and `aarch64`, each
+  containing prebuilt binaries, systemd units, the desktop entry, application
+  icon, example configuration, current operational documentation, license,
+  security policy, and installation scripts. Only current documentation is
+  shipped.
+- Matching SHA256 checksum: `wayexpand-<version>-linux-<arch>.tar.gz.sha256`
+- Matching Cargo dependency inventory:
+  `wayexpand-<version>-linux-<arch>.cargo-metadata.json`
 
 The binary archive packager fixes file ordering, ownership, permissions, and
 timestamps; `SOURCE_DATE_EPOCH` controls the normalized timestamp and defaults
@@ -208,12 +210,16 @@ configuration migration behavior.
 
 ## Verification after publishing
 
-Download the archive and checksum independently, then verify and inspect
-it:
+Download both binary archives and their checksums, then verify and inspect
+each architecture:
 
 ```sh
-sha256sum --check wayexpand-<version>-linux-x86_64.tar.gz.sha256
-tar -tzf wayexpand-<version>-linux-x86_64.tar.gz
+read -r -p 'Release version (without v): ' version
+for arch in x86_64 aarch64; do
+  archive="wayexpand-${version}-linux-${arch}.tar.gz"
+  sha256sum --check "${archive}.sha256"
+  tar -tzf "$archive"
+done
 ```
 
 The `.sha256` files provide integrity checks, not publisher identity. Verify
@@ -227,8 +233,10 @@ configuration backup available until the new service has passed `wayexpand
 doctor --json` and a real expansion test.
 
 ```sh
-tar -xzf wayexpand-<version>-linux-x86_64.tar.gz
-cd wayexpand-<version>-linux-x86_64
+arch="$(uname -m)"
+archive="wayexpand-<version>-linux-${arch}.tar.gz"
+tar -xzf "$archive"
+cd "${archive%.tar.gz}"
 ./scripts/install-release.sh
 wayexpand explain-backend
 # Enable the selected service explicitly; do not implicitly enable
