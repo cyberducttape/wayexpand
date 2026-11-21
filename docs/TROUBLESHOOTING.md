@@ -128,8 +128,9 @@ remote-desktop, or sandboxed-app behavior.
 `debug --test` is an interactive desktop integration check that chooses a
 known harmless tutorial snippet, if one is configured. It never picks an
 arbitrary personal snippet automatically. If no tutorial is available, create
-one in the GUI or review a snippet with `wayexpand preview TRIGGER` and pass
-its trigger explicitly. Review the expected text first with
+one in the GUI or replace `TRIGGER` with the exact trigger (keep the quotes for
+punctuation) and review a snippet with `wayexpand preview 'TRIGGER'`. Pass
+that same trigger explicitly. Review the expected text first with
 `wayexpand preview`, select the target application class, and confirm before
 typing the trigger. It waits for sanitized capture/output evidence and then
 asks you to confirm exact visible text. It never presses Enter, never retries
@@ -249,8 +250,9 @@ through GNOME Shell, then independently verify the IBus engine.
 Configuration readiness does not prove that a text field receives input or
 that an application applied a replacement. Run `wayexpand debug --test` to
 use the harmless tutorial snippet when configured. If it is unavailable,
-review an enabled static snippet with `wayexpand preview TRIGGER`, then pass
-that exact trigger to `wayexpand debug --test 'TRIGGER'`. Confirm the visible
+replace `TRIGGER` with the exact trigger (keep the quotes for punctuation),
+review it with `wayexpand preview 'TRIGGER'`, then pass that trigger to
+`wayexpand debug --test 'TRIGGER'`. Confirm the visible
 result in the affected application.
 
 ### GNOME setup continuation

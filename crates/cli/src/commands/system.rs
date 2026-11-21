@@ -426,7 +426,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         }
     } else {
         println!("Activation completed. No enabled, safe-to-test expansion is configured; real application insertion remains NOT TESTED.");
-        println!("Setup is configured, but insertion is unverified. In the GUI, open Test Expansion to create a dedicated harmless snippet and verify it. From the CLI, review a static snippet with `wayexpand preview TRIGGER`, then run `wayexpand debug --test TRIGGER` in a disposable field.");
+        println!("Setup is configured, but insertion is unverified. In the GUI, open Test Expansion to create a dedicated harmless snippet and verify it. From the CLI, replace `TRIGGER` below with the exact trigger and keep the quotes so punctuation such as `;` is passed safely: `wayexpand preview 'TRIGGER'`, then `wayexpand debug --test 'TRIGGER'` in a disposable field.");
     }
     if desktop_test_result == crate::commands::debug::DesktopTestResult::Failed {
         println!("SETUP RESULT: ACTION REQUIRED");

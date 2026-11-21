@@ -183,7 +183,8 @@ distinguish `replacement-context-observed` from `output-emitted-unverified`;
 neither means the target document was changed. Run `wayexpand debug --test`
 and confirm the result in the application. This uses the known harmless
 tutorial snippet when configured. Otherwise, review an enabled static snippet
-with `wayexpand preview TRIGGER`, then test that exact trigger with
+by replacing `TRIGGER` with the exact trigger (keep the quotes for
+punctuation) in `wayexpand preview 'TRIGGER'`, then test it with
 `wayexpand debug --test 'TRIGGER'`. Setup and verification do not require
 `;;hello`.
 `wayexpand repair --gnome-input-source` repairs the GNOME source list, asks
