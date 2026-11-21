@@ -75,6 +75,26 @@ None of these channels is compositor-certified yet; see the
 [packaging status](docs/PACKAGING.md) and the
 [certification matrix](docs/CERTIFICATION_MATRIX.md).
 
+### Desktop compatibility
+
+Check the likely setup path for your desktop before choosing an integration:
+
+| Desktop/session | Likely path | Evidence and limits |
+| --- | --- | --- |
+| GNOME Shell 46, 48, 50, or 51 | IBus with the WayExpand Shell extension | Headless integration-tested; no real GNOME session is production-certified. |
+| GNOME Shell 49 | GNOME extension support is not declared | German and French layout switching has not been verified in a real GNOME 49 session. Do not treat the extension route as working; Quick Picker can copy snippets for manual paste. |
+| Another GNOME Shell major | GNOME extension support is not declared | Compatibility is unknown. Check the setup guide before enabling an integration; Quick Picker can copy snippets for manual paste. |
+| KDE Plasma / Wayland | Guided IBus setup; KWin tracking where available | Setup checks this session, but no route is production-certified. Verify in each target application. |
+| Sway, Hyprland, or another Wayland desktop | Session-dependent or experimental route | Setup checks live capabilities. Use Quick Picker copy-and-paste if no route is available. |
+
+On GNOME, check the installed Shell version with `gnome-shell --version` and
+match it to the table before starting setup. Per-application GNOME results
+across keyboard layouts are in the
+[physical-session compatibility table](docs/GNOME_APPLICATION_COMPATIBILITY.md).
+Recommended setup does not grant raw keyboard access. Treat any explicit evdev
+request as a separate privacy choice; it observes keyboard events even in
+password fields. See [sensitive-field limits](docs/BACKENDS_SENSITIVE_FIELDS.md).
+
 ### Release packages
 
 Download the package and its `.sha256` from the
@@ -252,27 +272,7 @@ Built in: `dockerfile` (plus `-python`, `-node`, `-rust`), `compose`,
 `wayexpand new --show playbook`. Jinja and GitHub `{{ … }}` expressions are
 written as `{{{{ … }}}}`. See [Templates](docs/TEMPLATES.md).
 
-## Desktop compatibility
-
-Check the likely setup path for your desktop before enabling an integration:
-
-| Desktop/session | Likely path | Evidence and limits |
-| --- | --- | --- |
-| GNOME Shell 46, 48, 50, or 51 | IBus with the WayExpand Shell extension | Headless integration-tested; no real GNOME session is production-certified. |
-| GNOME Shell 49 | GNOME extension support is not declared | German and French layout switching has not been verified in a real GNOME 49 session. Do not treat the extension route as working; Quick Picker can copy snippets for manual paste. |
-| Another GNOME Shell major | GNOME extension support is not declared | Compatibility is unknown. Check the setup guide before enabling an integration; Quick Picker can copy snippets for manual paste. |
-| KDE Plasma / Wayland | Guided IBus setup; KWin tracking where available | Setup checks this session, but no route is production-certified. Verify in each target application. |
-| Sway, Hyprland, or another Wayland desktop | Session-dependent or experimental route | Setup checks live capabilities. Use Quick Picker copy-and-paste if no route is available. |
-
-On GNOME, check the installed Shell version with `gnome-shell --version` and
-match it to the table before starting setup. The installer prints the same
-compatibility summary before its optional setup instructions.
-For per-application GNOME results across keyboard layouts, see the
-[physical-session compatibility table](docs/GNOME_APPLICATION_COMPATIBILITY.md).
-
-Recommended setup does not grant raw keyboard access. Treat any explicit
-evdev request as a separate privacy choice; it observes keyboard events even
-in password fields. See [sensitive-field limits](docs/BACKENDS_SENSITIVE_FIELDS.md).
+## Compatibility limits
 
 - **Committed text only.** WayExpand does not see IME preedit/composition;
   finish CJK, dead-key, and Compose sequences before expecting a trigger to
