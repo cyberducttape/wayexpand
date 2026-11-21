@@ -66,22 +66,17 @@ input and already-committed text. Active IME/preedit composition is
 intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
-The latest current-source isolated KWin smoke run is preserved in
-[`docs/evidence/doctor-certify-d75ea528.json`](evidence/doctor-certify-d75ea528.json).
-It tested clean commit `d75ea5288b8f` on KWin 6.6.7 on 2026-11-21. Thirteen
-checks passed, five were not tested, and backend latency was measured. The
-private session used stdin-simulated capture and libei keysym fallback. Its 20
-injector samples for a small replacement (a two-character trigger replaced by
-one character) measured p50/p95/p99 of 25.112/25.349/25.390 ms. That is about
-twice the 12.6 ms of the 2026-10-30 run because backspaces are now paced 12 ms
-apart like typed keys; compositors dropped some unpaced backspaces and left
-part of the trigger behind. Re-running the 2026-10-30 commit `494aac93b15d` on
-the same KWin 6.6.7 still measured 12.751 ms, so the difference is that pacing,
-not the compositor. The harness no longer measures medium and large
-replacements. These measurements exclude keyboard capture and client paint.
-The run remains partial: physical capture, overlapping input, Unicode
+The latest isolated KWin smoke run is preserved in
+[`docs/evidence/doctor-certify-45f430bb3c2e.json`](evidence/doctor-certify-45f430bb3c2e.json).
+It tested clean commit `45f430bb3c2e` on private KWin 6.6.7 on 2026-11-21.
+Thirteen checks passed, five were not tested, and backend latency was measured.
+The private session used stdin-simulated capture and libei keysym fallback. Its
+20 injector samples for a small replacement measured p50/p95/p99 of
+24.871/25.172/25.294 ms. These measurements exclude keyboard capture and client
+paint. This remains a partial headless smoke run: it is not evidence from the
+active desktop session, and physical capture, overlapping input, Unicode
 insertion on this route, suspend/resume, password-field behavior, and
-long-running stability are not certified.
+long-running stability remain uncertified.
 
 The previous run, on commit `494aac93b15d` with KWin 6.6.6 on 2026-10-30, is
 preserved in

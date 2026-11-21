@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "evidence_type": "component-live-session-check",
+  "tested_commit": "45f430bb3c2e2676e513d180ca69e9011943cf3a",
+  "captured_at_utc": "2026-11-21T23:14:41Z",
+  "system": "Ubuntu 26.04.1 LTS, Linux 7.0.0-44-generic",
+  "desktop": "KDE Plasma Wayland",
+  "plasma": "6.6.6",
+  "compositor": "KWin 6.6.7",
+  "command": "cargo test --locked -p wayexpand-backend-kwin-window live_kwin_tracker -- --ignored --nocapture",
+  "status": "passed",
+  "tests_passed": [
+    "live_kwin_tracker_requires_trustworthy_application_identity",
+    "live_kwin_tracker_health_probe_detects_script_unload"
+  ],
+  "tests_failed": 0,
+  "verified": [
+    "The live KWin tracker requires trustworthy application identity.",
+    "The tracker health probe detects unloading its temporary KWin script."
+  ],
+  "limitations": [
+    "This checks the KWin window-tracker component only.",
+    "It does not exercise physical keyboard capture, replacement typing, real application clients, password fields, layout switching, or the full focus-change matrix.",
+    "This is not production compositor certification."
+  ]
+}
