@@ -56,6 +56,7 @@ const PICKER_SOCKET_NAME: &str = "wayexpand-picker.sock";
 const PICKER_SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(250);
 const PICKER_FOCUS_CONFIRM_TIMEOUT: Duration = Duration::from_secs(2);
 const PICKER_FOCUS_ACK_TIMEOUT: Duration = Duration::from_secs(3);
+const MAX_PICKER_FOCUS_CLIENTS: usize = 16;
 const PICKER_FOCUS_ACK: u8 = 0x06;
 const PICKER_FOCUS_REJECTED: u8 = 0x15;
 
@@ -216,35 +217,84 @@ fn serve_picker_requests(
     repaint_context: Arc<Mutex<Option<egui::Context>>>,
     focus_request_state: Arc<Mutex<FocusRequestState>>,
 ) {
+    let mut clients = Vec::new();
     while !stop.load(Ordering::Acquire) {
         match listener.accept() {
-            Ok((mut stream, _)) => {
-                let _ = stream.set_read_timeout(Some(PICKER_SOCKET_READ_TIMEOUT));
-                let (acknowledgement, acknowledged) = mpsc::sync_channel(1);
-                let accepted = read_focus_request(&mut stream)
-                    && queue_focus_request(&sender, &focus_request_state, acknowledgement);
-                if accepted {
-                    if let Ok(context) = repaint_context.lock() {
-                        if let Some(context) = context.as_ref() {
-                            context.request_repaint();
-                        }
+            Ok((stream, _)) => {
+                let mut active = Vec::with_capacity(clients.len());
+                for client in clients.drain(..) {
+                    if client.is_finished() {
+                        let _ = client.join();
+                    } else {
+                        active.push(client);
                     }
                 }
-                let confirmed = accepted
-                    && acknowledged
-                        .recv_timeout(PICKER_FOCUS_ACK_TIMEOUT)
-                        .is_ok_and(|focused| focused);
-                let response = if confirmed {
-                    PICKER_FOCUS_ACK
-                } else {
-                    PICKER_FOCUS_REJECTED
-                };
-                let _ = stream.write_all(&[response]);
+                clients = active;
+                if clients.len() >= MAX_PICKER_FOCUS_CLIENTS {
+                    let mut stream = stream;
+                    let _ = stream.set_read_timeout(Some(PICKER_SOCKET_READ_TIMEOUT));
+                    if read_focus_request(&mut stream) {
+                        let _ = stream.write_all(&[PICKER_FOCUS_REJECTED]);
+                    }
+                    continue;
+                }
+                let client_sender = sender.clone();
+                let client_stop = Arc::clone(&stop);
+                let client_context = Arc::clone(&repaint_context);
+                let client_request_state = Arc::clone(&focus_request_state);
+                if let Ok(client) = thread::Builder::new()
+                    .name("wayexpand-picker-focus-client".into())
+                    .spawn(move || {
+                        serve_focus_request(
+                            stream,
+                            client_sender,
+                            client_stop,
+                            client_context,
+                            client_request_state,
+                        )
+                    })
+                {
+                    clients.push(client);
+                }
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(_) => break,
         }
     }
+    for client in clients {
+        let _ = client.join();
+    }
+}
+
+fn serve_focus_request(
+    mut stream: UnixStream,
+    sender: SyncSender<()>,
+    stop: Arc<AtomicBool>,
+    repaint_context: Arc<Mutex<Option<egui::Context>>>,
+    focus_request_state: Arc<Mutex<FocusRequestState>>,
+) {
+    let _ = stream.set_read_timeout(Some(PICKER_SOCKET_READ_TIMEOUT));
+    let (acknowledgement, acknowledged) = mpsc::sync_channel(1);
+    let accepted = !stop.load(Ordering::Acquire)
+        && read_focus_request(&mut stream)
+        && queue_focus_request(&sender, &focus_request_state, acknowledgement);
+    if accepted {
+        if let Ok(context) = repaint_context.lock() {
+            if let Some(context) = context.as_ref() {
+                context.request_repaint();
+            }
+        }
+    }
+    let confirmed = accepted
+        && acknowledged
+            .recv_timeout(PICKER_FOCUS_ACK_TIMEOUT)
+            .is_ok_and(|focused| focused);
+    let response = if confirmed {
+        PICKER_FOCUS_ACK
+    } else {
+        PICKER_FOCUS_REJECTED
+    };
+    let _ = stream.write_all(&[response]);
 }
 
 fn queue_focus_request(
@@ -2368,25 +2418,36 @@ mod tests {
         split_request.read_exact(&mut response).unwrap();
         assert_eq!(response[0], super::PICKER_FOCUS_ACK);
         drop(split_request);
-        let socket_for_coalesced_request = socket.clone();
-        let coalesced_request = thread::spawn(move || {
-            let mut stream = UnixStream::connect(socket_for_coalesced_request).unwrap();
-            stream.write_all(b"focus").unwrap();
-            let mut response = [0u8; 1];
-            stream.read_exact(&mut response).unwrap();
-            response[0]
-        });
-        let deadline = Instant::now() + Duration::from_secs(1);
-        let mut coalesced_acknowledgements = Vec::new();
-        while coalesced_acknowledgements.is_empty() && Instant::now() < deadline {
-            coalesced_acknowledgements = primary.take_focus_request();
-            thread::sleep(Duration::from_millis(5));
+        let (focus_sender, focus_requests) = std::sync::mpsc::sync_channel(1);
+        let focus_state =
+            std::sync::Arc::new(std::sync::Mutex::new(super::FocusRequestState::default()));
+        let mut responses = Vec::new();
+        for _ in 0..3 {
+            let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
+            assert!(super::queue_focus_request(
+                &focus_sender,
+                &focus_state,
+                acknowledgement
+            ));
+            responses.push(response);
         }
-        assert!(!coalesced_acknowledgements.is_empty());
-        for acknowledgement in coalesced_acknowledgements {
+        assert!(focus_requests.try_recv().is_ok());
+        assert!(matches!(
+            focus_requests.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        let acknowledgements = {
+            let mut state = focus_state.lock().unwrap();
+            state.pending = false;
+            std::mem::take(&mut state.acknowledgements)
+        };
+        assert_eq!(acknowledgements.len(), responses.len());
+        for acknowledgement in acknowledgements {
             let _ = acknowledgement.send(true);
         }
-        assert_eq!(coalesced_request.join().unwrap(), super::PICKER_FOCUS_ACK);
+        for response in responses {
+            assert_eq!(response.recv().unwrap(), true);
+        }
         assert!(primary.take_focus_request().is_empty());
         drop(primary);
         assert!(!socket.exists(), "closing the picker removes its socket");
