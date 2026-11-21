@@ -862,7 +862,7 @@ fn make_report_actions_runnable(report: &mut serde_json::Value) {
         let Some(action) = report
             .get_mut(section)
             .and_then(|section| section.get_mut("next_action"))
-            .and_then(serde_json::Value::as_str)
+            .and_then(|action| action.as_str())
             .map(str::to_owned)
         else {
             continue;

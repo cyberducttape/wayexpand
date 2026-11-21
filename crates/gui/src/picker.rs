@@ -217,7 +217,7 @@ fn serve_picker_requests(
     repaint_context: Arc<Mutex<Option<egui::Context>>>,
     focus_request_state: Arc<Mutex<FocusRequestState>>,
 ) {
-    let mut clients = Vec::new();
+    let mut clients: Vec<thread::JoinHandle<()>> = Vec::new();
     while !stop.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((stream, _)) => {
