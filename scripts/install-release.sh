@@ -35,7 +35,7 @@ for argument in "$@"; do
 done
 if [ "$enable_service" -eq 1 ] && [ -z "$service_name" ]; then
     printf '%s\n' "error: --enable requires an explicit --service selection" >&2
-    printf '%s\n' "choose a service only after reviewing wayexpand doctor and accepting its documented limitations" >&2
+    printf '%s\n' "choose a service only after reviewing \"$HOME/.local/bin/wayexpand\" doctor and accepting its documented limitations" >&2
     exit 2
 fi
 if [ "$enable_service" -eq 1 ] && ! command -v systemctl >/dev/null 2>&1; then
@@ -336,7 +336,7 @@ if [ -d "$release_dir/icons" ]; then
 fi
 printf '%s\n' "Start here: open WayExpand from your desktop application menu. Its setup guide checks this session,"
 printf '%s\n' "shows the next action, and verifies insertion in a real application."
-printf '%s\n' "If the launcher is not visible yet, start it directly: $bin_dir/wayexpand-gui"
+printf '%s\n' "If the launcher is not visible yet, start it directly: \"$bin_dir/wayexpand-gui\""
 printf '%s\n' ""
 printf '%s\n' ""
 printf '%s\n' "Optional command-line setup:"
@@ -352,8 +352,8 @@ if [ -f "$release_dir/polkit/org.wayexpand.action.policy" ] &&
     printf '%s\n' "  sudo install -m 0644 \"$release_dir/polkit/org.wayexpand.action.policy\" /usr/share/polkit-1/actions/"
 fi
 printf '%s\n' "Setup never grants raw-input permissions or portal consent. If it reports"
-printf '%s\n' "no safe automatic path, review doctor and the documented explicit modes."
-printf '%s\n' "To remove this installation later, run scripts/uninstall-user.sh."
+printf '%s\n' "no safe automatic path, review \"$bin_dir/wayexpand\" doctor and the documented explicit modes."
+printf '%s\n' "To remove this installation later, run \"$release_dir/scripts/uninstall-user.sh\"."
 
 if command -v systemctl >/dev/null 2>&1; then
     active_upgrade=0
@@ -369,7 +369,7 @@ if command -v systemctl >/dev/null 2>&1; then
             case "$runtime_check_output" in
                 *'Action: restart the affected service'*|*'Action: restart the active Action Broker service'*)
                     printf '%s\n' 'After reviewing the process details above, apply the restart and health check with:'
-                    printf '  %s/wayexpand upgrade --apply\n' "$bin_dir"
+                    printf '  "%s/wayexpand" upgrade --apply\n' "$bin_dir"
                     ;;
                 *)
                     printf '%s\n' 'The runtime check did not identify a managed daemon version mismatch; inspect the status above before restarting anything.'
@@ -377,7 +377,7 @@ if command -v systemctl >/dev/null 2>&1; then
             esac
         else
             printf '%s\n' "$runtime_check_output"
-            printf '%s\n' 'Could not complete the runtime check. Inspect the check output and rerun wayexpand upgrade --check before applying.'
+            printf '%s\n' "Could not complete the runtime check. Inspect the output and rerun \"$bin_dir/wayexpand\" upgrade --check before applying."
         fi
     fi
 fi

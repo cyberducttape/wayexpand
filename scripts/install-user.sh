@@ -32,7 +32,7 @@ for argument in "$@"; do
 done
 if [ "$enable_service" -eq 1 ] && [ -z "$service_name" ]; then
     printf '%s\n' "error: --enable requires an explicit --service selection" >&2
-    printf '%s\n' "choose a service only after reviewing wayexpand doctor and accepting its documented limitations" >&2
+    printf '%s\n' "choose a service only after reviewing \"$HOME/.local/bin/wayexpand\" doctor and accepting its documented limitations" >&2
     exit 2
 fi
 if [ "$enable_service" -eq 1 ] && ! command -v systemctl >/dev/null 2>&1; then
@@ -419,7 +419,7 @@ printf '%s\n' ""
 printf '%s\n' "=== START HERE ==="
 printf '%s\n' "Open WayExpand from your desktop application menu. Its setup guide checks this session,"
 printf '%s\n' "shows the next action, and verifies insertion in a real application."
-printf '%s\n' "If the launcher is not visible yet, start it directly: $bin_dir/wayexpand-gui"
+printf '%s\n' "If the launcher is not visible yet, start it directly: \"$bin_dir/wayexpand-gui\""
 printf '%s\n' ""
 printf '%s\n' ""
 printf '%s\n' "=== OPTIONAL COMMAND-LINE SETUP ==="
@@ -464,7 +464,7 @@ if command -v systemctl >/dev/null 2>&1; then
             case "$runtime_check_output" in
                 *'Action: restart the affected service'*|*'Action: restart the active Action Broker service'*)
                     printf '%s\n' 'After reviewing the process details above, apply the restart and health check with:'
-                    printf '  %s/wayexpand upgrade --apply\n' "$bin_dir"
+                    printf '  "%s/wayexpand" upgrade --apply\n' "$bin_dir"
                     ;;
                 *)
                     printf '%s\n' 'The runtime check did not identify a managed daemon version mismatch; inspect the status above before restarting anything.'
@@ -472,7 +472,7 @@ if command -v systemctl >/dev/null 2>&1; then
             esac
         else
             printf '%s\n' "$runtime_check_output"
-            printf '%s\n' 'Could not complete the runtime check. Inspect the check output and rerun wayexpand upgrade --check before applying.'
+            printf '%s\n' "Could not complete the runtime check. Inspect the output and rerun \"$bin_dir/wayexpand\" upgrade --check before applying."
         fi
     fi
 fi
