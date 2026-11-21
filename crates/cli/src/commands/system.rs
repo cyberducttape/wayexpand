@@ -1584,6 +1584,24 @@ fn backend_list_command(arguments: Vec<String>) -> Result<()> {
                 route["output_transaction"].as_str().unwrap_or("unknown"),
                 route["application_result"].as_str().unwrap_or("unknown"),
             );
+            println!(
+                "  destination_identity_available={} destination_identity_verified={}",
+                route["destination_identity_available"]
+                    .as_bool()
+                    .unwrap_or(false),
+                route["destination_identity_verified"]
+                    .as_bool()
+                    .unwrap_or(false),
+            );
+            println!(
+                "  physical_input_interruption_observable={} physical_input_interruption_verified={}",
+                route["physical_input_interruption_observable"].as_bool().unwrap_or(false),
+                route["physical_input_interruption_verified"].as_bool().unwrap_or(false),
+            );
+            println!(
+                "  recovery_outcome_known={}",
+                route["recovery_outcome_known"].as_bool().unwrap_or(false),
+            );
             for limitation in assessment["limitations"].as_array().into_iter().flatten() {
                 if let Some(limitation) = limitation.as_str() {
                     println!("  limitation: {limitation}");
@@ -1620,6 +1638,11 @@ fn backend_route_json(planned: &wayexpand_backend_selection::PlannedRoute) -> se
         "output_transaction": contract.output_transaction,
         "application_result": contract.application_result,
         "atomic_replace": contract.atomic_replace,
+        "destination_identity_available": contract.destination_identity_available,
+        "destination_identity_verified": contract.destination_identity_verified,
+        "physical_input_interruption_observable": contract.physical_input_interruption_observable,
+        "physical_input_interruption_verified": contract.physical_input_interruption_verified,
+        "recovery_outcome_known": contract.recovery_outcome_known,
         "sensitive_field_detection": contract.sensitive_fields,
     })
 }

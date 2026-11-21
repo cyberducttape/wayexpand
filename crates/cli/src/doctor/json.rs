@@ -289,6 +289,11 @@ fn route_plan_entry(planned: &wayexpand_backend_selection::PlannedRoute) -> serd
         "output_transaction": contract.output_transaction,
         "application_result": contract.application_result,
         "atomic_replace": contract.atomic_replace,
+        "destination_identity_available": contract.destination_identity_available,
+        "destination_identity_verified": contract.destination_identity_verified,
+        "physical_input_interruption_observable": contract.physical_input_interruption_observable,
+        "physical_input_interruption_verified": contract.physical_input_interruption_verified,
+        "recovery_outcome_known": contract.recovery_outcome_known,
         "sensitive_field_protection": contract.sensitive_field_support.certified,
         "assessment": &planned.assessment,
     })

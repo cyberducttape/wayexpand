@@ -53,9 +53,23 @@ pub struct RouteContract {
     /// How deletion and insertion are submitted to the client/compositor.
     pub output_transaction: String,
     /// Whether this route can observe that the application applied the text.
-    /// Current routes cannot; user-confirmed desktop tests are separate.
+    /// User-confirmed desktop tests are separate from route-level evidence.
     pub application_result: String,
     pub atomic_replace: bool,
+    /// Whether this route has a stable target identity while replacement is
+    /// in flight. This does not imply that the identity is certified on a
+    /// particular compositor.
+    pub destination_identity_available: bool,
+    /// Whether target identity has been demonstrated on a real compositor.
+    pub destination_identity_verified: bool,
+    /// Whether new physical input can interrupt an output transaction.
+    pub physical_input_interruption_observable: bool,
+    /// Whether interruption observation has been demonstrated on a real
+    /// compositor session.
+    pub physical_input_interruption_verified: bool,
+    /// Whether the route can determine the outcome applied to the target,
+    /// rather than only observing backend/protocol acknowledgement.
+    pub recovery_outcome_known: bool,
     pub app_identity: String,
     pub focus_tracking: bool,
     pub status: String,

@@ -131,7 +131,7 @@ if "$script" true "$valid_matrix" >"$test_root/valid.out" 2>"$test_root/valid.er
     printf '%s\n' 'production gate accepted evidence while the shipped route contract is experimental' >&2
     exit 1
 fi
-grep -F 'the declared route contract does not provide certified sensitive-field handling and atomic verified replacement' \
+grep -F 'the declared route contract does not provide certified destination identity, interruption handling, recovery, sensitive-field handling, and atomic verified replacement' \
     "$test_root/valid.err" >/dev/null
 
 python3 - "$valid_matrix" "$project_dir" <<'PY'
@@ -157,7 +157,12 @@ route["status"] = "supported"
 route["atomic_replace"] = True
 route["trigger_precondition"] = "surrounding_text_matches_trigger"
 route["output_transaction"] = "atomic_protocol_batch"
-route["application_result"] = "unobservable"
+route["application_result"] = "observable"
+route["destination_identity_available"] = True
+route["destination_identity_verified"] = True
+route["physical_input_interruption_observable"] = True
+route["physical_input_interruption_verified"] = True
+route["recovery_outcome_known"] = True
 route["sensitive_fields"] = True
 route["sensitive_field_support"]["implemented"] = True
 route["sensitive_field_support"]["certified"] = True
