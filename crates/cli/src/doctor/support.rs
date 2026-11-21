@@ -35,9 +35,24 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
         }
     }
 
-    let doctor = read_report("doctor")?;
-    let certification = read_report("certify")?;
-    let why = read_report("why")?;
+    // These reports are independent read-only snapshots. Collect them
+    // concurrently so a slow probe does not add up to three separate
+    // ten-second waits when the support preview runs during setup.
+    let (doctor, certification, why) = thread::scope(|scope| {
+        let doctor = scope.spawn(|| read_report("doctor"));
+        let certification = scope.spawn(|| read_report("certify"));
+        let why = scope.spawn(|| read_report("why"));
+        Ok::<_, Error>((
+            doctor
+                .join()
+                .map_err(|_| anyhow::anyhow!("doctor diagnostics worker panicked"))??,
+            certification
+                .join()
+                .map_err(|_| anyhow::anyhow!("certification diagnostics worker panicked"))??,
+            why.join()
+                .map_err(|_| anyhow::anyhow!("why diagnostics worker panicked"))??,
+        ))
+    })?;
     let status = crate::doctor::status::read_daemon_status()
         .ok()
         .and_then(|raw| crate::doctor::status::status_as_json(&raw).ok());
