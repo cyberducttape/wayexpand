@@ -134,6 +134,27 @@ build_dependency_hint() {
             printf '%s\n' "  https://github.com/cyberducttape/wayexpand/releases" ;;
     esac
 }
+missing_native_build_dependencies=0
+if ! command -v cc >/dev/null 2>&1; then
+    printf '%s\n' 'error: no C compiler (cc) was found; a source build requires native build tools' >&2
+    missing_native_build_dependencies=1
+fi
+if ! command -v pkg-config >/dev/null 2>&1; then
+    printf '%s\n' 'error: pkg-config was not found; it is needed to locate Wayland and xkbcommon headers and libraries' >&2
+    missing_native_build_dependencies=1
+else
+    for module in wayland-client xkbcommon; do
+        if ! pkg-config --exists "$module"; then
+            printf '%s\n' "error: pkg-config cannot find the $module development files" >&2
+            missing_native_build_dependencies=1
+        fi
+    done
+fi
+if [ "$missing_native_build_dependencies" -ne 0 ]; then
+    printf '%s\n' 'Install the native build dependencies, then rerun this script:' >&2
+    build_dependency_hint >&2
+    exit 1
+fi
 printf '%s\n' "Developer source install: compiling the application from this checkout."
 printf '%s\n' "For ordinary desktop installation, use a published .deb/.rpm or release archive; no local Rust toolchain is needed."
 bin_dir="$HOME/.local/bin"
