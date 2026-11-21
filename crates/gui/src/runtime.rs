@@ -756,8 +756,15 @@ fn run_support_preview() -> Result<String, String> {
 
     let mut command = Command::new(cli);
     configure_process_group(&mut command);
+    let mut arguments = vec!["support-bundle"];
+    if wayexpand_backend_selection::Compositor::detect()
+        == wayexpand_backend_selection::Compositor::Gnome
+    {
+        arguments.push("--gnome");
+    }
+    arguments.push("--output");
     let child = match command
-        .args(["support-bundle", "--output"])
+        .args(arguments)
         .arg(&path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

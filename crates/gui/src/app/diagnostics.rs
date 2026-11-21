@@ -2471,6 +2471,14 @@ impl GuiApp {
                 ] {
                     ui.label(format!("✓ {item}"));
                 }
+                if wayexpand_backend_selection::Compositor::detect()
+                    == wayexpand_backend_selection::Compositor::Gnome
+                {
+                    ui.label(format!(
+                        "✓ {}",
+                        self.strings.dg_gnome_shell_ibus_and_extension_readiness()
+                    ));
+                }
                 ui.add_space(6.0);
                 ui.label(RichText::new(self.strings.dg_this_report_excludes()).strong());
                 for item in [

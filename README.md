@@ -192,7 +192,8 @@ actual route. For the full symptom-by-symptom guide, see
 [Troubleshooting](docs/TROUBLESHOOTING.md).
 
 If you need to ask for help, open **Diagnostics → Export support report** to
-preview the redacted report before saving it. From a terminal, use
+preview the redacted report before saving it; GNOME sessions include GNOME
+Shell, IBus source, and extension checks automatically. From a terminal, use
 `wayexpand support-bundle --gnome --output wayexpand-support.json` to include
 GNOME-specific checks; review the report before sharing it.
 

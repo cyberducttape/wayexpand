@@ -23,7 +23,8 @@ text appeared in that application's field. Even an acknowledged output
 operation does not prove the application changed its text.
 
 To share diagnostics, open **Diagnostics → Export support report** and preview
-the redacted report before saving. From a terminal, run
+the redacted report before saving. GNOME sessions automatically include GNOME
+Shell, IBus source, and extension checks. From a terminal, run
 `wayexpand support-bundle --gnome --output wayexpand-support.json` to include
 GNOME-specific checks; inspect the report before sending it to anyone.
 
