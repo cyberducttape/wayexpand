@@ -102,8 +102,10 @@ Benötigt Rust 1.92 oder neuer und die nativen Build-Werkzeuge:
 ```bash
 # 1. Build-Werkzeuge (je nach Distribution)
 sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev git   # Debian, Ubuntu
-sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel git      # Fedora
+sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel git    # Fedora, RHEL-Familie
 sudo pacman -S --needed base-devel wayland libxkbcommon git                       # Arch
+sudo zypper install gcc pkg-config wayland-devel libxkbcommon-devel git         # openSUSE
+sudo apk add build-base pkgconf wayland-dev libxkbcommon-dev git                # Alpine
 
 # 2. Rust 1.92+, falls `cargo --version` älter ist (Ubuntu 24.04 liefert 1.75)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh

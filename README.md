@@ -106,8 +106,10 @@ Rust 1.92; build from source there.
 ```sh
 # 1. Native build tools (pick your distribution)
 sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev git   # Debian, Ubuntu
-sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel git      # Fedora
+sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel git    # Fedora, RHEL-family
 sudo pacman -S --needed base-devel wayland libxkbcommon git                       # Arch
+sudo zypper install gcc pkg-config wayland-devel libxkbcommon-devel git         # openSUSE
+sudo apk add build-base pkgconf wayland-dev libxkbcommon-dev git                # Alpine
 
 # 2. Rust 1.92 or newer; skip if `cargo --version` already shows one.
 #    Distribution Rust is often too old (Ubuntu 24.04 ships 1.75).
