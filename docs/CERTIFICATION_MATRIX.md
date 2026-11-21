@@ -138,6 +138,33 @@ US, German, and French layouts, and Shell restart/extension upgrade behavior.
 It exercises Chromium's safe pass-through behavior. These hosted jobs validate
 their stated headless scope only; they do not fill the real-session matrix.
 
+Start a per-platform report while logged into the physical GNOME Wayland
+session being evaluated. For example:
+
+```sh
+python3 scripts/new-gnome-acceptance-report.py \
+  --platform ubuntu-24.04-gnome \
+  --output evidence/ubuntu-24.04-gnome.json \
+  --package-identity 'WayExpand 1.2.3 release archive sha256:…' \
+  --physical-keyboard 'lab keyboard asset KBD-014' \
+  --reviewed-by 'Reviewer Name' \
+  --confirm-physical-session
+```
+
+The command checks for a Wayland session, records the current commit and GNOME
+Shell version when available, and creates the report without overwriting an
+existing file. `--confirm-physical-session` is an operator attestation; the
+environment cannot prove that a physical keyboard is connected. Override the
+commit or Shell version when recording a separately built package with
+`--wayexpand-commit` or `--gnome-shell-version`. The generated template starts
+every application/layout/scenario and lifecycle result as `not-tested`; fill
+in the exact application identity and version, route, result, and evidence
+reference for each cell. For each real trigger replacement, also record all
+four direct observations. Then run the printed
+`scripts/check-gnome-acceptance-matrix.py --report …` command. It rejects the
+template until required evidence is filled in; creating the file is not a test
+result or certification.
+
 The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
 checks component discovery, GNOME source registration, Shell activation, an
