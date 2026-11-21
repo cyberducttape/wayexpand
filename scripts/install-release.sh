@@ -330,7 +330,7 @@ fi
 printf '%s\n' "Installed binaries in $bin_dir"
 printf '%s\n' "Installed user units in $unit_dir"
 printf '%s\n' "Installed desktop entry in $application_dir"
-printf '%s\n' "Staged IBus component in $library_dir/current/ibus (register it with \`wayexpand setup --backend ibus\`)"
+printf '%s\n' "Staged IBus component in $library_dir/current/ibus (register it with \"$bin_dir/wayexpand\" setup --backend ibus)"
 if [ -d "$release_dir/icons" ]; then
     printf '%s\n' "Installed application icon in $icon_base"
 fi
@@ -341,11 +341,11 @@ printf '%s\n' ""
 printf '%s\n' ""
 printf '%s\n' "Optional command-line setup:"
 printf '%s\n' "  export PATH=\"$bin_dir:\$PATH\""
-printf '%s\n' "  wayexpand setup     # guided setup; checks this session and explains the next step"
-printf '%s\n' "  wayexpand doctor    # diagnose an unavailable route"
+printf '%s\n' "  \"$bin_dir/wayexpand\" setup     # guided setup; checks this session and explains the next step"
+printf '%s\n' "  \"$bin_dir/wayexpand\" doctor    # diagnose an unavailable route"
 printf '%s\n' "  # For named actions, edit $config_dir/broker.toml and enable:"
 printf '%s\n' "  systemctl --user enable --now wayexpand-action-broker.service"
-printf '%s\n' "  wayexpand edit      # edit snippets"
+printf '%s\n' "  \"$bin_dir/wayexpand\" edit      # edit snippets"
 if [ -f "$release_dir/polkit/org.wayexpand.action.policy" ] &&
     [ ! -f /usr/share/polkit-1/actions/org.wayexpand.action.policy ]; then
     printf '%s\n' "Broker actions require administrator installation of the polkit policy:"
