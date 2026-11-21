@@ -96,6 +96,29 @@ if HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
 fi
 [ ! -e "$test_root/home/.local" ]
 
+# Existing directories at file destinations must be rejected before the active
+# version is switched. Cover executable, service, and desktop destinations.
+for collision in bin service dropin desktop; do
+    collision_home="$test_root/collision-$collision"
+    collision_config="$test_root/collision-config-$collision"
+    collision_data="$test_root/collision-data-$collision"
+    case "$collision" in
+        bin) collision_target="$collision_home/.local/bin/wayexpand" ;;
+        service) collision_target="$collision_config/systemd/user/wayexpand-input-method.service" ;;
+        dropin) collision_target="$collision_config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ;;
+        desktop) collision_target="$collision_data/applications/wayexpand.desktop" ;;
+    esac
+    mkdir -p "$(dirname "$collision_target")"
+    mkdir "$collision_target"
+    if HOME="$collision_home" XDG_CONFIG_HOME="$collision_config" XDG_DATA_HOME="$collision_data" \
+        "$release_dir/scripts/install-release.sh" >"$test_root/collision-$collision.log" 2>&1; then
+        printf '%s\n' "release installer accepted a directory at its $collision destination" >&2
+        exit 1
+    fi
+    grep -F "installation target is a directory: $collision_target" "$test_root/collision-$collision.log" >/dev/null
+    [ ! -e "$collision_home/.local/lib/wayexpand/current" ]
+done
+
 # Stub out systemctl so this test never touches the invoking user's real
 # systemd session, no matter what HOME/XDG_CONFIG_HOME are set to (systemctl
 # talks to the session bus, which is independent of those variables).
