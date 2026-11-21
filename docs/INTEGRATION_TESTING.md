@@ -434,10 +434,16 @@ The certification workflow performs a hosted preflight before it schedules any
 self-hosted jobs. Configure the repository secret
 `CERTIFICATION_RUNNER_TOKEN` with a fine-grained GitHub token (or GitHub App
 token) that has repository **Administration: read** permission; GitHub's
-default workflow token cannot list repository self-hosted runners. The
-preflight requires an online runner labeled `wayexpand-certification` plus
-each of `kde`, `gnome`, `sway`, and `hyprland`, and fails with the missing
-labels instead of leaving a release queued indefinitely.
+default workflow token cannot list repository self-hosted runners. A runner is
+eligible for a desktop only when it is online and labeled with both
+`wayexpand-certification` and that desktop's ID. Compatibility runs include
+the eligible desktops and skip offline ones. A production run fails preflight
+if any target marked `production_certification_required` lacks an online,
+correctly labeled runner, rather than leaving the release queued indefinitely.
+The current matrix marks no desktop production-required, so a production run
+fails closed until a route has the required real-session evidence and its
+matrix declaration is reviewed. The matrix, not the list of supported labels,
+defines which runners are required for a given run.
 
 Use the evidence collector on a real compositor session:
 
