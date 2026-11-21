@@ -486,11 +486,20 @@ impl GuiApp {
         let repairs_applied =
             valid_apply_report && repairs.is_some_and(|repairs| !repairs.is_empty());
         let no_repairs_remained = valid_apply_report && repairs.is_some_and(Vec::is_empty);
+        let repaired_components = repairs
+            .into_iter()
+            .flatten()
+            .filter_map(|repair| repair.get("component").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>()
+            .join(", ");
         self.installation_repair_preview = None;
         self.installation_repair_dialog_open = false;
         if repairs_applied {
             self.refresh_diagnostics(false);
-            Status::info(self.strings.repair_completed())
+            Status::info(
+                self.strings
+                    .repair_completed_components(&repaired_components),
+            )
         } else if no_repairs_remained {
             self.refresh_diagnostics(false);
             Status::info(self.strings.repair_already_completed())
