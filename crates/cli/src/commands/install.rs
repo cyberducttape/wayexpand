@@ -1324,7 +1324,13 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
         for r in &rows {
             print!("{}", check_row(r.status, r.component, &r.path));
         }
-        println!("\nIntegration:");
+        if setup_backend == "ibus" {
+            println!("\nIntegration:");
+        } else {
+            println!(
+                "\nIntegration (IBus checks describe an alternative route; selected route: {setup_backend}):"
+            );
+        }
         for check in &integration {
             print!(
                 "{}",
