@@ -179,6 +179,14 @@ certification notes, with *Open diagnostics* for the full report.
 
 Useful commands:
 
+If your terminal says `wayexpand: command not found`, run the installed CLI
+directly as `"$HOME/.local/bin/wayexpand"`, or add its directory to this
+terminal's PATH with:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 ```sh
 wayexpand why              # the most likely cause, with one next step
 wayexpand install-check    # are the installed files and integrations present?
