@@ -184,7 +184,8 @@ Useful commands:
 If your terminal says `wayexpand: command not found`, run the installed CLI
 directly as `"$HOME/.local/bin/wayexpand"`, or add its directory to this
 terminal's PATH with the command below; then the short-name examples that
-follow will work in this terminal:
+follow will work in this terminal. If you keep PATH unchanged, prefix each
+example with `"$HOME/.local/bin/wayexpand"` instead:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
