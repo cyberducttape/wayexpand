@@ -605,58 +605,10 @@ impl GuiApp {
                     ui.label(RichText::new(self.strings.welcome_intro()).color(palette.muted));
                 });
                 ui.add_space(14.0);
+                // Keep first run focused on the one next action: show only
+                // the detected desktop here and fold the full table away.
                 theme::card(ui, palette, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(
-                        RichText::new(self.strings.desktop_compatibility_heading())
-                            .strong()
-                            .color(ui.visuals().strong_text_color()),
-                    );
-                    ui.add_space(4.0);
-                    egui::Grid::new("first_run_desktop_compatibility")
-                        .num_columns(2)
-                        .striped(true)
-                        .show(ui, |ui| {
-                            let rows = self.strings.desktop_compatibility_rows();
-                            let detected_major_is_listed =
-                                detected_gnome_major.as_deref().is_some_and(|major| {
-                                    rows.iter().any(|(desktop, _)| {
-                                        desktop.strip_prefix("GNOME ").is_some_and(|versions| {
-                                            versions
-                                                .split(',')
-                                                .any(|version| version.trim() == major)
-                                        })
-                                    })
-                                });
-                            for (desktop, route) in rows {
-                                let is_detected =
-                                    detected_gnome_major.as_deref().is_some_and(|major| {
-                                        desktop.strip_prefix("GNOME ").is_some_and(|versions| {
-                                            versions
-                                                .split(',')
-                                                .any(|version| version.trim() == major)
-                                        }) || desktop.starts_with("Other GNOME")
-                                            && !detected_major_is_listed
-                                    });
-                                if is_detected {
-                                    let color =
-                                        if detected_gnome_major.as_deref().is_some_and(|major| {
-                                            matches!(major, "46" | "48" | "50" | "51")
-                                        }) {
-                                            palette.accent
-                                        } else {
-                                            palette.warning
-                                        };
-                                    ui.label(RichText::new(desktop).strong().color(color));
-                                    ui.label(RichText::new(route).color(color));
-                                } else {
-                                    ui.label(RichText::new(desktop).strong());
-                                    ui.label(route);
-                                }
-                                ui.end_row();
-                            }
-                        });
-                    ui.add_space(4.0);
                     if wayexpand_backend_selection::Compositor::detect()
                         == wayexpand_backend_selection::Compositor::Gnome
                     {
@@ -670,6 +622,59 @@ impl GuiApp {
                             });
                         ui.label(RichText::new(version_hint).small().color(palette.muted));
                     }
+                    egui::CollapsingHeader::new(self.strings.desktop_compatibility_heading())
+                        .id_salt("first_run_desktop_compatibility_details")
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            egui::Grid::new("first_run_desktop_compatibility")
+                                .num_columns(2)
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    let rows = self.strings.desktop_compatibility_rows();
+                                    let detected_major_is_listed =
+                                        detected_gnome_major.as_deref().is_some_and(|major| {
+                                            rows.iter().any(|(desktop, _)| {
+                                                desktop.strip_prefix("GNOME ").is_some_and(
+                                                    |versions| {
+                                                        versions
+                                                            .split(',')
+                                                            .any(|version| version.trim() == major)
+                                                    },
+                                                )
+                                            })
+                                        });
+                                    for (desktop, route) in rows {
+                                        let is_detected =
+                                            detected_gnome_major.as_deref().is_some_and(|major| {
+                                                desktop.strip_prefix("GNOME ").is_some_and(
+                                                    |versions| {
+                                                        versions
+                                                            .split(',')
+                                                            .any(|version| version.trim() == major)
+                                                    },
+                                                ) || desktop.starts_with("Other GNOME")
+                                                    && !detected_major_is_listed
+                                            });
+                                        if is_detected {
+                                            let color = if detected_gnome_major
+                                                .as_deref()
+                                                .is_some_and(|major| {
+                                                    matches!(major, "46" | "48" | "50" | "51")
+                                                }) {
+                                                palette.accent
+                                            } else {
+                                                palette.warning
+                                            };
+                                            ui.label(RichText::new(desktop).strong().color(color));
+                                            ui.label(RichText::new(route).color(color));
+                                        } else {
+                                            ui.label(RichText::new(desktop).strong());
+                                            ui.label(route);
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+                        });
                 });
                 ui.add_space(10.0);
                 if self.gnome_setup_resume_pending {
@@ -780,10 +785,11 @@ impl GuiApp {
                                         .color(palette.muted),
                                 );
                             });
-                        } else if !(daemon_running || ibus_only)
-                            && !self.current_next_step().is_some_and(|(problem, _)| {
+                        } else if !(daemon_running
+                            || ibus_only
+                            || self.current_next_step().is_some_and(|(problem, _)| {
                                 problem == super::Problem::InstallationIncomplete
-                            })
+                            }))
                         {
                             ui.label(
                                 RichText::new(self.strings.onboarding_turn_on_help())
@@ -1366,7 +1372,7 @@ mod guided_setup_tests {
         let strings = crate::lang::Strings::new(crate::lang::Language::English);
         assert!(strings
             .compatibility_replacement_active()
-            .contains("Compatibility replacement is enabled (non-atomic)"));
+            .contains("deletes the trigger and types the replacement separately"));
     }
 
     #[test]
