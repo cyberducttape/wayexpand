@@ -10,6 +10,9 @@ Start with the direct answer to **“Why didn't my expansion work?”**:
 wayexpand why
 ```
 
+For a release archive or per-user source install, prefix commands with
+`"$HOME/.local/bin/wayexpand"` when `~/.local/bin` is not on PATH.
+
 It reports one prioritized cause and what to do next. For example, if GNOME
 has not selected WayExpand, the next step is to select it in **Settings →
 Keyboard** or the input-source menu, then run a live typing test in the
