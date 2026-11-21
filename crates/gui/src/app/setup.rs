@@ -150,10 +150,16 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
         })
         .map(str::trim)
         .unwrap_or("Setup command execution");
-    let problem_id = combined
-        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
-        .find(|part| part.starts_with("WX-") && part.len() > 3)
-        .unwrap_or("WX-SETUP-001");
+    let find_problem_id = |output: &str| {
+        output
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
+            .find(|part| part.starts_with("WX-") && part.len() > 3)
+            .map(str::to_owned)
+    };
+    let problem_id = find_problem_id(summary)
+        .or_else(|| find_problem_id(&stderr))
+        .or_else(|| find_problem_id(&stdout))
+        .unwrap_or_else(|| "WX-SETUP-001".to_owned());
     let find_remedy = |output: &str| {
         output
             .lines()
@@ -179,7 +185,7 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
         (
                 "The WayExpand command-line component is missing from this installation.",
                 "Starting the WayExpand command-line component",
-                "WX-INSTALL-001",
+                "WX-INSTALL-001".to_owned(),
                 "Reinstall WayExpand using the same package, release archive, or per-user installer as this GUI, then reopen it.".to_owned(),
             )
     } else {
