@@ -157,13 +157,23 @@ existing file. `--confirm-physical-session` is an operator attestation; the
 environment cannot prove that a physical keyboard is connected. Override the
 commit or Shell version when recording a separately built package with
 `--wayexpand-commit` or `--gnome-shell-version`. The generated template starts
-every application/layout/scenario and lifecycle result as `not-tested`; fill
-in the exact application identity and version, route, result, and evidence
-reference for each cell. For each real trigger replacement, also record all
-four direct observations. Then run the printed
-`scripts/check-gnome-acceptance-matrix.py --report …` command. It rejects the
-template until required evidence is filled in; creating the file is not a test
-result or certification.
+every application/layout/scenario and lifecycle result as `not-tested`. To
+record results without editing JSON by hand, run:
+
+```sh
+python3 scripts/record-gnome-acceptance-results.py \
+  --report evidence/ubuntu-24.04-gnome.json
+```
+
+The recorder walks each application/scenario/layout cell, then lifecycle
+checks. Perform the displayed test in the named application first; record its
+exact identity, version, input route, result, and evidence reference. For each
+real trigger replacement, it also asks for the four direct observations.
+Progress is saved after every cell, and rerunning resumes at the next
+`not-tested` result. `q` exits safely. Run the printed
+`scripts/check-gnome-acceptance-matrix.py --report …` command when finished.
+The recorder does not observe the tests itself; creating or filling the report
+is not a certification result until its evidence has been reviewed.
 
 The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
