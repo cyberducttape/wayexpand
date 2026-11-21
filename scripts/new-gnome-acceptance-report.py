@@ -16,10 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 PLAN_PATH = ROOT / "tests/certification/gnome-ibus-matrix.json"
 
 
-def is_gnome_session():
-    desktop_value = os.environ.get("XDG_CURRENT_DESKTOP", "").strip()
+def is_gnome_session(current_desktop=None, session_desktop=None):
+    if current_desktop is None:
+        current_desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
+    if session_desktop is None:
+        session_desktop = os.environ.get("XDG_SESSION_DESKTOP", "")
+    desktop_value = current_desktop.strip()
     if not desktop_value:
-        desktop_value = os.environ.get("XDG_SESSION_DESKTOP", "")
+        desktop_value = session_desktop
     tokens = {
         token.strip().casefold()
         for token in desktop_value.replace(";", ":").split(":")
@@ -28,10 +32,10 @@ def is_gnome_session():
     return any(token == "gnome" or token.startswith("gnome-") for token in tokens)
 
 
-def os_release_identity():
+def os_release_identity(path=Path("/etc/os-release")):
     values = {}
     try:
-        lines = Path("/etc/os-release").read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
         return None
     for line in lines:
@@ -46,6 +50,18 @@ def os_release_identity():
     if "ID" not in values or "VERSION_ID" not in values:
         return None
     return values["ID"].casefold(), values["VERSION_ID"]
+
+
+def platform_matches_distribution(platform, identity):
+    if identity is None:
+        return False
+    distribution_id, distribution_version = identity
+    expected_distribution = platform["distribution"].casefold()
+    expected_release = platform["release"].split()[0]
+    release_matches = distribution_version == expected_release or distribution_version.startswith(
+        f"{expected_release}."
+    )
+    return distribution_id == expected_distribution and release_matches
 
 
 def shell_version():
@@ -69,6 +85,16 @@ def gnome_shell_major(version):
         re.IGNORECASE,
     )
     return match.group(1) if match else None
+
+
+def platform_matches_shell_version(platform, version):
+    major = gnome_shell_major(version)
+    if major is None:
+        return False
+    expected_shell = platform.get("gnome_shell", "")
+    if expected_shell.endswith(".x"):
+        return major == expected_shell.split(".", 1)[0]
+    return True
 
 
 def main():
@@ -121,15 +147,12 @@ def main():
     if platform is None:
         parser.error(f"unknown platform {args.platform!r}; choose from the matrix platform IDs")
     detected_distribution = os_release_identity()
-    expected_distribution = platform["distribution"].casefold()
-    expected_release = platform["release"].split()[0]
     if detected_distribution is None:
         parser.error("cannot identify the host distribution from /etc/os-release")
-    distribution_id, distribution_version = detected_distribution
-    release_matches = distribution_version == expected_release or distribution_version.startswith(
-        f"{expected_release}."
-    )
-    if distribution_id != expected_distribution or not release_matches:
+    if not platform_matches_distribution(platform, detected_distribution):
+        distribution_id, distribution_version = detected_distribution
+        expected_distribution = platform["distribution"].casefold()
+        expected_release = platform["release"].split()[0]
         parser.error(
             f"selected platform {args.platform} requires {expected_distribution} {expected_release}; "
             f"this host identifies as {distribution_id} {distribution_version}"
@@ -172,9 +195,10 @@ def main():
         parser.error(
             "GNOME Shell version must be exact (for example, `GNOME Shell 51.1` or `51.1`)"
         )
-    if platform["id"] == "fedora-45-gnome51" and shell_major != "51":
+    if not platform_matches_shell_version(platform, version):
+        expected_shell = platform.get("gnome_shell", "")
         parser.error(
-            f"selected platform {args.platform} requires GNOME Shell 51.x; detected {version}"
+            f"selected platform {args.platform} requires GNOME Shell {expected_shell}; detected {version}"
         )
 
     applications = [
