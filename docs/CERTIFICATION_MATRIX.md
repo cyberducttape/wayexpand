@@ -164,11 +164,11 @@ python3 scripts/new-gnome-acceptance-report.py \
 ```
 
 The command checks that the selected platform matches `/etc/os-release` and
-that the session identifies as GNOME Wayland, records the current commit only
-when the checkout is clean, detects the GNOME Shell version when available,
-and creates the report without overwriting an existing file. If the checkout
-is dirty, pass `--wayexpand-commit` with the full commit used to build the
-tested package.
+that the session identifies as GNOME Wayland, detects or accepts the exact
+Shell version and validates a pinned major, records the current commit only
+when the checkout is clean, and creates the report without overwriting an
+existing file. If the checkout is dirty, pass `--wayexpand-commit` with the
+full commit used to build the tested package.
 `--confirm-physical-session` is an operator attestation; the environment
 cannot prove that a physical keyboard is connected. Override the commit or
 Shell version when recording a separately built package with

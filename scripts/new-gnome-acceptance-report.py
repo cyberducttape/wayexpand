@@ -5,6 +5,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -59,6 +60,15 @@ def shell_version():
     except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return ""
     return result.stdout.strip() or result.stderr.strip()
+
+
+def gnome_shell_major(version):
+    match = re.fullmatch(
+        r"(?:GNOME Shell\s+)?(\d+)(?:\.\d+)*",
+        version.strip(),
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else None
 
 
 def main():
@@ -157,6 +167,15 @@ def main():
     version = args.gnome_shell_version.strip() or shell_version()
     if not version:
         parser.error("cannot detect GNOME Shell version; pass --gnome-shell-version")
+    shell_major = gnome_shell_major(version)
+    if shell_major is None:
+        parser.error(
+            "GNOME Shell version must be exact (for example, `GNOME Shell 51.1` or `51.1`)"
+        )
+    if platform["id"] == "fedora-45-gnome51" and shell_major != "51":
+        parser.error(
+            f"selected platform {args.platform} requires GNOME Shell 51.x; detected {version}"
+        )
 
     applications = [
         {
