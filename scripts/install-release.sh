@@ -300,10 +300,8 @@ printf '%s\n' "Staged IBus component in $library_dir/current/ibus (register it w
 if [ -d "$release_dir/icons" ]; then
     printf '%s\n' "Installed application icon in $icon_base"
 fi
-printf '%s\n' "Start here: open WayExpand from your desktop application menu. Its setup guide checks this session,"
-printf '%s\n' "shows the next action, and verifies insertion in a real application."
-printf '%s\n' "If the launcher is not visible yet, start it directly: \"$bin_dir/wayexpand-gui\""
-printf '%s\n' ""
+printf '%s\n' "Next action: open the setup guide with: \"$bin_dir/wayexpand-gui\""
+printf '%s\n' "You can also launch WayExpand from your desktop application menu."
 printf '%s\n' ""
 printf '%s\n' "Optional command-line setup:"
 printf '%s\n' "  export PATH=\"$bin_dir:\$PATH\""
