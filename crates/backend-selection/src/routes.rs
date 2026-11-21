@@ -72,6 +72,9 @@ pub struct RouteContract {
     pub recovery_outcome_known: bool,
     pub app_identity: String,
     pub focus_tracking: bool,
+    /// Route maturity from the reviewed catalog. The production certification
+    /// gate promotes a route to `supported`; `experimental` remains the
+    /// default until that evidence is accepted.
     pub status: String,
     pub setup_backend: String,
     pub setup_detail: String,
@@ -102,8 +105,11 @@ pub struct SensitiveFieldSupport {
 }
 
 impl RouteContract {
+    /// The production certification validator promotes reviewed routes to
+    /// `supported`. Use that same catalog value when ranking routes and
+    /// describing certification readiness.
     pub fn is_certified(&self) -> bool {
-        self.status == "certified"
+        self.status == "supported"
     }
 
     /// Requirements this route has not yet demonstrated for production
@@ -142,7 +148,7 @@ impl RouteContract {
         if self.trigger_precondition != "surrounding_text_matches_trigger" {
             gaps.push("trigger not verified against target text");
         }
-        if self.status != "supported" {
+        if !self.is_certified() {
             gaps.push("route not production-supported");
         }
         gaps
