@@ -828,6 +828,17 @@ impl GuiApp {
                                 }
                             }
                         }
+                        if !route_ready
+                            && theme::secondary_button(
+                                ui,
+                                palette,
+                                self.strings.onboarding_open_diagnostics(),
+                            )
+                            .clicked()
+                        {
+                            self.diagnostics_open = true;
+                            self.refresh_diagnostics(false);
+                        }
                         // A healthy terminal-scoped route can still be too
                         // narrow for a user's browser/editor workflow. Keep the
                         // capability recommendation actionable during first run
