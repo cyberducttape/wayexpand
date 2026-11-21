@@ -173,12 +173,12 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
     } else {
         (summary, stage, problem_id, remedy)
     };
-    let remedy = if cli_missing {
-        remedy.to_owned()
-    } else {
+    let remedy = if !cli_missing && remedy.contains("wayexpand") {
         format!(
             "{remedy} If a suggested command starts with `wayexpand` and this is a per-user install without PATH configured, replace that first word with `\"$HOME/.local/bin/wayexpand\"`."
         )
+    } else {
+        remedy.to_owned()
     };
     let lower = combined.to_ascii_lowercase();
     let rollback = if lower.contains("rollback was incomplete")
