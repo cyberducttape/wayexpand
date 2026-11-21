@@ -102,14 +102,18 @@ fn main() {
             "Error:"
         };
         let message = error.to_string();
-        if let Some(usage) = message
-            .strip_prefix("usage: ")
-            .filter(|_| code == EXIT_USAGE)
-        {
-            // A bare usage line does not say what went wrong.
-            eprintln!("{label} missing or invalid arguments\nUsage: {usage}");
-        } else {
-            eprintln!("{label} {error:?}");
+        let diagnosis_already_printed =
+            CURRENT_COMMAND.get() == Some(&"why") && code == EXIT_DAEMON;
+        if !diagnosis_already_printed {
+            if let Some(usage) = message
+                .strip_prefix("usage: ")
+                .filter(|_| code == EXIT_USAGE)
+            {
+                // A bare usage line does not say what went wrong.
+                eprintln!("{label} missing or invalid arguments\nUsage: {usage}");
+            } else {
+                eprintln!("{label} {error:?}");
+            }
         }
         // Point a usage error at the command's full help, unless the message
         // already points at help.
