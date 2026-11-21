@@ -147,7 +147,8 @@ Launch **WayExpand** from the desktop application menu or run `wayexpand-gui`.
 Its first-run guide checks the installation and route, then asks you to verify
 an exact insertion in a real application before it records setup as working.
 Both installers print the desktop compatibility summary before their optional
-command-line instructions, so you can check the likely route before continuing.
+command-line instructions, and identify the active GNOME Shell version when
+available, so you can check the likely route before continuing.
 `wayexpand setup --check` reports missing integration dependencies without
 enabling raw keyboard capture. If automatic expansion cannot be verified yet,
 the guide offers a copy-only Quick Picker for manual paste.
