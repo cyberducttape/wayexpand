@@ -32,7 +32,7 @@ impl Strings {
     /// Current likely routes and evidence, shown before setup can request
     /// desktop integration or permissions. Headless coverage is never labeled
     /// as real-session certification.
-    pub(crate) fn desktop_compatibility_rows(&self) -> [(&'static str, &'static str); 4] {
+    pub(crate) fn desktop_compatibility_rows(&self) -> [(&'static str, &'static str); 5] {
         match self.lang {
             Language::English => [
                 (
@@ -40,8 +40,12 @@ impl Strings {
                     "IBus + WayExpand extension; headless-tested, not certified on a real desktop.",
                 ),
                 (
-                    "GNOME 49 and other majors",
-                    "Extension support is undeclared (GNOME 49 layout switching is unresolved); GNOME integration is unverified. Quick Picker can copy for manual paste.",
+                    "GNOME 49",
+                    "Extension support is undeclared; German/French layout switching is unverified in a real session. Quick Picker can copy for manual paste.",
+                ),
+                (
+                    "Other GNOME Shell majors",
+                    "Extension support is undeclared and compatibility is unknown. Check the setup guide before enabling an integration; Quick Picker can copy for manual paste.",
                 ),
                 (
                     "KDE Plasma / Wayland",
@@ -58,8 +62,12 @@ impl Strings {
                     "IBus + WayExpand-Erweiterung; headless getestet, nicht auf einem echten Desktop zertifiziert.",
                 ),
                 (
-                    "GNOME 49 und andere Hauptversionen",
-                    "Erweiterungsunterstützung ist nicht deklariert (Layoutwechsel unter GNOME 49 ist ungeklärt); die GNOME-Integration ist ungeprüft. Der Schnellwähler kann zum manuellen Einfügen kopieren.",
+                    "GNOME 49",
+                    "Erweiterungsunterstützung ist nicht deklariert; deutsche/französische Layoutwechsel sind in einer realen Sitzung ungeprüft. Der Schnellwähler kann zum manuellen Einfügen kopieren.",
+                ),
+                (
+                    "Andere GNOME-Shell-Hauptversionen",
+                    "Erweiterungsunterstützung ist nicht deklariert und die Kompatibilität unbekannt. Prüfen Sie die Einrichtungsanleitung, bevor Sie eine Integration aktivieren; der Schnellwähler kann zum manuellen Einfügen kopieren.",
                 ),
                 (
                     "KDE Plasma / Wayland",
@@ -76,8 +84,12 @@ impl Strings {
                     "IBus + ekstensi WayExpand; diuji headless, belum tersertifikasi pada desktop nyata.",
                 ),
                 (
-                    "GNOME 49 dan versi utama lainnya",
-                    "Dukungan ekstensi belum dinyatakan (pergantian tata letak pada GNOME 49 belum terselesaikan); integrasi GNOME belum terverifikasi. Quick Picker dapat menyalin untuk ditempel manual.",
+                    "GNOME 49",
+                    "Dukungan ekstensi belum dinyatakan; pergantian tata letak Jerman/Prancis belum terverifikasi pada sesi nyata. Quick Picker dapat menyalin untuk ditempel manual.",
+                ),
+                (
+                    "Versi utama GNOME Shell lainnya",
+                    "Dukungan ekstensi belum dinyatakan dan kompatibilitas belum diketahui. Periksa panduan penyiapan sebelum mengaktifkan integrasi; Quick Picker dapat menyalin untuk ditempel manual.",
                 ),
                 (
                     "KDE Plasma / Wayland",
