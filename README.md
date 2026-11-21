@@ -158,10 +158,15 @@ installed 1.92 or newer through `cargo +<version> build`.
 ### Release archive
 
 ```sh
-sha256sum --check wayexpand-*-linux-x86_64.tar.gz.sha256
-tar -xzf wayexpand-*-linux-x86_64.tar.gz
-./wayexpand-*-linux-x86_64/scripts/install-release.sh
+arch="$(uname -m)"
+sha256sum --check wayexpand-*-linux-"$arch".tar.gz.sha256
+tar -xzf wayexpand-*-linux-"$arch".tar.gz
+./wayexpand-*-linux-"$arch"/scripts/install-release.sh
 ```
+
+Download the release archive and matching checksum for your machine's
+architecture (`x86_64` or `aarch64`) into the same directory before running
+these commands.
 
 Before installing, the source and release installers show the desktop
 compatibility summary and identify the active GNOME Shell version when
