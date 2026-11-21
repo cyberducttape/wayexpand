@@ -628,7 +628,7 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         || !evdev_consent_ok
         || !capture_ready
     {
-        bail!("doctor found configuration, runtime, or backend problems");
+        bail!("doctor found configuration, runtime, or backend problems; follow the failed check's Next guidance above");
     }
     Ok(())
 }
