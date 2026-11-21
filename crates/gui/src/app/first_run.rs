@@ -774,7 +774,8 @@ impl GuiApp {
                                                 .failed_components
                                                 .iter()
                                                 .map(|component| {
-                                                    self.strings.dg_installation_component(component)
+                                                    self.strings
+                                                        .dg_installation_component(component)
                                                 })
                                                 .collect::<Vec<_>>()
                                                 .join(", ");

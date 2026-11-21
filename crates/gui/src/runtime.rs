@@ -876,7 +876,13 @@ pub(crate) fn load_config_snapshot(path: PathBuf) -> Result<ReloadSnapshot, Stri
 }
 
 fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot {
-    let installation_audit = run_installation_audit(&config_path);
+    // This subprocess is bounded but can take several seconds on a cold
+    // install. Run it alongside the session probes so one slow file audit
+    // does not delay every route and permission result.
+    let audit_config_path = config_path.clone();
+    let installation_audit = thread::Builder::new()
+        .name("wayexpand-installation-audit".into())
+        .spawn(move || run_installation_audit(&audit_config_path));
     let backend_status = discover_backends();
     let selection_capabilities = probe_capabilities();
     let ibus_available = ibus_engine_available();
@@ -933,7 +939,13 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         &daemon_status,
     );
     DiagnosticsSnapshot {
-        installation_audit,
+        installation_audit: installation_audit
+            .and_then(|worker| {
+                worker
+                    .join()
+                    .map_err(|_| std::io::Error::other("audit worker panicked"))
+            })
+            .unwrap_or_default(),
         backend_status,
         recommended_route,
         route_plan,
