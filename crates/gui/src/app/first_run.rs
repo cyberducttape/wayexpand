@@ -803,6 +803,12 @@ impl GuiApp {
                                 palette.success,
                                 self.strings.first_run_connected(&route_state_detail),
                             );
+                            if compatibility_replacement_active {
+                                ui.colored_label(
+                                    palette.warning,
+                                    self.strings.compatibility_replacement_active(),
+                                );
+                            }
                         } else {
                             // One problem and one action: the same answer the
                             // banner under the header gives after first run.
@@ -1217,12 +1223,6 @@ impl GuiApp {
                         }
                         if let Some(assurance) = route_assurance {
                             ui.label(note(assurance));
-                        }
-                        if compatibility_replacement_active {
-                            ui.colored_label(
-                                palette.warning,
-                                self.strings.compatibility_replacement_active(),
-                            );
                         }
                         if let Some(route) = recommendation {
                             ui.label(note(&format!(
