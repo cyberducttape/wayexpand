@@ -4,14 +4,23 @@
 
 ---
 
+## Start with the symptom
+
+| What is wrong? | First step |
+| --- | --- |
+| The command or app is missing, or installation did not finish | Run `"$HOME/.local/bin/wayexpand" install-check`; this works even when `~/.local/bin` is not on `PATH`. |
+| WayExpand opens, but a trigger does not expand | Type the trigger once in the affected field, then run `wayexpand why`. |
+| You need help from someone else | Open **Diagnostics → Export support report**, preview it, then save and review the redacted report before sharing. |
+
+For a release archive or per-user source install, prefix the other commands in
+this guide with `"$HOME/.local/bin/wayexpand"` when `~/.local/bin` is not on
+`PATH`.
+
 Start with the direct answer to **“Why didn't my expansion work?”**:
 
 ```sh
 wayexpand why
 ```
-
-For a release archive or per-user source install, prefix commands with
-`"$HOME/.local/bin/wayexpand"` when `~/.local/bin` is not on PATH.
 
 It reports one prioritized cause and what to do next. For example, if GNOME
 has not selected WayExpand, the next step is to select it in **Settings →
