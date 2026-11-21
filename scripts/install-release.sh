@@ -69,28 +69,6 @@ case "$state_home" in
         exit 1
         ;;
 esac
-# One consent-marker location for the CLI, installers, doctor, GUI and the
-# unit: systemd evaluates ConditionPathExists before any XDG environment
-# applies, so the marker never follows XDG_CONFIG_HOME. The evdev unit is
-# inert without it, and systemd reports a skipped condition as success, so
-# refuse rather than report an enabled service that never runs; never create
-# the marker here.
-evdev_marker="$HOME/.config/wayexpand/evdev-sensitive-fields-ack"
-legacy_evdev_marker="$config_dir/evdev-sensitive-fields-ack"
-if [ "$enable_service" -eq 1 ] && [ "$service_name" = wayexpand-evdev.service ] \
-    && [ ! -e "$evdev_marker" ]; then
-    printf '%s\n' "error: wayexpand-evdev.service only starts after you accept that it captures password fields" >&2
-    if [ "$legacy_evdev_marker" != "$evdev_marker" ] && [ -e "$legacy_evdev_marker" ]; then
-        printf '%s\n' "found your consent at its old location $legacy_evdev_marker; move it to the location the service checks:" >&2
-        printf '%s\n' "  install -d -m 0700 $HOME/.config/wayexpand" >&2
-        printf '%s\n' "  mv $legacy_evdev_marker $evdev_marker" >&2
-    else
-        printf '%s\n' "review docs/BACKENDS_SENSITIVE_FIELDS.md, then create the marker and rerun:" >&2
-        printf '%s\n' "  install -d -m 0700 $HOME/.config/wayexpand" >&2
-        printf '%s\n' "  install -m 0600 /dev/null $evdev_marker" >&2
-    fi
-    exit 2
-fi
 if [ "$(id -u)" -eq 0 ]; then
     if [ -n "${SUDO_USER:-}" ]; then
         printf '%s\n' "error: do not run the user installer with sudo; run it as $SUDO_USER" >&2
@@ -135,6 +113,28 @@ case ":${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:" in
         ;;
 esac
 printf '%s\n' ""
+# One consent-marker location for the CLI, installers, doctor, GUI and the
+# unit: systemd evaluates ConditionPathExists before any XDG environment
+# applies, so the marker never follows XDG_CONFIG_HOME. The evdev unit is
+# inert without it, and systemd reports a skipped condition as success, so
+# refuse rather than report an enabled service that never runs; never create
+# the marker here. Show compatibility above before asking users to create it.
+evdev_marker="$HOME/.config/wayexpand/evdev-sensitive-fields-ack"
+legacy_evdev_marker="$config_dir/evdev-sensitive-fields-ack"
+if [ "$enable_service" -eq 1 ] && [ "$service_name" = wayexpand-evdev.service ] \
+    && [ ! -e "$evdev_marker" ]; then
+    printf '%s\n' "error: wayexpand-evdev.service only starts after you accept that it captures password fields" >&2
+    if [ "$legacy_evdev_marker" != "$evdev_marker" ] && [ -e "$legacy_evdev_marker" ]; then
+        printf '%s\n' "found your consent at its old location $legacy_evdev_marker; move it to the location the service checks:" >&2
+        printf '%s\n' "  install -d -m 0700 $HOME/.config/wayexpand" >&2
+        printf '%s\n' "  mv $legacy_evdev_marker $evdev_marker" >&2
+    else
+        printf '%s\n' "review docs/BACKENDS_SENSITIVE_FIELDS.md, then create the marker and rerun:" >&2
+        printf '%s\n' "  install -d -m 0700 $HOME/.config/wayexpand" >&2
+        printf '%s\n' "  install -m 0600 /dev/null $evdev_marker" >&2
+    fi
+    exit 2
+fi
 for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     if [ ! -x "$release_dir/bin/$binary" ]; then
         printf '%s\n' "error: $release_dir/bin/$binary not found" >&2
