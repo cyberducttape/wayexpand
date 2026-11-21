@@ -60,11 +60,24 @@ benötigt keine Rust-Toolchain. Sobald eine solche Vorabversion vorliegt:
 sha256sum --check wayexpand-*-linux-x86_64.tar.gz.sha256
 tar -xzf wayexpand-*-linux-x86_64.tar.gz
 ./wayexpand-*-linux-x86_64/scripts/install-release.sh
-# oder: sudo apt install ./wayexpand_*_amd64.deb
-# oder: sudo dnf install ./wayexpand-*.x86_64.rpm
-wayexpand doctor
-wayexpand-gui
+"$HOME/.local/bin/wayexpand-gui"
 ```
+
+Alternativ installieren Sie das `.deb` mit `sudo apt install ./wayexpand_*_amd64.deb`
+oder das `.rpm` mit `sudo dnf install ./wayexpand-*.x86_64.rpm`. Starten Sie
+WayExpand danach über das Anwendungsmenü. Release-Archive und Quellinstallationen
+legen CLI und GUI unter `~/.local/bin` ab. Falls `wayexpand` im Terminal nicht
+gefunden wird, verwenden Sie den vollständigen Pfad oder ergänzen Sie PATH für
+dieses Terminal:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Die GUI führt durch die Einrichtung. Sie aktiviert den erkannten Eingabeweg,
+zeigt fehlende Schritte an und bittet Sie, eine harmlose Ersetzung in einer
+echten Anwendung zu bestätigen. Ohne bestätigte automatische Ersetzung kann
+der Schnellwähler Snippets zum manuellen Einfügen kopieren.
 
 Unter Ubuntu 26.04 (Resolute) gibt es außerdem ein experimentelles tägliches
 Paket im [WayExpand-PPA](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa):
@@ -99,7 +112,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone --depth 1 https://github.com/cyberducttape/wayexpand
 cd wayexpand
 ./scripts/install-user.sh
-wayexpand doctor
+"$HOME/.local/bin/wayexpand-gui"
 ```
 
 Mindestens Rust 1.92 (`rust-version`, in der CI geprüft). Der Checkout legt
@@ -111,6 +124,42 @@ installierten Rust ab 1.92 über `cargo +<version> build` bauen.
 Die Installer sind standardmäßig nicht-destruktiv und aktivieren keinen Dienst,
 solange nicht ausdrücklich `--enable` verwendet wird. Die Installation als
 root wird verweigert.
+
+### Erster Test und Hilfe bei Problemen
+
+Öffnen Sie WayExpand über das Anwendungsmenü oder bei einer Installation für
+Ihren Benutzer mit `"$HOME/.local/bin/wayexpand-gui"`. Folgen Sie im
+Einrichtungsassistenten diesen drei Schritten:
+
+1. **Desktop verbinden:** WayExpand einschalten und angezeigte Berechtigungs-
+   oder Eingabequellen-Schritte ausführen.
+2. **Test-Snippet anlegen:** das harmlose Test-Snippet verwenden oder ein
+   eigenes Snippet erstellen.
+3. **In einer App testen:** ein normales Textfeld öffnen, den angezeigten
+   Trigger eingeben und nur dann bestätigen, wenn genau der erwartete Text
+   erscheint. Bis dahin kann der Schnellwähler den Text kopieren, damit Sie
+   ihn manuell einfügen.
+
+Wenn etwas nicht funktioniert, starten Sie mit der wahrscheinlichsten Ursache
+und einem nächsten Schritt:
+
+```bash
+wayexpand why
+wayexpand install-check
+wayexpand doctor
+```
+
+Bei einer Installation für Ihren Benutzer können Sie die CLI ohne PATH-Änderung
+direkt aufrufen:
+
+```bash
+"$HOME/.local/bin/wayexpand" why
+"$HOME/.local/bin/wayexpand" install-check
+"$HOME/.local/bin/wayexpand" doctor
+"$HOME/.local/bin/wayexpand" support-bundle --output wayexpand-support.json
+```
+
+Prüfen Sie den bereinigten Diagnosebericht vor dem Weitergeben.
 
 ## Konfiguration
 
