@@ -232,6 +232,9 @@ Check the likely setup path for your desktop before enabling an integration:
 | KDE Plasma / Wayland | Guided IBus setup; KWin tracking where available | Setup checks this session, but no route is production-certified. Verify in each target application. |
 | Sway, Hyprland, or another Wayland desktop | Session-dependent or experimental route | Setup checks live capabilities. Use Quick Picker copy-and-paste if no route is available. |
 
+On GNOME, check the installed Shell version with `gnome-shell --version` and
+match it to the table before starting setup.
+
 Recommended setup does not grant raw keyboard access. Treat any explicit
 evdev request as a separate privacy choice; it observes keyboard events even
 in password fields. See [sensitive-field limits](docs/BACKENDS_SENSITIVE_FIELDS.md).

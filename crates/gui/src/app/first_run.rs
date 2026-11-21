@@ -613,6 +613,12 @@ impl GuiApp {
                                 ui.end_row();
                             }
                         });
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(self.strings.desktop_compatibility_version_hint())
+                            .small()
+                            .color(palette.muted),
+                    );
                 });
                 ui.add_space(10.0);
                 if self.gnome_setup_resume_pending {

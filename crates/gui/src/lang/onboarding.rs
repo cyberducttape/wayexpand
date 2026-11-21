@@ -90,6 +90,16 @@ impl Strings {
             ],
         }
     }
+
+    pub(crate) fn desktop_compatibility_version_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "To check your GNOME Shell version, run `gnome-shell --version`.",
+            Language::German => "Ihre GNOME-Shell-Version prüfen Sie mit `gnome-shell --version`.",
+            Language::Indonesian => {
+                "Periksa versi GNOME Shell dengan menjalankan `gnome-shell --version`."
+            }
+        }
+    }
 }
 
 impl Strings {
