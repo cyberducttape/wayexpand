@@ -75,6 +75,15 @@ def load(path):
         return json.load(stream)
 
 
+def gnome_shell_major(version):
+    match = re.fullmatch(
+        r"(?:GNOME Shell\s+)?(\d+)(?:\.\d+)*",
+        version.strip(),
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
 def validate_plan(plan):
     errors = []
     applications = set(plan.get("application_classes", []))
@@ -122,7 +131,7 @@ def validate_report(plan, report):
     reported_shell_version = report.get("gnome_shell_version")
     if platform_id == "fedora-45-gnome51" and (
         not isinstance(reported_shell_version, str)
-        or not reported_shell_version.startswith("51.")
+        or gnome_shell_major(reported_shell_version) != "51"
     ):
         errors.append("Fedora 45 report must identify GNOME Shell 51.x")
     if report.get("session_kind") != "physical-wayland-session":
