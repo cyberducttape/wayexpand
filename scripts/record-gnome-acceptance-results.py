@@ -186,7 +186,7 @@ def main():
 
         item["result"] = result
         if lifecycle:
-            item["evidence_ref"] = ask_required("Evidence reference (file path or reviewed artifact ID)")
+            item["evidence_ref"] = ask_required("Evidence reference (repo-relative path or reviewed artifact ID)")
         else:
             prior = next(
                 (
@@ -203,7 +203,7 @@ def main():
                 "Exact application version", prior.get("application_version", "")
             )
             item["input_route"] = ask_required("Input route", prior.get("input_route", ""))
-            item["evidence_ref"] = ask_required("Evidence reference (file path or reviewed artifact ID)")
+            item["evidence_ref"] = ask_required("Evidence reference (repo-relative path or reviewed artifact ID)")
             if item["scenario"] == "real-trigger-replacement":
                 item["trigger_captured"] = ask_observation("Trigger captured")
                 item["original_trigger_removed"] = ask_observation("Original trigger removed")

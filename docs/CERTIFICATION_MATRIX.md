@@ -138,6 +138,18 @@ US, German, and French layouts, and Shell restart/extension upgrade behavior.
 It exercises Chromium's safe pass-through behavior. These hosted jobs validate
 their stated headless scope only; they do not fill the real-session matrix.
 
+The current application-by-layout physical-session results are published in
+the [GNOME application compatibility table](GNOME_APPLICATION_COMPATIBILITY.md).
+It is generated from reviewed per-platform reports; missing reports remain
+`Not tested` and headless results are never promoted into those cells. After
+reviewing a new report, refresh it with:
+
+```sh
+scripts/render-gnome-application-compatibility.py \
+  --report REPORT.json \
+  --output docs/GNOME_APPLICATION_COMPATIBILITY.md
+```
+
 Start a per-platform report while logged into the physical GNOME Wayland
 session being evaluated. For example:
 

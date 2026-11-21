@@ -247,6 +247,8 @@ Check the likely setup path for your desktop before enabling an integration:
 On GNOME, check the installed Shell version with `gnome-shell --version` and
 match it to the table before starting setup. The installer prints the same
 compatibility summary before its optional setup instructions.
+For per-application GNOME results across keyboard layouts, see the
+[physical-session compatibility table](docs/GNOME_APPLICATION_COMPATIBILITY.md).
 
 Recommended setup does not grant raw keyboard access. Treat any explicit
 evdev request as a separate privacy choice; it observes keyboard events even
