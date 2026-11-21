@@ -32,6 +32,7 @@
     "recovery_outcome_known",
     "production_integrity_ready",
     "production_integrity_gaps",
+    "sensitive_field_state_observable",
     "sensitive_field_detection"
   ],
   "doctor_route": [
@@ -53,6 +54,7 @@
     "recovery_outcome_known",
     "production_integrity_ready",
     "production_integrity_gaps",
+    "sensitive_field_state_observable",
     "sensitive_field_protection",
     "assessment"
   ],

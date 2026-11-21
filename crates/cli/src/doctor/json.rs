@@ -297,6 +297,7 @@ fn route_plan_entry(planned: &wayexpand_backend_selection::PlannedRoute) -> serd
         "recovery_outcome_known": contract.recovery_outcome_known,
         "production_integrity_ready": integrity_gaps.is_empty(),
         "production_integrity_gaps": integrity_gaps,
+        "sensitive_field_state_observable": contract.sensitive_field_support.implemented,
         "sensitive_field_protection": contract.sensitive_field_support.certified,
         "assessment": &planned.assessment,
     })

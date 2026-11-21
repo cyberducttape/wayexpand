@@ -469,34 +469,70 @@ pub(crate) fn summarize_reports(
         .as_array()
         .into_iter()
         .flatten()
-        .map(|route| serde_json::json!({
-            "id": safe_token(route.get("id")),
-            "standing": safe_token(route.get("standing")),
-            "capture": safe_token(route.get("capture")),
-            "injection": safe_token(route.get("injection")),
-            "certification": safe_token(route.get("certification")),
-            "sensitive_field_protection": route.get("sensitive_field_protection").and_then(serde_json::Value::as_bool),
-            "assessment": {
-                "installed": safe_token(route["assessment"].get("installed")),
-                "supported": safe_token(route["assessment"].get("supported")),
-                "authorized": safe_token(route["assessment"].get("authorized")),
-                "connected": safe_token(route["assessment"].get("connected")),
-                "policy_allowed": route["assessment"].get("policy_allowed").and_then(serde_json::Value::as_bool),
-                "certified": route["assessment"].get("certified").and_then(serde_json::Value::as_bool),
-                "requires_user_action": route["assessment"].get("requires_user_action").and_then(serde_json::Value::as_bool),
-                "limitations": route["assessment"]["limitations"].as_array().into_iter().flatten().filter_map(|value| safe_token(Some(value))).collect::<Vec<_>>(),
-                "portal": route["assessment"].get("portal").filter(|value| value.is_object()).map(|portal| serde_json::json!({
-                    "provider_candidate": portal.get("provider_candidate").and_then(serde_json::Value::as_bool),
-                    "implementation_discovered": safe_token(portal.get("implementation_discovered")),
-                    "interface_available": safe_token(portal.get("interface_available")),
-                    "authorization": safe_token(portal.get("authorization")),
-                    "direct_eis_socket_configured": portal.get("direct_eis_socket_configured").and_then(serde_json::Value::as_bool),
-                    "eis_connected": safe_token(portal.get("eis_connected")),
-                    "injection_negotiated": safe_token(portal.get("injection_negotiated")),
-                    "injection_verified": safe_token(portal.get("injection_verified")),
-                })),
-            },
-        }))
+        .map(|route| {
+            let integrity_gaps = route["production_integrity_gaps"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|gap| {
+                    matches!(
+                        *gap,
+                        "destination identity unavailable"
+                            | "destination identity not verified on a real compositor"
+                            | "atomic replacement unavailable"
+                            | "physical-input interruption not observable"
+                            | "physical-input interruption not verified on a real compositor"
+                            | "sensitive-field state not observable"
+                            | "sensitive-field handling not certified"
+                            | "application result unobservable"
+                            | "recovery outcome unknown"
+                            | "trigger not verified against target text"
+                            | "route not production-supported"
+                    )
+                })
+                .collect::<Vec<_>>();
+            serde_json::json!({
+                "id": safe_token(route.get("id")),
+                "standing": safe_token(route.get("standing")),
+                "capture": safe_token(route.get("capture")),
+                "injection": safe_token(route.get("injection")),
+                "certification": safe_token(route.get("certification")),
+                "sensitive_field_protection": route.get("sensitive_field_protection").and_then(serde_json::Value::as_bool),
+                "production_integrity": {
+                    "ready": route.get("production_integrity_ready").and_then(serde_json::Value::as_bool),
+                    "destination_identity_available": route.get("destination_identity_available").and_then(serde_json::Value::as_bool),
+                    "destination_identity_verified": route.get("destination_identity_verified").and_then(serde_json::Value::as_bool),
+                    "atomic_replacement": route.get("atomic_replace").and_then(serde_json::Value::as_bool),
+                    "physical_input_interruption_observable": route.get("physical_input_interruption_observable").and_then(serde_json::Value::as_bool),
+                    "physical_input_interruption_verified": route.get("physical_input_interruption_verified").and_then(serde_json::Value::as_bool),
+                    "sensitive_field_state_observable": route.get("sensitive_field_state_observable").and_then(serde_json::Value::as_bool),
+                    "application_result": safe_token(route.get("application_result")),
+                    "recovery_outcome_known": route.get("recovery_outcome_known").and_then(serde_json::Value::as_bool),
+                    "gaps": integrity_gaps,
+                },
+                "assessment": {
+                    "installed": safe_token(route["assessment"].get("installed")),
+                    "supported": safe_token(route["assessment"].get("supported")),
+                    "authorized": safe_token(route["assessment"].get("authorized")),
+                    "connected": safe_token(route["assessment"].get("connected")),
+                    "policy_allowed": route["assessment"].get("policy_allowed").and_then(serde_json::Value::as_bool),
+                    "certified": route["assessment"].get("certified").and_then(serde_json::Value::as_bool),
+                    "requires_user_action": route["assessment"].get("requires_user_action").and_then(serde_json::Value::as_bool),
+                    "limitations": route["assessment"]["limitations"].as_array().into_iter().flatten().filter_map(|value| safe_token(Some(value))).collect::<Vec<_>>(),
+                    "portal": route["assessment"].get("portal").filter(|value| value.is_object()).map(|portal| serde_json::json!({
+                        "provider_candidate": portal.get("provider_candidate").and_then(serde_json::Value::as_bool),
+                        "implementation_discovered": safe_token(portal.get("implementation_discovered")),
+                        "interface_available": safe_token(portal.get("interface_available")),
+                        "authorization": safe_token(portal.get("authorization")),
+                        "direct_eis_socket_configured": portal.get("direct_eis_socket_configured").and_then(serde_json::Value::as_bool),
+                        "eis_connected": safe_token(portal.get("eis_connected")),
+                        "injection_negotiated": safe_token(portal.get("injection_negotiated")),
+                        "injection_verified": safe_token(portal.get("injection_verified")),
+                    })),
+                },
+            })
+        })
         .collect::<Vec<_>>();
     let protocol_probes = [
         "input_method_v2",
@@ -533,7 +569,7 @@ pub(crate) fn summarize_reports(
     );
     let diagnostics = diagnostic_summaries(doctor, services);
     serde_json::json!({
-        "schema": 4,
+        "schema": 5,
         "generated_at_unix": SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -827,7 +863,13 @@ mod tests {
             "route_plan": {"routes": [{
                 "id":"ibus", "standing":"available", "capture":"input_method",
                 "injection":"commit", "certification":"uncertified",
-                "sensitive_field_protection":false, "reason":"/home/alice/private reason"
+                "application_result":"unobservable", "atomic_replace":false,
+                "destination_identity_available":false, "destination_identity_verified":false,
+                "physical_input_interruption_observable":false, "physical_input_interruption_verified":false,
+                "recovery_outcome_known":false, "production_integrity_ready":false,
+                "production_integrity_gaps":["application result unobservable", "/home/alice/private reason"],
+                "sensitive_field_state_observable":true, "sensitive_field_protection":false,
+                "reason":"/home/alice/private reason"
             }]},
             "expansions": [{ "trigger": ":secret", "replacement": "private snippet" }]
         });
@@ -877,7 +919,7 @@ mod tests {
             summary["protocol_probes"]["input_method_v2"]["status"],
             "unavailable"
         );
-        assert_eq!(summary["schema"], 4);
+        assert_eq!(summary["schema"], 5);
         assert_eq!(summary["services"]["units"][0]["restart_count"], 3);
         assert_eq!(summary["services"]["units"][0]["exit_code"], 1);
         assert_eq!(summary["recent_events"]["input_backend_restarts"], 2);
@@ -895,6 +937,21 @@ mod tests {
             .iter()
             .any(|finding| { finding["id"] == "WX-SERVICE-003" }));
         assert!(summary["route_plan"]["routes"][0].get("reason").is_none());
+        assert_eq!(
+            summary["route_plan"]["routes"][0]["production_integrity"]["ready"],
+            false
+        );
+        assert_eq!(
+            summary["route_plan"]["routes"][0]["production_integrity"]["gaps"][0],
+            "application result unobservable"
+        );
+        assert_eq!(
+            summary["route_plan"]["routes"][0]["production_integrity"]["gaps"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         assert!(summary["protocol_probes"]["input_method_v2"]
             .get("detail")
             .is_none());

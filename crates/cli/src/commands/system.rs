@@ -1654,6 +1654,7 @@ fn backend_route_json(planned: &wayexpand_backend_selection::PlannedRoute) -> se
         "recovery_outcome_known": contract.recovery_outcome_known,
         "production_integrity_ready": integrity_gaps.is_empty(),
         "production_integrity_gaps": integrity_gaps,
+        "sensitive_field_state_observable": contract.sensitive_field_support.implemented,
         "sensitive_field_detection": contract.sensitive_fields,
     })
 }
