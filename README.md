@@ -147,6 +147,21 @@ out and back in before resuming.
 
 ### After installing
 
+If your terminal says `wayexpand: command not found`, run the installed CLI
+directly as `"$HOME/.local/bin/wayexpand"`, or add its directory to this
+terminal's PATH with the command below; then the short-name examples later in
+this guide will work in this terminal. If you keep PATH unchanged, prefix
+each example with `"$HOME/.local/bin/wayexpand"` instead:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+To keep that path in future terminals, run the one command for your shell
+once: Bash, `printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.bashrc"`;
+Zsh, `printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.zshrc"`;
+Fish, `fish_add_path "$HOME/.local/bin"`.
+
 Launch **WayExpand** from the desktop application menu or run `wayexpand-gui`.
 For a per-user installation when `~/.local/bin` is not on PATH, run
 `"$HOME/.local/bin/wayexpand-gui"`.
@@ -180,21 +195,6 @@ the guide offers a copy-only Quick Picker for manual paste.
 certification notes, with *Open diagnostics* for the full report.
 
 Useful commands:
-
-If your terminal says `wayexpand: command not found`, run the installed CLI
-directly as `"$HOME/.local/bin/wayexpand"`, or add its directory to this
-terminal's PATH with the command below; then the short-name examples that
-follow will work in this terminal. If you keep PATH unchanged, prefix each
-example with `"$HOME/.local/bin/wayexpand"` instead:
-
-```sh
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-To keep that path in future terminals, run the one command for your shell
-once: Bash, `printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.bashrc"`;
-Zsh, `printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.zshrc"`;
-Fish, `fish_add_path "$HOME/.local/bin"`.
 
 ```sh
 wayexpand why              # the most likely cause, with one next step
