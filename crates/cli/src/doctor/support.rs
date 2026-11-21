@@ -14,9 +14,9 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 const MAX_REPORT_BYTES: u64 = 1024 * 1024;
 const REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Produce a privacy-preserving support report from the same doctor and
-/// certification reports operators can run independently. Every nested
-/// structure is projected field-by-field; doctor JSON subtrees are never
+/// Produce a privacy-preserving support report from the same installation,
+/// doctor, and certification reports operators can run independently. Every
+/// nested structure is projected field-by-field; diagnostic JSON is never
 /// copied wholesale.
 pub(crate) fn support_bundle(args: Args) -> Result<()> {
     let mut output_path = None;
@@ -36,13 +36,17 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
     }
 
     // These reports are independent read-only snapshots. Collect them
-    // concurrently so a slow probe does not add up to three separate
+    // concurrently so a slow probe does not add up to four separate
     // ten-second waits when the support preview runs during setup.
-    let (doctor, certification, why) = thread::scope(|scope| {
+    let (installation, doctor, certification, why) = thread::scope(|scope| {
+        let installation = scope.spawn(|| read_report("install-check"));
         let doctor = scope.spawn(|| read_report("doctor"));
         let certification = scope.spawn(|| read_report("certify"));
         let why = scope.spawn(|| read_report("why"));
         Ok::<_, Error>((
+            installation
+                .join()
+                .map_err(|_| anyhow::anyhow!("installation diagnostics worker panicked"))??,
             doctor
                 .join()
                 .map_err(|_| anyhow::anyhow!("doctor diagnostics worker panicked"))??,
@@ -58,7 +62,8 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
         .and_then(|raw| crate::doctor::status::status_as_json(&raw).ok());
     let services = service_health();
     let mut report = summarize_reports(&doctor, &certification, status.as_ref(), &services);
-    report["first_step"] = first_step(&why);
+    report["installation"] = installation_summary(&installation);
+    report["first_step"] = first_step(&why, &installation);
     let include_gnome = force_gnome
         || wayexpand_backend_selection::Compositor::detect()
             == wayexpand_backend_selection::Compositor::Gnome;
@@ -246,10 +251,17 @@ fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
     })
 }
 
-/// Keep the actionable conclusion from `wayexpand why` without copying its
-/// detailed route telemetry into the support bundle. The command may print a
-/// nonzero exit status when it has diagnosed a problem; its JSON remains useful.
-fn first_step(why: &serde_json::Value) -> serde_json::Value {
+/// Prefer an actionable installation repair over route advice when required
+/// files are missing. Otherwise keep the conclusion from `wayexpand why`
+/// without copying its detailed route telemetry into the support bundle.
+fn first_step(why: &serde_json::Value, installation: &serde_json::Value) -> serde_json::Value {
+    if installation["ready"].as_bool() == Some(false) {
+        return serde_json::json!({
+            "state": "installation_incomplete",
+            "answer": "The installation audit found one or more missing required components.",
+            "next_action": "Run `wayexpand repair --check` to review safe repairs. Apply only listed repairs, then rerun `wayexpand install-check`; if no safe repair applies, rerun the WayExpand installer.",
+        });
+    }
     let diagnosis = &why["diagnosis"];
     let safe_text = |key: &str| {
         diagnosis
@@ -270,6 +282,36 @@ fn first_step(why: &serde_json::Value) -> serde_json::Value {
         "state": safe_token(diagnosis.get("state")),
         "answer": safe_text("answer"),
         "next_action": safe_text("next_action"),
+    })
+}
+
+/// Keep component-level install evidence while omitting local paths and raw
+/// check details, which can contain usernames or installation locations.
+fn installation_summary(installation: &serde_json::Value) -> serde_json::Value {
+    let checks = installation["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|check| {
+            let component = safe_token(check.get("component"))?;
+            let status = check
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .filter(|status| matches!(*status, "pass" | "fail" | "optional"))?;
+            Some(serde_json::json!({"component":component,"status":status}))
+        })
+        .collect::<Vec<_>>();
+    let identity = installation.get("installation_identity");
+    serde_json::json!({
+        "ready": copy(installation, "ready"),
+        "checks": checks,
+        "identity": {
+            "cli_method": identity.and_then(|value| safe_token(value.get("cli_method"))),
+            "path_method": identity.and_then(|value| safe_token(value.get("path_method"))),
+            "daemon_method": identity.and_then(|value| safe_token(value.get("daemon_method"))),
+            "path_shadow_detected": identity.and_then(|value| value.get("path_shadow_detected")).and_then(serde_json::Value::as_bool),
+            "mixed_cli_daemon_installation": identity.and_then(|value| value.get("mixed_cli_daemon_installation")).and_then(serde_json::Value::as_bool),
+        },
     })
 }
 
@@ -433,10 +475,9 @@ fn read_report(command_name: &str) -> Result<serde_json::Value> {
             }
         }
     };
-    // `doctor --json` and `why --json` intentionally exit unsuccessfully for
-    // unhealthy hosts, but still emit a useful machine-readable report.
-    // Certification also reports when no live scenario has been run.
-    if !status.success() && !matches!(command_name, "doctor" | "why") {
+    // These read-only audits intentionally exit unsuccessfully when they find
+    // problems, but still emit useful machine-readable reports.
+    if !status.success() && !matches!(command_name, "install-check" | "doctor" | "why") {
         bail!("{command_name} diagnostics could not be collected");
     }
     serde_json::from_slice(&bytes)
