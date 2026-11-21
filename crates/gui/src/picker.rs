@@ -54,6 +54,8 @@ const MAX_RESULTS: usize = 60;
 const UNAVAILABLE_PENALTY: i64 = 1_000_000;
 const PICKER_SOCKET_NAME: &str = "wayexpand-picker.sock";
 const PICKER_SOCKET_READ_TIMEOUT: Duration = Duration::from_millis(250);
+const PICKER_FOCUS_ACK: u8 = 0x06;
+const PICKER_FOCUS_REJECTED: u8 = 0x15;
 
 /// Owns the one picker instance for this login session. Its lifetime also
 /// anchors Wayland clipboard ownership; closing the picker releases both.
@@ -129,7 +131,10 @@ impl PickerInstance {
                 anyhow::bail!("picker socket was replaced during startup");
             }
 
-            let (sender, focus_requests) = mpsc::sync_channel(4);
+            // There is only one action: bring this window forward. Keep at
+            // most one pending request and acknowledge later duplicates as
+            // coalesced rather than dropping them when a queue fills.
+            let (sender, focus_requests) = mpsc::sync_channel(1);
             let stop = Arc::new(AtomicBool::new(false));
             let worker_stop = Arc::clone(&stop);
             let repaint_context = Arc::new(Mutex::new(None));
@@ -189,13 +194,24 @@ fn serve_picker_requests(
         match listener.accept() {
             Ok((mut stream, _)) => {
                 let _ = stream.set_read_timeout(Some(PICKER_SOCKET_READ_TIMEOUT));
-                if read_focus_request(&mut stream) && sender.try_send(()).is_ok() {
+                let accepted = read_focus_request(&mut stream)
+                    && match sender.try_send(()) {
+                        Ok(()) | Err(mpsc::TrySendError::Full(())) => true,
+                        Err(mpsc::TrySendError::Disconnected(())) => false,
+                    };
+                if accepted {
                     if let Ok(context) = repaint_context.lock() {
                         if let Some(context) = context.as_ref() {
                             context.request_repaint();
                         }
                     }
                 }
+                let response = if accepted {
+                    PICKER_FOCUS_ACK
+                } else {
+                    PICKER_FOCUS_REJECTED
+                };
+                let _ = stream.write_all(&[response]);
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(_) => break,
@@ -257,8 +273,17 @@ fn request_existing_picker(socket_path: &Path) -> anyhow::Result<bool> {
     match UnixStream::connect(socket_path) {
         Ok(mut stream) => {
             stream.set_write_timeout(Some(PICKER_SOCKET_READ_TIMEOUT))?;
+            stream.set_read_timeout(Some(PICKER_SOCKET_READ_TIMEOUT))?;
             stream.write_all(b"focus")?;
-            Ok(true)
+            let mut response = [0u8; 1];
+            stream.read_exact(&mut response)?;
+            match response[0] {
+                PICKER_FOCUS_ACK => Ok(true),
+                PICKER_FOCUS_REJECTED => {
+                    anyhow::bail!("the existing picker is shutting down and could not accept the focus request; try opening it again")
+                }
+                _ => anyhow::bail!("the existing picker returned an invalid focus acknowledgment"),
+            }
         }
         Err(error)
             if matches!(
@@ -2209,7 +2234,7 @@ mod tests {
     fn picker_launches_focus_the_single_live_instance_and_cleanup_releases_ownership() {
         use std::{
             fs,
-            io::Write,
+            io::{Read, Write},
             os::unix::fs::PermissionsExt,
             os::unix::net::UnixStream,
             path::PathBuf,
@@ -2247,7 +2272,17 @@ mod tests {
         split_request.write_all(b"fo").unwrap();
         thread::sleep(Duration::from_millis(25));
         split_request.write_all(b"cus").unwrap();
+        let mut response = [0u8; 1];
+        split_request.read_exact(&mut response).unwrap();
+        assert_eq!(response[0], super::PICKER_FOCUS_ACK);
         drop(split_request);
+        // Several callers while the action is already pending all receive an
+        // acknowledgment, but consume only one slot in the bounded queue.
+        let mut coalesced_request = UnixStream::connect(&socket).unwrap();
+        coalesced_request.write_all(b"focus").unwrap();
+        coalesced_request.read_exact(&mut response).unwrap();
+        assert_eq!(response[0], super::PICKER_FOCUS_ACK);
+        drop(coalesced_request);
         let deadline = Instant::now() + Duration::from_secs(1);
         let mut got_split_focus_request = false;
         while !got_split_focus_request && Instant::now() < deadline {
@@ -2261,9 +2296,48 @@ mod tests {
             got_split_focus_request,
             "a focus request split across writes still focuses the live picker"
         );
+        assert!(
+            !primary.take_focus_request(),
+            "coalesced focus requests occupy one pending action"
+        );
 
         drop(primary);
         assert!(!socket.exists(), "closing the picker removes its socket");
+        fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn rejected_focus_request_is_not_reported_as_success() {
+        use std::{
+            fs,
+            io::Write,
+            os::unix::{fs::PermissionsExt, net::UnixListener},
+            path::PathBuf,
+            thread,
+        };
+
+        let dir: PathBuf = std::env::temp_dir().join(format!(
+            "wayexpand-picker-rejected-focus-test-{}-{}",
+            unsafe { libc::geteuid() },
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = dir.join("picker.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert!(super::read_focus_request(&mut stream));
+            stream.write_all(&[super::PICKER_FOCUS_REJECTED]).unwrap();
+        });
+
+        let error = super::request_existing_picker(&socket).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("could not accept the focus request"));
+        worker.join().unwrap();
+        fs::remove_file(&socket).unwrap();
         fs::remove_dir(&dir).unwrap();
     }
 
