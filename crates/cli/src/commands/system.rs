@@ -605,6 +605,11 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         build_info::VERSION,
         build_info::COMMIT
     );
+    let quick_diagnosis =
+        crate::commands::install::make_cli_command_runnable("wayexpand why".into());
+    println!(
+        "Quick answer for a missed expansion: run `{quick_diagnosis}`; this command shows the full readiness details."
+    );
     println!("Session: {}", session_description());
     println!("Feature limits: WayExpand does not observe another IME's active preedit; commit or cancel composition before typing a trigger. Local dead-key/Compose guards and committed-Unicode support depend on the selected route. App-filter window tracking requires KWin or the WayExpand GNOME Shell extension and fails closed when unavailable.");
     let config_ok = print_config_diagnostics(&config_path);
