@@ -27,6 +27,26 @@ def is_gnome_session():
     return any(token == "gnome" or token.startswith("gnome-") for token in tokens)
 
 
+def os_release_identity():
+    values = {}
+    try:
+        lines = Path("/etc/os-release").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        key, separator, value = line.partition("=")
+        if separator and key in {"ID", "VERSION_ID"}:
+            try:
+                parsed = shlex.split(value, comments=True)
+            except ValueError:
+                return None
+            if parsed:
+                values[key] = parsed[0]
+    if "ID" not in values or "VERSION_ID" not in values:
+        return None
+    return values["ID"].casefold(), values["VERSION_ID"]
+
+
 def shell_version():
     try:
         result = subprocess.run(
@@ -90,6 +110,20 @@ def main():
     platform = next((item for item in plan["platforms"] if item["id"] == args.platform), None)
     if platform is None:
         parser.error(f"unknown platform {args.platform!r}; choose from the matrix platform IDs")
+    detected_distribution = os_release_identity()
+    expected_distribution = platform["distribution"].casefold()
+    expected_release = platform["release"].split()[0]
+    if detected_distribution is None:
+        parser.error("cannot identify the host distribution from /etc/os-release")
+    distribution_id, distribution_version = detected_distribution
+    release_matches = distribution_version == expected_release or distribution_version.startswith(
+        f"{expected_release}."
+    )
+    if distribution_id != expected_distribution or not release_matches:
+        parser.error(
+            f"selected platform {args.platform} requires {expected_distribution} {expected_release}; "
+            f"this host identifies as {distribution_id} {distribution_version}"
+        )
 
     commit = args.wayexpand_commit.strip()
     if not commit:
