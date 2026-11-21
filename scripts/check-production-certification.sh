@@ -28,7 +28,7 @@ if ! jq -e '
 fi
 
 production_targets=$(jq '[.targets[] | select(.production_certification_required)] | length' "$matrix")
-message='No declared compositor route currently meets WayExpand production certification requirements. The release gate remains blocked until a real-session route demonstrates sensitive-field handling, atomic replacement, and the required input/output contract.'
+message='No declared compositor route currently meets WayExpand production certification requirements. The release gate remains blocked until a real-session route demonstrates sensitive-field handling, atomic replacement, and the required input/output contract. See docs/CERTIFICATION_MATRIX.md#production-certification-gate-no-eligible-compositor-route for current route blockers and docs/CERTIFICATION.md#self-hosted-workflow for runner setup.'
 summary_file=${GITHUB_STEP_SUMMARY:-}
 
 if [ "$production_targets" -eq 0 ]; then
