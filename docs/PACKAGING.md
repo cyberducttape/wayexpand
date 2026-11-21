@@ -189,7 +189,8 @@ rpmbuild --rebuild /tmp/wayexpand-srpm/wayexpand-*.src.rpm   # or: mock <srpm>
 
 1. Sign in at https://copr.fedorainfracloud.org and create a project, for
    example `wayexpand`, with the chroots to publish (`fedora-43-x86_64`,
-   `fedora-44-x86_64`, and their `aarch64` twins). Fedora 43 ships Rust
+   `fedora-44-x86_64`, `fedora-45-x86_64` (the CI package target), and their
+   `aarch64` twins). Fedora 43 ships Rust
    1.99, above the required 1.92.
 2. *Packages → New package → SCM*: clone URL
    `https://github.com/cyberducttape/wayexpand.git`, spec file
