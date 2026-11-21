@@ -2428,6 +2428,7 @@ impl GuiApp {
             })
             .map(str::to_owned);
         let mut open = self.setup_failure_report_open;
+        let mut close_requested = false;
         egui::Window::new(self.strings.dg_setup_diagnostic_report())
             .id(egui::Id::new("setup_failure_diagnostic_report"))
             .order(egui::Order::Foreground)
@@ -2460,6 +2461,7 @@ impl GuiApp {
                     }
                     if ui.button(self.strings.dg_open_diagnostics()).clicked() {
                         self.diagnostics_open = true;
+                        close_requested = true;
                     }
                 });
                 egui::CollapsingHeader::new(self.strings.dg_technical_details())
@@ -2476,7 +2478,7 @@ impl GuiApp {
                             });
                     });
             });
-        self.setup_failure_report_open = open;
+        self.setup_failure_report_open = open && !close_requested;
     }
 
     fn render_support_export(&mut self, ctx: &egui::Context, palette: &Palette) {
