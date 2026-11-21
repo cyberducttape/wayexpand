@@ -1119,7 +1119,7 @@ fn setup_next_action(
 
 /// Make setup's copyable next-step commands work when the user launched the
 /// CLI by absolute path because its install directory is not on PATH.
-fn make_cli_command_runnable(command: String) -> String {
+pub(crate) fn make_cli_command_runnable(command: String) -> String {
     let (binary, remainder) = if let Some(remainder) = command.strip_prefix("wayexpand ") {
         ("wayexpand", format!(" {remainder}"))
     } else if command == "wayexpand" {

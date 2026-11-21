@@ -179,6 +179,7 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
                 "Run `wayexpand upgrade --check` with the CLI from the active installation. Resolve the build identity warning, then run `wayexpand why` again.",
             )
         };
+        let next_action = runnable_cli_suggestion(next_action);
         if json {
             println!(
                 "{}",
@@ -215,7 +216,12 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
         }
         return Err(classified_error(
             CliErrorKind::Daemon,
-            format!("WX-VERSION-001: {answer} Run `wayexpand upgrade --check` before trusting route diagnostics."),
+            format!(
+                "WX-VERSION-001: {answer} {}",
+                runnable_cli_suggestion(
+                    "Run `wayexpand upgrade --check` before trusting route diagnostics."
+                )
+            ),
         ));
     }
     let daemon = status.as_ref().and_then(daemon_route);
@@ -268,17 +274,16 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
         )
     });
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report_json(
-                daemon.as_ref(),
-                ibus_field.as_ref(),
-                now,
-                daemon_status_schema,
-                daemon_status_compatible,
-                input_method_guidance.as_ref(),
-            ))?
+        let mut report = report_json(
+            daemon.as_ref(),
+            ibus_field.as_ref(),
+            now,
+            daemon_status_schema,
+            daemon_status_compatible,
+            input_method_guidance.as_ref(),
         );
+        make_report_actions_runnable(&mut report);
+        println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         print_report(
             daemon.as_ref(),
@@ -852,6 +857,35 @@ fn report_json(
     })
 }
 
+fn make_report_actions_runnable(report: &mut serde_json::Value) {
+    for section in ["diagnosis", "desktop_input_route"] {
+        let Some(action) = report
+            .get_mut(section)
+            .and_then(|section| section.get_mut("next_action"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if let Some(target) = report
+            .get_mut(section)
+            .and_then(|section| section.get_mut("next_action"))
+        {
+            *target = serde_json::Value::String(runnable_cli_suggestion(&action));
+        }
+    }
+}
+
+fn runnable_cli_suggestion(suggestion: &str) -> String {
+    let cli = crate::commands::install::make_cli_command_runnable("wayexpand".into());
+    let gui = crate::commands::install::make_cli_command_runnable("wayexpand-gui".into());
+    suggestion
+        .replace("`wayexpand-gui ", &format!("`{gui} "))
+        .replace("`wayexpand-gui`", &format!("`{gui}`"))
+        .replace("`wayexpand ", &format!("`{cli} "))
+        .replace("`wayexpand`", &format!("`{cli}`"))
+}
+
 fn print_report(
     daemon: Option<&DaemonRoute>,
     ibus_field: Option<&IbusFieldEvidence>,
@@ -869,7 +903,12 @@ fn print_report(
                 .map(|schema| schema.to_string())
                 .unwrap_or_else(|| "unknown".into())
         );
-        println!("  Fix: run `wayexpand upgrade --check` before trusting route diagnostics.");
+        println!(
+            "  Fix: {}",
+            runnable_cli_suggestion(
+                "run `wayexpand upgrade --check` before trusting route diagnostics."
+            )
+        );
         if ibus_field.is_some() {
             println!();
         } else {
@@ -883,8 +922,14 @@ fn print_report(
         && daemon_status_compatible != Some(false)
     {
         println!("No WayExpand typing route is running, so nothing can expand.");
-        println!("Next: run `wayexpand setup`, then `wayexpand doctor`.");
-        println!("For manual insertion meanwhile: open `wayexpand-gui --picker --copy-only` and paste the selected snippet.");
+        println!(
+            "Next: {}",
+            runnable_cli_suggestion("run `wayexpand setup`, then `wayexpand doctor`.")
+        );
+        println!(
+            "For manual insertion meanwhile: open {} and paste the selected snippet.",
+            runnable_cli_suggestion("`wayexpand-gui --picker --copy-only`")
+        );
         return;
     }
     if let Some(guidance) = scope_guidance.as_ref().or(input_method) {
@@ -898,7 +943,7 @@ fn print_report(
             guidance.state.replace('_', " ")
         );
         println!("  {}", guidance.answer);
-        println!("  Next: {}", guidance.action);
+        println!("  Next: {}", runnable_cli_suggestion(guidance.action));
         println!(
             "  Trigger match: {}. Text delivery: {}.",
             pattern_match_text(pattern_match),
@@ -931,15 +976,24 @@ fn print_report(
                         delivery_status_text(delivery_status)
                     );
                     println!("  {}", sentence(verdict.explanation()));
-                    println!("  Next: {}", ibus_field_action(verdict, field.latest_match));
+                    println!(
+                        "  Next: {}",
+                        runnable_cli_suggestion(ibus_field_action(verdict, field.latest_match))
+                    );
                 }
                 None if field.keys_seen > 0 => {
                     println!("  IBus received typing in this login session, but has no recent field-level input evidence.");
-                    println!("  Next: {}", ibus_no_current_field_action(field.keys_seen));
+                    println!(
+                        "  Next: {}",
+                        runnable_cli_suggestion(ibus_no_current_field_action(field.keys_seen))
+                    );
                 }
                 None => {
                     println!("  No typing has reached the IBus engine in this login session.");
-                    println!("  Next: {}", ibus_no_current_field_action(0));
+                    println!(
+                        "  Next: {}",
+                        runnable_cli_suggestion(ibus_no_current_field_action(0))
+                    );
                 }
             }
             println!();
@@ -998,7 +1052,7 @@ fn print_report(
             );
             println!("  {answer}");
             if let Some(fix) = fix {
-                println!("  Fix: {fix}");
+                println!("  Fix: {}", runnable_cli_suggestion(&fix));
             }
             if !diagnosis.recent.is_empty() {
                 println!("  Recent expansions (newest first; no text is recorded):");
@@ -1028,7 +1082,7 @@ fn print_report(
             {
                 println!("  Focus changed since this input; the application is not identified by this telemetry.");
             }
-            println!("  Next: {}", guidance.action);
+            println!("  Next: {}", runnable_cli_suggestion(guidance.action));
             println!("  Trigger match: not established. Text delivery: not established.");
             println!("  A matcher preview checks the rule only; it does not verify insertion into the field.");
         }
