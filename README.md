@@ -191,6 +191,11 @@ example with `"$HOME/.local/bin/wayexpand"` instead:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
+To keep that path in future terminals, run the one command for your shell
+once: Bash, `printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.bashrc"`;
+Zsh, `printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.zshrc"`;
+Fish, `fish_add_path "$HOME/.local/bin"`.
+
 ```sh
 wayexpand why              # the most likely cause, with one next step
 wayexpand install-check    # are the installed files and integrations present?
