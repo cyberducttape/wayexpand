@@ -578,6 +578,16 @@ impl GuiApp {
                 .and_then(|capabilities| capabilities.inject_atomic_replace),
             gnome_ibus || kde_ibus || ibus_only,
         );
+        let detected_gnome_version = self
+            .compositor_info
+            .strip_prefix("GNOME Shell · ")
+            .filter(|version| *version != "version unavailable")
+            .map(str::to_owned);
+        let detected_gnome_major = detected_gnome_version
+            .as_deref()
+            .and_then(|version| version.split('.').next())
+            .filter(|major| !major.is_empty() && major.chars().all(|ch| ch.is_ascii_digit()))
+            .map(str::to_owned);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -607,9 +617,42 @@ impl GuiApp {
                         .num_columns(2)
                         .striped(true)
                         .show(ui, |ui| {
-                            for (desktop, route) in self.strings.desktop_compatibility_rows() {
-                                ui.label(RichText::new(desktop).strong());
-                                ui.label(route);
+                            let rows = self.strings.desktop_compatibility_rows();
+                            let detected_major_is_listed =
+                                detected_gnome_major.as_deref().is_some_and(|major| {
+                                    rows.iter().any(|(desktop, _)| {
+                                        desktop.strip_prefix("GNOME ").is_some_and(|versions| {
+                                            versions
+                                                .split(',')
+                                                .any(|version| version.trim() == major)
+                                        })
+                                    })
+                                });
+                            for (desktop, route) in rows {
+                                let is_detected =
+                                    detected_gnome_major.as_deref().is_some_and(|major| {
+                                        desktop.strip_prefix("GNOME ").is_some_and(|versions| {
+                                            versions
+                                                .split(',')
+                                                .any(|version| version.trim() == major)
+                                        }) || desktop.starts_with("Other GNOME")
+                                            && !detected_major_is_listed
+                                    });
+                                if is_detected {
+                                    let color =
+                                        if detected_gnome_major.as_deref().is_some_and(|major| {
+                                            matches!(major, "46" | "48" | "50" | "51")
+                                        }) {
+                                            palette.accent
+                                        } else {
+                                            palette.warning
+                                        };
+                                    ui.label(RichText::new(desktop).strong().color(color));
+                                    ui.label(RichText::new(route).color(color));
+                                } else {
+                                    ui.label(RichText::new(desktop).strong());
+                                    ui.label(route);
+                                }
                                 ui.end_row();
                             }
                         });
@@ -617,11 +660,8 @@ impl GuiApp {
                     if wayexpand_backend_selection::Compositor::detect()
                         == wayexpand_backend_selection::Compositor::Gnome
                     {
-                        let detected_version = self
-                            .compositor_info
-                            .strip_prefix("GNOME Shell · ")
-                            .filter(|version| *version != "version unavailable");
-                        let version_hint = detected_version
+                        let version_hint = detected_gnome_version
+                            .as_deref()
                             .map(|version| {
                                 self.strings.desktop_compatibility_detected_version(version)
                             })
