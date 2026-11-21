@@ -558,7 +558,7 @@ fn diagnose_input_method_route(
             return Some(InputMethodGuidance {
                 state: "trigger_not_matched",
                 answer: "WayExpand received input in a recent IBus field, but no configured trigger matched its latest input.",
-                action: "Check the exact trigger, enabled state, match mode, and application filters with `wayexpand explain 'THE_TRIGGER'`. Then type the trigger in the affected application and verify the visible replacement; a matcher result alone does not prove delivery. Use `wayexpand-gui --picker --copy-only` and paste if this field cannot be replaced safely.",
+                action: "Replace `TRIGGER` with the exact trigger you typed, then run `wayexpand explain 'TRIGGER'` to check its enabled state, match mode, and application filters. Type it in the affected application and verify the visible replacement; a matcher result alone does not prove delivery. Use `wayexpand-gui --picker --copy-only` and paste if this field cannot be replaced safely.",
             });
         }
         let verdict = IbusFieldVerdict::of(field);
@@ -1249,7 +1249,7 @@ fn verdict_text(
                     ""
                 }
             ),
-            Some("Run `wayexpand explain 'the trigger you typed'` to check the pattern and app filter; this does not test desktop input or insertion. Then run `wayexpand debug --test` in the affected app and inspect the visible text.".to_owned()),
+            Some("Replace `TRIGGER` with the exact trigger you typed, then run `wayexpand explain 'TRIGGER'` to check the pattern and app filter; this does not test desktop input or insertion. Then run `wayexpand debug --test` in the affected app and inspect the visible text.".to_owned()),
         ),
         Verdict::LastStopped(kind) => {
             let completion = diagnosis
@@ -1346,7 +1346,7 @@ fn ibus_field_action(
 ) -> &'static str {
     use IbusFieldVerdict as V;
     if latest_match == telemetry::IbusLatestMatch::NoMatch {
-        return "Check the exact trigger, enabled state, match mode, and application filters with `wayexpand explain 'THE_TRIGGER'`. Then type the trigger in the affected application and verify the visible replacement; a matcher result alone does not prove delivery. Use `wayexpand-gui --picker --copy-only` and paste if this field cannot be replaced safely.";
+        return "Replace `TRIGGER` with the exact trigger you typed, then run `wayexpand explain 'TRIGGER'` to check its enabled state, match mode, and application filters. Type it in the affected application and verify the visible replacement; a matcher result alone does not prove delivery. Use `wayexpand-gui --picker --copy-only` and paste if this field cannot be replaced safely.";
     }
     match verdict {
         V::OutputEmittedUnverified => {
@@ -1365,7 +1365,7 @@ fn ibus_field_action(
             "This field cannot support safe automatic replacement. Open `wayexpand-gui --picker --copy-only` and paste manually."
         }
         V::Mismatch => {
-            "Check the exact trigger with `wayexpand explain 'THE_TRIGGER'`; inspect the field before trying again."
+            "Replace `TRIGGER` with the exact trigger you typed, then run `wayexpand explain 'TRIGGER'`; inspect the field before trying again."
         }
         V::Policy => {
             "Run `wayexpand policy check --json` and `wayexpand doctor --security`; ask the policy administrator before changing a restriction."
