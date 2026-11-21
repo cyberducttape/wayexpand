@@ -234,8 +234,10 @@ configuration backup available until the new service has passed `wayexpand
 doctor --json` and a real expansion test.
 
 ```sh
+printf 'Release version (without v): '
+read -r version
 arch="$(uname -m)"
-archive="wayexpand-<version>-linux-${arch}.tar.gz"
+archive="wayexpand-${version}-linux-${arch}.tar.gz"
 tar -xzf "$archive"
 cd "${archive%.tar.gz}"
 ./scripts/install-release.sh
