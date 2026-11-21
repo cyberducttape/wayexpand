@@ -86,6 +86,7 @@ install -m 0644 "$project_dir/README.md" "$project_dir/LICENSE" \
 install -m 0600 "$project_dir/expansions.toml" "$root/expansions.toml"
 install -m 0600 "$project_dir/broker.toml.example" "$root/broker.toml.example"
 install -m 0755 "$project_dir/scripts/install-release.sh" "$root/scripts/"
+install -m 0644 "$project_dir/scripts/desktop-compatibility.sh" "$root/scripts/"
 install -m 0755 "$project_dir/scripts/install-xdg-systemd-dropins.sh" "$root/scripts/"
 install -m 0755 "$project_dir/scripts/hash-install-payload.sh" "$root/scripts/"
 install -m 0755 "$project_dir/scripts/uninstall-user.sh" "$root/scripts/"
