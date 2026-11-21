@@ -154,21 +154,33 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
         .find(|part| part.starts_with("WX-") && part.len() > 3)
         .unwrap_or("WX-SETUP-001");
-    let remedy = combined
-        .lines()
-        .find(|line| {
-            let line = line.trim_start();
-            line.starts_with("Next:") || line.starts_with("Fix:") || line.starts_with("Remedy:")
-        })
-        .map(str::trim)
-        .unwrap_or("Run `wayexpand setup --check` and address the reported prerequisite.");
+    let find_remedy = |output: &str| {
+        output
+            .lines()
+            .rev()
+            .find(|line| {
+                let line = line.trim_start();
+                line.starts_with("Next:") || line.starts_with("Fix:") || line.starts_with("Remedy:")
+            })
+            .map(str::trim)
+            .map(str::to_owned)
+    };
+    // CLI diagnostics commonly write their specific Fix/Next guidance to
+    // stderr while stdout contains generic progress hints. Prefer the
+    // actionable error stream, and within it the last hint, so the report
+    // does not send users to an earlier, less specific step.
+    let remedy = find_remedy(&stderr)
+        .or_else(|| find_remedy(&stdout))
+        .unwrap_or_else(|| {
+            "Run `wayexpand setup --check` and address the reported prerequisite.".to_owned()
+        });
     let cli_missing = combined.contains("could not find the `wayexpand` CLI");
     let (summary, stage, problem_id, remedy) = if cli_missing {
         (
                 "The WayExpand command-line component is missing from this installation.",
                 "Starting the WayExpand command-line component",
                 "WX-INSTALL-001",
-                "Reinstall WayExpand using the same package, release archive, or per-user installer as this GUI, then reopen it.",
+                "Reinstall WayExpand using the same package, release archive, or per-user installer as this GUI, then reopen it.".to_owned(),
             )
     } else {
         (summary, stage, problem_id, remedy)
