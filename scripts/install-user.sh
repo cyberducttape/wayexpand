@@ -428,6 +428,16 @@ printf '%s\n' "=== OPTIONAL COMMAND-LINE SETUP ==="
 printf '%s\n' ""
 printf '%s\n' "Add to PATH to use the short 'wayexpand' command:"
 printf '%s\n' "   export PATH=\"$bin_dir:\$PATH\""
+case "${SHELL##*/}" in
+    bash)
+        printf '%s\n' "For future Bash terminals, run once: printf '\\nexport PATH=\"$bin_dir:\$PATH\"\\n' >> \"$HOME/.bashrc\"" ;;
+    zsh)
+        printf '%s\n' "For future Zsh terminals, run once: printf '\\nexport PATH=\"$bin_dir:\$PATH\"\\n' >> \"$HOME/.zshrc\"" ;;
+    fish)
+        printf '%s\n' "For future Fish terminals, run once: fish_add_path \"$bin_dir\"" ;;
+    *)
+        printf '%s\n' "To keep this PATH in future terminals, see $project_dir/README.md" ;;
+esac
 printf '%s\n' ""
 printf '%s\n' "If you use named actions, edit $broker_config and enable the action service:"
 printf '%s\n' "   systemctl --user enable --now wayexpand-action-broker.service"

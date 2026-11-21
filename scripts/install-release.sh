@@ -341,6 +341,16 @@ printf '%s\n' ""
 printf '%s\n' ""
 printf '%s\n' "Optional command-line setup:"
 printf '%s\n' "  export PATH=\"$bin_dir:\$PATH\""
+case "${SHELL##*/}" in
+    bash)
+        printf '%s\n' "For future Bash terminals, run once: printf '\\nexport PATH=\"$bin_dir:\$PATH\"\\n' >> \"$HOME/.bashrc\"" ;;
+    zsh)
+        printf '%s\n' "For future Zsh terminals, run once: printf '\\nexport PATH=\"$bin_dir:\$PATH\"\\n' >> \"$HOME/.zshrc\"" ;;
+    fish)
+        printf '%s\n' "For future Fish terminals, run once: fish_add_path \"$bin_dir\"" ;;
+    *)
+        printf '%s\n' "To keep this PATH in future terminals, see $release_dir/README.md" ;;
+esac
 printf '%s\n' "  \"$bin_dir/wayexpand\" setup     # guided setup; checks this session and explains the next step"
 printf '%s\n' "  \"$bin_dir/wayexpand\" doctor    # diagnose an unavailable route"
 printf '%s\n' "  # For named actions, edit $config_dir/broker.toml and enable:"
