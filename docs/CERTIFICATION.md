@@ -724,7 +724,7 @@ commits text-input-v3 state with `done()`, while
 `InputMethod::deleteSurroundingText` sends deletion and a separate `done()`.
 The two operations therefore remain separate client updates. See the
 [KWin input method implementation](https://invent.kde.org/plasma/kwin/-/blob/c1f623739f4e819d291b1ddda50d5a57674a54f5/src/inputmethod.cpp#L507)
-and its [surrounding-text deletion path](https://invent.kde.org/plasma/kwin/-/blob/c1f623739f4e819d291b1ddda50d5a57674a54f5/src/inputmethod.cpp#L566).
+and its [surrounding-text deletion path](https://invent.kde.org/plasma/kwin/-/blob/c1f623739f4e819d291b1ddda50d5a57674a54f5/src/inputmethod.cpp#L581).
 Adding a WayExpand adapter for that path or upgrading KWin to 6.7 would not by
 itself satisfy the atomic replacement requirement.
 
