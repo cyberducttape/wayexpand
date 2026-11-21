@@ -467,15 +467,11 @@ if [ -f "$project_dir/polkit/org.wayexpand.action.policy" ] &&
     printf '%s\n' "   sudo install -m 0644 \"$project_dir/polkit/org.wayexpand.action.policy\" /usr/share/polkit-1/actions/"
 fi
 printf '%s\n' ""
-printf '%s\n' "For command-line troubleshooting, run these in order:"
+printf '%s\n' "For the shortest troubleshooting answer, run:"
+printf '%s\n' "   \"$bin_dir/wayexpand\" why"
+printf '%s\n' "It reports the likely cause and one next action. For all readiness checks, run:"
 printf '%s\n' "   \"$bin_dir/wayexpand\" doctor"
-printf '%s\n' ""
-printf '%s\n' "   \"$bin_dir/wayexpand\" setup"
-printf '%s\n' "   If you choose IBus and its manifest is missing, setup explains the one-time administrator authorization before installing it."
-printf '%s\n' "   For scripted IBus setup, explicitly authorize that step with: \"$bin_dir/wayexpand\" setup --backend ibus --yes --install-system-integration"
-printf '%s\n' "   \"$bin_dir/wayexpand\" status"
-printf '%s\n' "   \"$bin_dir/wayexpand\" doctor"
-printf '%s\n' "   (setup never grants raw-input permissions or portal consent)"
+printf '%s\n' "The desktop setup guide handles route activation and asks before any sensitive permission."
 printf '%s\n' ""
 printf '%s\n' "To edit snippets:"
 printf '%s\n' "   \"$bin_dir/wayexpand\" edit"
@@ -547,3 +543,8 @@ for entry in "$library_dir"/*; do
     fi
     rm -rf -- "$entry"
 done
+
+printf '%s\n' ""
+printf '%s\n' "=== INSTALLATION COMPLETE ==="
+printf '%s\n' "Next action: open WayExpand from your desktop application menu and follow its setup guide."
+printf '%s\n' "If the menu entry is not visible yet, start it with: \"$bin_dir/wayexpand-gui\""
