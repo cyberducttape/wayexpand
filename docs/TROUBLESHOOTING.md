@@ -25,8 +25,9 @@ operation does not prove the application changed its text.
 To share diagnostics, open **Diagnostics → Export support report** and preview
 the redacted report before saving. GNOME sessions automatically include GNOME
 Shell, IBus source, and extension checks. From a terminal, run
-`wayexpand support-bundle --gnome --output wayexpand-support.json` to include
-GNOME-specific checks; inspect the report before sending it to anyone.
+`wayexpand support-bundle --output wayexpand-support.json`; GNOME sessions
+include GNOME-specific checks automatically. Use `--gnome` to request those
+checks on another desktop. Inspect the report before sending it to anyone.
 
 For more detailed, content-free diagnostics, use:
 

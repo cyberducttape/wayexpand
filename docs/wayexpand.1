@@ -117,7 +117,8 @@ Produce a machine-readable local certification report. Protocol availability
 is not treated as end-to-end certification; untested scenarios remain visible.
 .TP
 .B support [--gnome] [--output FILE]
-Write a redacted support report. With --gnome, include GNOME input-source
+Write a redacted support report. GNOME checks are included automatically in a
+GNOME session; --gnome includes GNOME input-source
 readiness, sanitized component locations, IBus state, policy state and test
 outcomes. The report excludes config paths, snippet
 contents, credentials, and detailed error strings. A file is created with mode

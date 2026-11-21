@@ -195,9 +195,10 @@ actual route. For the full symptom-by-symptom guide, see
 
 If you need to ask for help, open **Diagnostics → Export support report** to
 preview the redacted report before saving it; GNOME sessions include GNOME
-Shell, IBus source, and extension checks automatically. From a terminal, use
-`wayexpand support-bundle --gnome --output wayexpand-support.json` to include
-GNOME-specific checks; review the report before sharing it.
+Shell, IBus source, and extension checks automatically. From a terminal, run
+`wayexpand support-bundle --output wayexpand-support.json`; GNOME checks are
+included automatically on GNOME. Use `--gnome` to request them on another
+desktop. Review the report before sharing it.
 
 For a sysadmin first task, see the [HTTP 503 incident triage
 walkthrough](docs/HTTP503_WALKTHROUGH.md). It generates a validated,

@@ -20,11 +20,11 @@ const REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 /// copied wholesale.
 pub(crate) fn support_bundle(args: Args) -> Result<()> {
     let mut output_path = None;
-    let mut gnome = false;
+    let mut force_gnome = false;
     let mut args = args;
     while let Some(argument) = args.next() {
-        if argument == "--gnome" && !gnome {
-            gnome = true;
+        if argument == "--gnome" && !force_gnome {
+            force_gnome = true;
         } else if argument == "--output" && output_path.is_none() {
             output_path =
                 Some(PathBuf::from(args.next().ok_or_else(|| {
@@ -42,7 +42,10 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
         .and_then(|raw| crate::doctor::status::status_as_json(&raw).ok());
     let services = service_health();
     let mut report = summarize_reports(&doctor, &certification, status.as_ref(), &services);
-    if gnome {
+    let include_gnome = force_gnome
+        || wayexpand_backend_selection::Compositor::detect()
+            == wayexpand_backend_selection::Compositor::Gnome;
+    if include_gnome {
         report["gnome"] = gnome_support_section(&doctor);
     }
     let bytes = serde_json::to_vec_pretty(&report).context("serializing support report")?;
