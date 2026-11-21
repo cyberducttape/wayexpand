@@ -343,11 +343,13 @@ PY
 grep -F -- 'needs: [ci, certification]' "$release_workflow" >/dev/null
 grep -F -- 'needs: [ci, certification, linux-aarch64]' "$release_workflow" >/dev/null
 grep -F -- "checkout_ref: \${{ inputs.release_ref || github.ref }}" "$release_workflow" >/dev/null
-# Certification decides what a release claims, not whether binaries ship:
-# builds run after CI alone, and the notes say when certification failed.
+# Uncertified binaries ship only as preview prereleases; certification is
+# required for the workflow to mark a release stable/latest.
 grep -F -- "if: \${{ !cancelled() && needs.ci.result == 'success' }}" "$release_workflow" >/dev/null
 grep -F -- "needs.certification.result == 'success' && env.CERTIFIED_NOTE || env.UNCERTIFIED_NOTE" "$release_workflow" >/dev/null
-grep -F -- 'Not compositor-certified.' "$release_workflow" >/dev/null
+grep -F -- 'Experimental preview — not compositor-certified.' "$release_workflow" >/dev/null
+grep -F -- "prerelease: \${{ needs.certification.result != 'success' }}" "$release_workflow" >/dev/null
+grep -F -- "make_latest: \${{ needs.certification.result == 'success' && 'true' || 'false' }}" "$release_workflow" >/dev/null
 # Certification that cannot run is skipped, not failed.
 grep -F -- "if: \${{ needs.certification-available.outputs.available == 'true' }}" "$release_workflow" >/dev/null
 

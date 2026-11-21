@@ -160,7 +160,7 @@ PY
 }
 
 check_installed() {
-    check_version=$expected_version
+    check_version=${1:-$expected_version}
     stage='checking installed executables and shared libraries'
     printf '%s\n' 'Checking installed executables and shared libraries'
     for binary in $binaries; do
@@ -313,6 +313,9 @@ if [ -n "$previous_package" ]; then
         printf '%s\n' 'error: rollback removed the WayExpand CLI' >&2
         exit 1
     }
+    previous_release_version=${previous_version##* }
+    stage='checking every installed binary after rollback'
+    check_installed "$previous_release_version"
     stage='re-upgrading after rollback'
     printf '%s\n' 'Re-upgrading to the candidate package'
     install_package

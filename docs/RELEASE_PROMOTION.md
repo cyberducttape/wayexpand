@@ -4,35 +4,33 @@ This guide covers the manual steps needed to promote releases on GitHub and mana
 
 ## Current release promotion
 
-Use this short check for each new stable release. The version-specific history
-of earlier promotions belongs in the changelog, not in the active procedure.
+The release workflow publishes uncertified builds as experimental preview
+prereleases. It marks a release stable and latest only after the production
+physical-session certification job succeeds. Do not manually promote a
+preview release: stable promotion requires attached desktop acceptance
+evidence and the certification security checks.
 
 ### Manual Steps
 
 1. **Open GitHub Releases**
    - Go to https://github.com/cyberducttape/wayexpand/releases
 
-2. **Find the current release**
-   - Select the intended stable release for the current version
-   - Click the three-dot menu icon next to the release title
+2. **Verify the workflow classification**
+   - Confirm uncertified output is marked as an experimental preview prerelease
+   - Confirm a certified release is marked stable and latest
 
-3. **Promote to Latest**
-   - Click "Edit release"
-   - Check the box: "Set as the latest release"
-   - Click "Update release"
-
-4. **Verify**
+3. **Verify**
    - Visit https://github.com/cyberducttape/wayexpand/releases/latest
    - Confirm it redirects to the intended release tag
 
 ### Why This Matters
 
-- Package managers and installation scripts check `/releases/latest`
+- Package managers and installation scripts check `/releases/latest`, which must resolve to a certified stable release
 - Users following default links get the newest stable version
 - Outdated defaults harm adoption and support (users on old versions)
 
 **Time Required:** 5 minutes  
-**Effort:** Manual UI actions only  
+**Effort:** Workflow verification
 **When:** Before announcing each release
 
 ---

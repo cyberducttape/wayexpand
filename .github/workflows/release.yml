@@ -60,10 +60,8 @@ jobs:
     with:
       checkout_ref: ${{ inputs.release_ref || github.ref }}
 
-  # Certification decides what the release may claim, not whether it ships.
-  # No compositor route is production-certified yet, so gating the binaries
-  # on it published releases without any downloads. The release notes state
-  # the certification result instead.
+  # Uncertified builds may ship as preview prereleases. Only a successful
+  # physical-session certification run may publish a stable/latest release.
   # Certification needs a production-eligible route and the runner token.
   # Without either it can only fail, which marked every release run red;
   # skip it instead and let the notes say the release is not certified.
@@ -95,7 +93,7 @@ jobs:
             {
               echo '## Compositor certification skipped'
               echo "Production-required routes: $targets; runner token configured: $HAS_RUNNER_TOKEN."
-              echo 'This release is published as not compositor-certified.'
+              echo 'This release is published as an experimental preview because no production route passed physical-session certification.'
             } >>"$GITHUB_STEP_SUMMARY"
           fi
 
@@ -184,7 +182,7 @@ jobs:
         This release passed real-compositor certification; see
         docs/CERTIFICATION_MATRIX.md for the certified routes.
       UNCERTIFIED_NOTE: >-
-        **Not compositor-certified.** These binaries passed the full CI
+        **Experimental preview — not compositor-certified.** These binaries passed the full CI
         suite, including headless KWin, Sway, GNOME and IBus end-to-end
         tests, but no desktop route has passed physical-session
         certification yet. Run `wayexpand setup` and verify an insertion
@@ -400,7 +398,8 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
-          make_latest: true
+          prerelease: ${{ needs.certification.result != 'success' }}
+          make_latest: ${{ needs.certification.result == 'success' && 'true' || 'false' }}
           body: ${{ needs.certification.result == 'success' && env.CERTIFIED_NOTE || env.UNCERTIFIED_NOTE }}
           files: |
             wayexpand-*.tar.gz
