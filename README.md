@@ -176,11 +176,20 @@ certification notes, with *Open diagnostics* for the full report.
 Useful commands:
 
 ```sh
-wayexpand doctor          # what this desktop supports, and what is missing
-wayexpand status          # is the daemon running, and on which path
-wayexpand upgrade-status  # is the running daemon from this CLI build?
-wayexpand test ';sig'     # check matching without the desktop
+wayexpand why              # the most likely cause, with one next step
+wayexpand install-check    # are the installed files and integrations present?
+wayexpand doctor           # is an input route available in this desktop session?
+wayexpand debug            # detailed, content-free route diagnostics
+wayexpand debug --test     # test a harmless expansion in a disposable text field
+wayexpand test ';sig'      # check matching only; does not test desktop typing
 ```
+
+If setup or expansion is stuck, start with `wayexpand why` and follow its
+suggested next step. Use `wayexpand install-check` for an installation
+problem, or `wayexpand doctor` for a desktop-session problem. After applying a
+fix, run `wayexpand debug --test` in a disposable text field to check the
+actual route. For the full symptom-by-symptom guide, see
+[Troubleshooting](docs/TROUBLESHOOTING.md).
 
 For a sysadmin first task, see the [HTTP 503 incident triage
 walkthrough](docs/HTTP503_WALKTHROUGH.md). It generates a validated,
