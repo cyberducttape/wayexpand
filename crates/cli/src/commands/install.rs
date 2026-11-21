@@ -1138,7 +1138,8 @@ pub(crate) fn make_cli_command_runnable(command: String) -> String {
     let executable = if binary == "wayexpand" {
         if current_executable
             .file_name()
-            .is_none_or(|name| name != "wayexpand")
+            .and_then(|name| name.to_str())
+            != Some("wayexpand")
         {
             return command;
         }
