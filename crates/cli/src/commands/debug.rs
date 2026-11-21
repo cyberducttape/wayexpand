@@ -697,7 +697,10 @@ fn desktop_test_for(
         .iter()
         .find(|item| item.is_keyboard_matchable() && item.answers_to(trigger))
     else {
-        bail!("no enabled expansion matches that trigger; run `wayexpand debug --trigger <trigger>` to inspect matching")
+        bail!(
+            "no enabled expansion matches that trigger; replace `TRIGGER` with the exact text you typed, \
+             then run `wayexpand debug --trigger 'TRIGGER'` to inspect matching (keep the quotes for punctuation)"
+        )
     };
     if expansion.command.is_some() || expansion.replacement.contains("{{") {
         bail!("desktop test is limited to static text snippets; command-backed and templated snippets are excluded")
