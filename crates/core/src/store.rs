@@ -39,16 +39,70 @@ pub struct ConfigStoreStatus {
 impl ConfigStore {
     pub fn load(path: impl Into<PathBuf>) -> Result<Arc<Self>, ConfigError> {
         let path = path.into();
-        let loaded = Config::load_versioned(&path)?;
-        Ok(Arc::new(Self {
-            observed_stamp: Mutex::new(metadata_stamp(&path)),
+        Self::load_with(
             path,
-            snapshot: RwLock::new(ConfigSnapshot {
-                config: Arc::new(loaded.config),
-                generation: 0,
-            }),
-            reload_error: Mutex::new(None),
-            subscribers: Mutex::new(Vec::new()),
+            |path| Config::load_versioned(path),
+            metadata_stamp,
+            |path, revision| Config::source_matches_revision(path, revision),
+        )
+    }
+
+    fn load_with(
+        path: PathBuf,
+        mut load: impl FnMut(&Path) -> Result<crate::LoadedConfig, ConfigError>,
+        mut stamp: impl FnMut(&Path) -> Option<FileStamp>,
+        mut verify: impl FnMut(&Path, &crate::ConfigRevision) -> Result<bool, ConfigError>,
+    ) -> Result<Arc<Self>, ConfigError> {
+        let mut last_error = None;
+        for _ in 0..MAX_RELOAD_ATTEMPTS {
+            let before = stamp(&path);
+            let loaded = match load(&path) {
+                Ok(loaded) => loaded,
+                Err(error)
+                    if matches!(&error, ConfigError::Read { .. } | ConfigError::Busy { .. }) =>
+                {
+                    last_error = Some(error);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let after = stamp(&path);
+            let verified = match verify(&path, &loaded.revision) {
+                Ok(verified) => verified,
+                Err(error)
+                    if matches!(&error, ConfigError::Read { .. } | ConfigError::Busy { .. }) =>
+                {
+                    last_error = Some(error);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            if before.is_some() && before == after && verified {
+                return Ok(Arc::new(Self {
+                    observed_stamp: Mutex::new(after),
+                    path,
+                    snapshot: RwLock::new(ConfigSnapshot {
+                        config: Arc::new(loaded.config),
+                        generation: 0,
+                    }),
+                    reload_error: Mutex::new(None),
+                    subscribers: Mutex::new(Vec::new()),
+                }));
+            }
+            last_error = Some(ConfigError::Read {
+                path: path.display().to_string(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "configuration changed while loading",
+                ),
+            });
+        }
+        Err(last_error.unwrap_or_else(|| ConfigError::Read {
+            path: path.display().to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "configuration changed while loading",
+            ),
         }))
     }
     /// Return only the configuration. Use [`Self::snapshot`] when its
@@ -267,6 +321,42 @@ mod tests {
         assert_eq!(store.snapshot().config.expansion[0].replacement, "new");
         let _ = fs::remove_file(path);
     }
+
+    #[test]
+    fn startup_retries_when_file_is_replaced_between_read_and_metadata_capture() {
+        let path = path();
+        write_private(
+            &path,
+            "[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':x'\nreplacement = 'version-a'\n",
+        );
+        let calls = std::cell::Cell::new(0);
+        let load = |path: &Path| {
+            let call = calls.get() + 1;
+            calls.set(call);
+            let loaded = Config::load_versioned(path)?;
+            if call == 1 {
+                atomic_write_private(
+                    path,
+                    "[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':x'\nreplacement = 'version-b'\n",
+                );
+            }
+            Ok(loaded)
+        };
+        let store = ConfigStore::load_with(path.clone(), load, metadata_stamp, |path, revision| {
+            Config::source_matches_revision(path, revision)
+        })
+        .unwrap();
+
+        assert_eq!(calls.get(), 2, "the raced first read must be retried");
+        assert_eq!(store.snapshot().generation, 0);
+        assert_eq!(
+            store.snapshot().config.expansion[0].replacement,
+            "version-b"
+        );
+        assert!(!store.reload_if_changed().unwrap());
+        let _ = fs::remove_file(path);
+    }
+
     #[test]
     fn invalid_reload_keeps_last_valid_snapshot() {
         let path = path();
