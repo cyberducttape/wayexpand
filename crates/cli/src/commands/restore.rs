@@ -66,7 +66,7 @@ pub(crate) fn restore_command(mut args: Args) -> Result<()> {
         && (expected_current.as_deref() != Some(current_fingerprint.as_str())
             || expected_backup.as_deref() != Some(backup_fingerprint.as_str()))
     {
-        bail!("active configuration or backup changed after review; run `wayexpand restore <backup> --check --json` again")
+        bail!("active configuration or backup changed after review; rerun `wayexpand restore 'BACKUP' --check --json` with the same backup path (keep the quotes) to review it again")
     }
     let canonical_current = fs::canonicalize(&config_path).ok();
     if canonical_current.is_some() && canonical_current == fs::canonicalize(&backup_path).ok() {

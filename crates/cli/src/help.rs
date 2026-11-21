@@ -463,7 +463,7 @@ fn main_help(style: &Style, version: &str, all: bool) -> String {
         help.push_str(&format!("  {example:<34}{meaning}\n"));
     }
     help.push_str(&format!(
-        "\nRun `wayexpand help <command>` for its options{}.\n",
+        "\nRun `wayexpand help 'COMMAND'` for its options (replace COMMAND with a command name){}.\n",
         if all { "" } else { "; `help --all` lists all" }
     ));
     help

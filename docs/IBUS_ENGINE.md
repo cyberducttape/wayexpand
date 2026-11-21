@@ -223,8 +223,9 @@ If IBus is configured but a required route check fails, setup returns a
 nonzero result with `SETUP RESULT: ACTION REQUIRED` and a stable finding ID;
 the valid configuration is retained for diagnosis. A second unrestricted
 capture route beside IBus is also an action-required condition because it can
-expand the same trigger twice. Run `wayexpand help finding <WX-ID>` for the
-repair and retest steps. A route with no hard failure but no user-confirmed
+expand the same trigger twice. Replace `WX-ID` with the finding ID shown, then
+run `wayexpand help finding 'WX-ID'` for the repair and retest steps. A route
+with no hard failure but no user-confirmed
 application insertion is reported as configured and awaiting test.
 
 ```sh

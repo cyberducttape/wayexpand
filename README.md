@@ -74,8 +74,8 @@ local, offline, no account, no telemetry.
 This guide follows the current source checkout; published packages may not yet
 include newer commands or fixes. Check the installed build with
 `wayexpand --version` (source builds include `-dev+<commit>`). If an option in
-this guide is unavailable, run `wayexpand help <command>` to see what your
-installed version supports.
+this guide is unavailable, run `wayexpand help 'COMMAND'` with the command name
+to see what your installed version supports.
 
 None of these channels is compositor-certified yet; see the
 [packaging status](docs/PACKAGING.md) and the
