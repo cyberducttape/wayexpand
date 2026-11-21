@@ -135,6 +135,10 @@ tar -xzf wayexpand-*-linux-x86_64.tar.gz
 ./wayexpand-*-linux-x86_64/scripts/install-release.sh
 ```
 
+Before installing, the source and release installers show the desktop
+compatibility summary and identify the active GNOME Shell version when
+available, so you can see the likely route before continuing.
+
 The release archive and source installer install for your user only. They never
 run as root, enable services, grant raw-input access, or accept portal consent
 for you. They stage the IBus component but may ask for administrator
@@ -146,9 +150,6 @@ out and back in before resuming.
 Launch **WayExpand** from the desktop application menu or run `wayexpand-gui`.
 Its first-run guide checks the installation and route, then asks you to verify
 an exact insertion in a real application before it records setup as working.
-Both installers print the desktop compatibility summary before their optional
-command-line instructions, and identify the active GNOME Shell version when
-available, so you can check the likely route before continuing.
 `wayexpand setup --check` reports missing integration dependencies without
 enabling raw keyboard capture. If automatic expansion cannot be verified yet,
 the guide offers a copy-only Quick Picker for manual paste.
