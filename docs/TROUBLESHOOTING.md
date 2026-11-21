@@ -33,8 +33,9 @@ include GNOME-specific checks automatically. Use `--gnome` to request those
 checks on another desktop. The report includes a `first_step` diagnosis with
 the likely cause and one suggested action, alongside the detailed route
 evidence and a redacted installation audit. Missing required components take
-priority in `first_step`; component names and states are included, while local
-paths are omitted. Inspect the report before sending it to anyone.
+priority in `first_step`; CLI/PATH/daemon installation mismatches do too.
+Component names and states are included, while installation paths are omitted.
+Inspect the report before sending it to anyone.
 
 For more detailed, content-free diagnostics, use:
 

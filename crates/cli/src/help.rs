@@ -237,7 +237,7 @@ pub(crate) const COMMANDS: &[Command] = &[
     command("repair", Troubleshoot, "Show or apply installation repairs", &["repair --check|--apply [--json]", "repair --gnome-input-source [--json]"]),
     command("reset", Troubleshoot, "Preview and apply a scoped recovery reset", &["reset --integration|--services|--preferences [--check|--apply --yes] [--json]"]).advanced(),
     command("support-bundle", Troubleshoot, "Write a redacted report to attach to a bug report", &["support-bundle [--gnome] [--output FILE]"])
-        .details("Collects an installation audit, versions, backend state and recent findings. Installation component states omit local file paths; snippet text is excluded. Its first step prioritizes missing installed components before route advice. GNOME integration checks are included automatically in a GNOME session; --gnome requests them on other desktops.")
+        .details("Collects an installation audit, versions, backend state and recent findings. Installation component states omit local file paths; snippet text is excluded. Its first step prioritizes missing components or installation identity mismatches before route advice. GNOME integration checks are included automatically in a GNOME session; --gnome requests them on other desktops.")
         .aliases(&["support"]),
     command("compatibility-report", Troubleshoot, "Generate a reproducible desktop compatibility report", &["compatibility-report [--json]"]).advanced(),
     command("help", Troubleshoot, "Show help for WayExpand or one command", &[

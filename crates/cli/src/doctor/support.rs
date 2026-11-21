@@ -262,6 +262,16 @@ fn first_step(why: &serde_json::Value, installation: &serde_json::Value) -> serd
             "next_action": "Run `wayexpand repair --check` to review safe repairs. Apply only listed repairs, then rerun `wayexpand install-check`; if no safe repair applies, rerun the WayExpand installer.",
         });
     }
+    let identity = &installation["installation_identity"];
+    if identity["path_shadow_detected"].as_bool() == Some(true)
+        || identity["mixed_cli_daemon_installation"].as_bool() == Some(true)
+    {
+        return serde_json::json!({
+            "state": "installation_identity_mismatch",
+            "answer": "The CLI, PATH, or running daemon resolves to a different WayExpand installation.",
+            "next_action": "Run `wayexpand upgrade --check` from the installation you intend to use, follow its reported action, and rerun `wayexpand why` before trusting route history.",
+        });
+    }
     let diagnosis = &why["diagnosis"];
     let safe_text = |key: &str| {
         diagnosis
