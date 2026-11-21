@@ -4,11 +4,13 @@
 # and local GNOME version diagnosis in one place so both install paths agree.
 wayexpand_print_desktop_compatibility() {
     printf '%s\n' "Desktop compatibility (likely route; verify in your own applications):"
-    printf '%s\n' "  GNOME Shell 46, 48, 50, 51: IBus + WayExpand extension (headless-tested; no real-session certification)"
-    printf '%s\n' "  GNOME Shell 49: extension support undeclared; German/French layout switching unverified in a real session"
-    printf '%s\n' "  Other GNOME Shell majors: extension support undeclared; compatibility unknown"
-    printf '%s\n' "  KDE Plasma / other Wayland desktops: setup checks available routes; application behavior is unverified"
-    printf '%s\n' "  If no automatic route is verified, Quick Picker can copy snippets for manual paste."
+    printf '  %-27s | %-31s | %s\n' "Desktop" "Likely route" "Evidence"
+    printf '  %-27s-+-%-31s-+-%s\n' "---------------------------" "-------------------------------" "------------------------------------------------------"
+    printf '  %-27s | %-31s | %s\n' "GNOME Shell 46, 48, 50, 51" "IBus + WayExpand extension" "Headless tests; no real-session certification"
+    printf '  %-27s | %-31s | %s\n' "GNOME Shell 49" "Extension route undeclared" "German/French switching unverified in a real session"
+    printf '  %-27s | %-31s | %s\n' "Other GNOME versions" "Unknown; check detected version" "Extension support undeclared"
+    printf '  %-27s | %-31s | %s\n' "KDE / other Wayland" "Setup checks available routes" "Application behavior unverified"
+    printf '  %-27s | %-31s | %s\n' "Quick Picker" "Copy, then paste" "Manual fallback"
     case ":${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:" in
         *:GNOME:*|*:gnome:*)
             if command -v gnome-shell >/dev/null 2>&1; then
