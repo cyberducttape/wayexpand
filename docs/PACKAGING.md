@@ -217,24 +217,36 @@ when `rpmdev-vercmp` is available.
 
 ### aarch64
 
-The release workflow builds on native x86_64 and aarch64 runners and is
-configured to attach both archives after certification gates pass. No release
-archive is currently published. For local evaluation on an aarch64 Fedora,
-Debian, Ubuntu, or Arch system, build from source after installing Rust 1.92+
-and native Wayland dependencies:
+The [latest GitHub release](https://github.com/cyberducttape/wayexpand/releases/latest)
+includes an aarch64 binary archive and checksum. No aarch64 `.deb` or `.rpm`
+package is published; install the archive for your user:
 
 ```bash
-sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev
+sha256sum --check wayexpand-*-linux-aarch64.tar.gz.sha256
+tar -xzf wayexpand-*-linux-aarch64.tar.gz
+./wayexpand-*-linux-aarch64/scripts/install-release.sh
+```
+
+For a custom build on an aarch64 Fedora, Debian, Ubuntu, or Arch system,
+install Rust 1.92+ and native Wayland dependencies, then build from source:
+
+```bash
+# Install native dependencies for your distribution
+sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev   # Debian, Ubuntu
+sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel    # Fedora
+sudo pacman -S --needed base-devel wayland libxkbcommon                     # Arch
 cargo build --locked --release --workspace
 ```
 
-The binaries are in `target/release/`. Run `wayexpand doctor` before enabling
-a user service. Native builds are preferred over cross-builds because the
-Wayland and compositor protocol libraries must match the target system.
+The binaries are in `target/release/`. Run `./target/release/wayexpand doctor`
+before enabling a user service. Native builds are preferred over cross-builds
+because the Wayland and compositor protocol libraries must match the target
+system.
 
 CI uses native aarch64 hardware, avoiding fragile cross-builds of the Wayland
-and compositor-protocol stack. The release archive uses the same user installer
-and assets as x86_64.
+and compositor-protocol stack. Binary availability does not establish
+compositor certification; check the certification matrix before relying on a
+desktop route.
 
 ---
 
