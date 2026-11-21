@@ -167,7 +167,9 @@ journalctl --user -u wayexpand-input-method.service -n 20
 
 ### GUI shows old settings after upgrade
 
-Restart the GUI: `pkill -f wayexpand-gui && wayexpand-gui`
+Close the WayExpand window, then reopen it from the applications menu. For a
+release archive or per-user source installation, launch it directly with
+`"$HOME/.local/bin/wayexpand-gui"` if `wayexpand-gui` is not on PATH.
 
 ---
 
