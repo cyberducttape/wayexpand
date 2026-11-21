@@ -103,9 +103,29 @@ cargo_version=$(cd "$project_dir" && "$cargo_bin" --version 2>/dev/null | awk '{
 if [ -n "$required_rust" ] && [ -n "$cargo_version" ]; then
     oldest=$(printf '%s\n%s\n' "$required_rust" "${cargo_version%%-*}" | sort -V | head -n1)
     if [ "$oldest" != "$required_rust" ]; then
-        printf '%s\n' "error: Rust $required_rust or newer is required; $cargo_bin is $cargo_version" >&2
-        printf '%s\n' "install a current toolchain with rustup (https://rustup.rs); this checkout then selects the right version itself" >&2
-        exit 1
+        rustup_cargo="$HOME/.cargo/bin/cargo"
+        rustup_version=
+        if [ -x "$rustup_cargo" ] && [ "$cargo_bin" != "$rustup_cargo" ]; then
+            rustup_version=$(cd "$project_dir" && "$rustup_cargo" --version 2>/dev/null | awk '{print $2}' || true)
+            if [ -n "$rustup_version" ]; then
+                rustup_oldest=$(printf '%s\n%s\n' "$required_rust" "${rustup_version%%-*}" | sort -V | head -n1)
+                if [ "$rustup_oldest" = "$required_rust" ]; then
+                    printf '%s\n' "Using rustup Cargo at $rustup_cargo ($rustup_version); PATH Cargo at $cargo_bin ($cargo_version) was too old."
+                    cargo_bin=$rustup_cargo
+                    cargo_version=$rustup_version
+                    oldest=$required_rust
+                fi
+            fi
+        fi
+        if [ "$oldest" != "$required_rust" ]; then
+            printf '%s\n' "error: Rust $required_rust or newer is required; $cargo_bin is $cargo_version" >&2
+            if [ -n "$rustup_version" ]; then
+                printf '%s\n' "rustup Cargo at $rustup_cargo is $rustup_version, which is also too old" >&2
+            else
+                printf '%s\n' "install a current toolchain with rustup (https://rustup.rs); this checkout then selects the right version itself" >&2
+            fi
+            exit 1
+        fi
     fi
 fi
 
