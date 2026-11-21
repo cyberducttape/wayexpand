@@ -151,7 +151,7 @@ pub(crate) fn compositor_info() -> String {
     } else if env::var("XDG_CURRENT_DESKTOP")
         .is_ok_and(|value| value.to_ascii_lowercase().contains("gnome"))
     {
-        ("Mutter", None, Vec::new())
+        ("GNOME Shell", Some("gnome-shell"), vec!["--version"])
     } else if wayland_session() {
         ("Wayland compositor", None, Vec::new())
     } else {

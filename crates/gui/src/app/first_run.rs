@@ -614,11 +614,22 @@ impl GuiApp {
                             }
                         });
                     ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(self.strings.desktop_compatibility_version_hint())
-                            .small()
-                            .color(palette.muted),
-                    );
+                    if wayexpand_backend_selection::Compositor::detect()
+                        == wayexpand_backend_selection::Compositor::Gnome
+                    {
+                        let detected_version = self
+                            .compositor_info
+                            .strip_prefix("GNOME Shell · ")
+                            .filter(|version| *version != "version unavailable");
+                        let version_hint = detected_version
+                            .map(|version| {
+                                self.strings.desktop_compatibility_detected_version(version)
+                            })
+                            .unwrap_or_else(|| {
+                                self.strings.desktop_compatibility_version_hint().to_owned()
+                            });
+                        ui.label(RichText::new(version_hint).small().color(palette.muted));
+                    }
                 });
                 ui.add_space(10.0);
                 if self.gnome_setup_resume_pending {

@@ -112,6 +112,14 @@ impl Strings {
             }
         }
     }
+
+    pub(crate) fn desktop_compatibility_detected_version(&self, version: &str) -> String {
+        match self.lang {
+            Language::English => format!("Detected GNOME Shell version: {version}."),
+            Language::German => format!("Erkannte GNOME-Shell-Version: {version}."),
+            Language::Indonesian => format!("Versi GNOME Shell terdeteksi: {version}."),
+        }
+    }
 }
 
 impl Strings {
