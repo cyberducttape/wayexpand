@@ -213,8 +213,8 @@ pub(crate) const COMMANDS: &[Command] = &[
     command("upgrade", Service, "Finish, check or roll back a staged upgrade", &["upgrade --check|--apply|--rollback [--json]"]),
     command("upgrade-status", Service, "Check whether the running service matches this CLI", &["upgrade-status [--json]"]).advanced(),
     // Troubleshooting
-    command("why", Troubleshoot, "Say why the last trigger did not expand", &["why [--json]"])
-        .details("Reads the running service's and the IBus engine's content-free history: whether matching is on, whether typing arrives, and what happened to the last few expansions. No typed text is recorded or shown.")
+    command("why", Troubleshoot, "Find the likely cause and next step for a missed trigger", &["why [--json]"])
+        .details("Reports one likely cause and one suggested next action from the running service and IBus engine's content-free status. It explains whether matching is on, whether typing arrives, and what happened to recent expansions. No typed text is recorded or shown.")
         .examples(&[("wayexpand why", "Type a trigger that did not expand, then run this")]),
     command("explain", Troubleshoot, "Explain why text would or would not expand", &["explain <text> [--json] [--offline] [--app ID] [config]"])
         .details("Runs the text through the same matcher the service uses and reports each check: trigger, word boundary, app filter, policy. --app tests it as if that application had focus; --offline skips the running service.")
@@ -231,11 +231,13 @@ pub(crate) const COMMANDS: &[Command] = &[
         ("wayexpand debug --live --seconds 30", "Watch the service while you type"),
     ]),
     command("health", Troubleshoot, "Report readiness with a stable monitoring exit code", &["health [--json]"]).advanced(),
-    command("install-check", Troubleshoot, "Check that WayExpand's components are installed", &["install-check [--json] [--config PATH]"]).advanced(),
+    command("install-check", Troubleshoot, "Check that WayExpand's components are installed", &["install-check [--json] [--config PATH]"])
+        .details("Read-only audit of the installed files, desktop integration, services, and active configuration. It identifies missing components without changing the installation; use `repair --check` to review safe repairs.")
+        .examples(&[("wayexpand install-check", "Check whether the installation is complete")]).advanced(),
     command("repair", Troubleshoot, "Show or apply installation repairs", &["repair --check|--apply [--json]", "repair --gnome-input-source [--json]"]),
     command("reset", Troubleshoot, "Preview and apply a scoped recovery reset", &["reset --integration|--services|--preferences [--check|--apply --yes] [--json]"]).advanced(),
     command("support-bundle", Troubleshoot, "Write a redacted report to attach to a bug report", &["support-bundle [--gnome] [--output FILE]"])
-        .details("Collects versions, backend state and recent findings without snippet text. --gnome adds the GNOME integration checks.")
+        .details("Collects an installation audit, versions, backend state and recent findings. Installation component states omit local file paths; snippet text is excluded. Its first step prioritizes missing components or installation identity mismatches before route advice. GNOME integration checks are included automatically in a GNOME session; --gnome requests them on other desktops.")
         .aliases(&["support"]),
     command("compatibility-report", Troubleshoot, "Generate a reproducible desktop compatibility report", &["compatibility-report [--json]"]).advanced(),
     command("help", Troubleshoot, "Show help for WayExpand or one command", &[
@@ -461,7 +463,7 @@ fn main_help(style: &Style, version: &str, all: bool) -> String {
         help.push_str(&format!("  {example:<34}{meaning}\n"));
     }
     help.push_str(&format!(
-        "\nRun `wayexpand help <command>` for its options{}.\n",
+        "\nRun `wayexpand help 'COMMAND'` for a command's options{}.\n",
         if all { "" } else { "; `help --all` lists all" }
     ));
     help

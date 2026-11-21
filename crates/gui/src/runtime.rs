@@ -756,8 +756,15 @@ fn run_support_preview() -> Result<String, String> {
 
     let mut command = Command::new(cli);
     configure_process_group(&mut command);
+    let mut arguments = vec!["support-bundle"];
+    if wayexpand_backend_selection::Compositor::detect()
+        == wayexpand_backend_selection::Compositor::Gnome
+    {
+        arguments.push("--gnome");
+    }
+    arguments.push("--output");
     let child = match command
-        .args(["support-bundle", "--output"])
+        .args(arguments)
         .arg(&path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -773,13 +780,21 @@ fn run_support_preview() -> Result<String, String> {
         }
     };
     let mut supervisor = ChildSupervisor::new(child);
-    let deadline = Instant::now() + Duration::from_secs(25);
+    // The CLI collects doctor, certification, and `why` reports sequentially
+    // (each has a 10-second bound), then may run GNOME-specific checks. Leave
+    // enough time for the complete redacted report instead of timing out after
+    // the first two slower diagnostics.
+    const SUPPORT_REPORT_TIMEOUT: Duration = Duration::from_secs(60);
+    let deadline = Instant::now() + SUPPORT_REPORT_TIMEOUT;
     let status = loop {
         if Instant::now() >= deadline {
             supervisor.kill_group();
             let _ = supervisor.reap();
             let _ = fs::remove_dir_all(&directory);
-            return Err("support report collection exceeded its 25 second limit".into());
+            return Err(format!(
+                "support report collection exceeded its {} second limit",
+                SUPPORT_REPORT_TIMEOUT.as_secs()
+            ));
         }
         match supervisor.has_exited() {
             Ok(true) => match supervisor.reap() {
@@ -861,7 +876,13 @@ pub(crate) fn load_config_snapshot(path: PathBuf) -> Result<ReloadSnapshot, Stri
 }
 
 fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot {
-    let installation_audit = run_installation_audit(&config_path);
+    // This subprocess is bounded but can take several seconds on a cold
+    // install. Run it alongside the session probes so one slow file audit
+    // does not delay every route and permission result.
+    let audit_config_path = config_path.clone();
+    let installation_audit = thread::Builder::new()
+        .name("wayexpand-installation-audit".into())
+        .spawn(move || run_installation_audit(&audit_config_path));
     let backend_status = discover_backends();
     let selection_capabilities = probe_capabilities();
     let ibus_available = ibus_engine_available();
@@ -918,7 +939,13 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         &daemon_status,
     );
     DiagnosticsSnapshot {
-        installation_audit,
+        installation_audit: installation_audit
+            .and_then(|worker| {
+                worker
+                    .join()
+                    .map_err(|_| std::io::Error::other("audit worker panicked"))
+            })
+            .unwrap_or_default(),
         backend_status,
         recommended_route,
         route_plan,

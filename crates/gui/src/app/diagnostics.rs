@@ -437,6 +437,11 @@ impl GuiApp {
             {
                 self.refresh_diagnostics(true);
             }
+            if ui.button(self.strings.dg_export_support_report()).clicked() {
+                self.support_export_open = true;
+                self.support_preview = None;
+                self.support_preview_error = None;
+            }
             if self.diagnostics_running {
                 ui.spinner();
             }
@@ -1354,11 +1359,6 @@ impl GuiApp {
             });
         }
         ui.separator();
-        if ui.button(self.strings.dg_export_support_report()).clicked() {
-            self.support_export_open = true;
-            self.support_preview = None;
-            self.support_preview_error = None;
-        }
         if let Some(action) = why_action {
             self.perform_next_step(action);
         }
@@ -2409,7 +2409,26 @@ impl GuiApp {
         if !self.setup_failure_report_open {
             return;
         }
+        let summary = self
+            .setup_failure_report
+            .as_deref()
+            .and_then(|report| {
+                report
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Summary: "))
+            })
+            .map(str::to_owned);
+        let remedy = self
+            .setup_failure_report
+            .as_deref()
+            .and_then(|report| {
+                report
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Suggested remedy: "))
+            })
+            .map(str::to_owned);
         let mut open = self.setup_failure_report_open;
+        let mut close_requested = false;
         egui::Window::new(self.strings.dg_setup_diagnostic_report())
             .id(egui::Id::new("setup_failure_diagnostic_report"))
             .order(egui::Order::Foreground)
@@ -2426,26 +2445,48 @@ impl GuiApp {
                     .small()
                     .color(palette.muted),
                 );
+                if let Some(summary) = &summary {
+                    ui.strong(self.strings.dg_failure_summary());
+                    ui.label(summary);
+                }
+                if let Some(remedy) = &remedy {
+                    ui.strong(self.strings.dg_suggested_remedy());
+                    ui.label(remedy);
+                }
                 ui.horizontal(|ui| {
-                    if ui.button(self.strings.dg_copy_report()).clicked() {
+                    if ui
+                        .button(if self.setup_failure_report_copied {
+                            self.strings.dg_report_copied()
+                        } else {
+                            self.strings.dg_copy_report()
+                        })
+                        .clicked()
+                    {
                         if let Some(report) = &self.setup_failure_report {
                             ui.ctx().copy_text(report.clone());
+                            self.setup_failure_report_copied = true;
                         }
                     }
                     if ui.button(self.strings.dg_open_diagnostics()).clicked() {
                         self.diagnostics_open = true;
+                        close_requested = true;
                     }
                 });
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
+                egui::CollapsingHeader::new(self.strings.dg_technical_details())
+                    .default_open(false)
                     .show(ui, |ui| {
-                        if let Some(report) = &self.setup_failure_report {
-                            ui.add(egui::Label::new(RichText::new(report).monospace()).wrap());
-                        }
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                if let Some(report) = &self.setup_failure_report {
+                                    ui.add(
+                                        egui::Label::new(RichText::new(report).monospace()).wrap(),
+                                    );
+                                }
+                            });
                     });
             });
-        self.setup_failure_report_open = open;
+        self.setup_failure_report_open = open && !close_requested;
     }
 
     fn render_support_export(&mut self, ctx: &egui::Context, palette: &Palette) {
@@ -2463,6 +2504,7 @@ impl GuiApp {
             .show(ctx, |ui| {
                 ui.label(RichText::new(self.strings.dg_this_report_includes()).strong());
                 for item in [
+                    self.strings.dg_likely_cause_and_next_action(),
                     self.strings.dg_wayexpand_version_and_desktop_session(),
                     self.strings.dg_backend_and_route_availability(),
                     self.strings.dg_service_states_exit_codes_restart_counts(),
@@ -2470,6 +2512,14 @@ impl GuiApp {
                         .dg_bounded_sanitized_event_counters_and_certification(),
                 ] {
                     ui.label(format!("✓ {item}"));
+                }
+                if wayexpand_backend_selection::Compositor::detect()
+                    == wayexpand_backend_selection::Compositor::Gnome
+                {
+                    ui.label(format!(
+                        "✓ {}",
+                        self.strings.dg_gnome_shell_ibus_and_extension_readiness()
+                    ));
                 }
                 ui.add_space(6.0);
                 ui.label(RichText::new(self.strings.dg_this_report_excludes()).strong());
@@ -2494,6 +2544,7 @@ impl GuiApp {
                     {
                         self.support_preview_loading = true;
                         self.support_preview_error = None;
+                        self.support_preview_copied = false;
                         if let Some(sender) = self.diagnostics_sender.as_ref() {
                             if sender.try_send(runtime::Request::SupportPreview).is_err() {
                                 self.support_preview_loading = false;
@@ -2515,6 +2566,22 @@ impl GuiApp {
                     if self.support_preview_loading {
                         ui.spinner();
                         ui.label(self.strings.dg_collecting_sanitized_report());
+                    }
+                    if ui
+                        .add_enabled(
+                            self.support_preview.is_some(),
+                            egui::Button::new(if self.support_preview_copied {
+                                self.strings.dg_report_copied()
+                            } else {
+                                self.strings.dg_copy_report()
+                            }),
+                        )
+                        .clicked()
+                    {
+                        if let Some(report) = self.support_preview.as_ref() {
+                            ui.ctx().copy_text(report.clone());
+                            self.support_preview_copied = true;
+                        }
                     }
                     if ui
                         .add_enabled(
@@ -2544,6 +2611,17 @@ impl GuiApp {
                 }
                 if let Some(report) = &mut self.support_preview {
                     ui.separator();
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(report) {
+                        let first_step = &value["first_step"];
+                        if let Some(answer) = first_step["answer"].as_str() {
+                            ui.strong(self.strings.dg_report_likely_cause());
+                            ui.label(answer);
+                        }
+                        if let Some(action) = first_step["next_action"].as_str() {
+                            ui.strong(self.strings.dg_report_next_action());
+                            ui.label(action);
+                        }
+                    }
                     egui::ScrollArea::vertical()
                         .max_height(260.0)
                         .show(ui, |ui| {
@@ -2578,7 +2656,13 @@ impl GuiApp {
             .create_new(true)
             .mode(0o600)
             .open(&path)
-            .map_err(|error| self.strings.dg_could_not_create_report_file_error(&error))?;
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    self.strings.dg_report_path_already_exists().to_owned()
+                } else {
+                    self.strings.dg_could_not_create_report_file_error(&error)
+                }
+            })?;
         if let Err(error) = file
             .write_all(report.as_bytes())
             .and_then(|()| file.sync_all())

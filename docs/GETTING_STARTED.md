@@ -15,11 +15,13 @@ configuration from a verified real-application test.
 Use a distribution package where one is available, then open **WayExpand**
 from your applications menu. See the [packaging guide](PACKAGING.md) for
 current availability: the Ubuntu daily package is experimental, and a Fedora
-package channel is not currently published. Source installation is intended
-for developers and packagers.
+package channel is not currently published. If no package is available for
+your distribution, the [release archive](../README.md#release-archive) or a
+[per-user source install](../README.md#build-from-source) are also options.
 
 If the application is already installed but has no launcher, run
-`wayexpand-gui`.
+`wayexpand-gui`. For release archives and per-user source installs, use
+`"$HOME/.local/bin/wayexpand-gui"` when `~/.local/bin` is not on PATH.
 
 ### 2. Follow setup and add a snippet
 
@@ -50,6 +52,24 @@ and session.
 If no automatic route is available, Quick Picker remains available in
 copy-only mode: choose a snippet, switch to the target application, and paste
 it yourself. It does not enable raw capture or attempt insertion.
+
+### If setup does not work
+
+Start with the diagnosis and one suggested next action:
+
+```sh
+wayexpand why
+```
+
+Use `wayexpand install-check` for missing or mismatched installed files, and
+`wayexpand doctor` for desktop-session route readiness. With a per-user install
+that is not on PATH, run these as `"$HOME/.local/bin/wayexpand" why`,
+`"$HOME/.local/bin/wayexpand" install-check`, or
+`"$HOME/.local/bin/wayexpand" doctor`. For details, see the
+[troubleshooting guide](TROUBLESHOOTING.md). To share diagnostics, create a
+redacted report with `wayexpand support-bundle --output wayexpand-support.json`
+and review it before sharing. Without the per-user install directory on PATH,
+run `"$HOME/.local/bin/wayexpand" support-bundle --output wayexpand-support.json`.
 
 IBus alone cannot safely replace a trigger in fields that do not report
 verifiable surrounding text; it passes typing through unchanged rather than

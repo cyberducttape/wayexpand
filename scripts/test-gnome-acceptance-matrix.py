@@ -2,10 +2,13 @@
 """Regression tests for the GNOME acceptance evidence gate."""
 
 import runpy
+import tempfile
 import unittest
+from pathlib import Path
 
 
 CHECKER = runpy.run_path("scripts/check-gnome-acceptance-matrix.py")
+REPORT_GENERATOR = runpy.run_path("scripts/new-gnome-acceptance-report.py")
 PLAN = CHECKER["load"](CHECKER["MATRIX"])
 
 
@@ -32,6 +35,16 @@ def complete_report():
                 "keyboard_profile": profile,
                 "result": "pass",
                 "evidence_ref": f"artifacts/{application}-{scenario}-{profile}.json",
+                **(
+                    {
+                        "trigger_captured": True,
+                        "original_trigger_removed": True,
+                        "replacement_occurrences": 1,
+                        "intended_field_retained_focus": True,
+                    }
+                    if scenario == "real-trigger-replacement"
+                    else {}
+                ),
             }
             for application in PLAN["application_classes"]
             for scenario in PLAN["required_application_scenarios"]
@@ -45,6 +58,34 @@ def complete_report():
 
 
 class AcceptanceMatrixTests(unittest.TestCase):
+    def test_report_generator_requires_gnome_desktop_identity(self):
+        is_gnome_session = REPORT_GENERATOR["is_gnome_session"]
+        self.assertTrue(is_gnome_session("ubuntu:GNOME", "ubuntu"))
+        self.assertTrue(is_gnome_session("", "gnome-classic"))
+        self.assertFalse(is_gnome_session("KDE", "gnome"))
+
+    def test_report_generator_reads_distribution_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            os_release = Path(directory) / "os-release"
+            os_release.write_text(
+                'ID="ubuntu"\nVERSION_ID="24.04"\n', encoding="utf-8"
+            )
+            identity = REPORT_GENERATOR["os_release_identity"](os_release)
+        self.assertEqual(identity, ("ubuntu", "24.04"))
+        ubuntu = next(item for item in PLAN["platforms"] if item["id"] == "ubuntu-24.04-gnome")
+        fedora = next(item for item in PLAN["platforms"] if item["id"] == "fedora-45-gnome51")
+        matches = REPORT_GENERATOR["platform_matches_distribution"]
+        self.assertTrue(matches(ubuntu, identity))
+        self.assertFalse(matches(fedora, identity))
+
+    def test_report_generator_validates_exact_pinned_shell_major(self):
+        fedora = next(item for item in PLAN["platforms"] if item["id"] == "fedora-45-gnome51")
+        matches = REPORT_GENERATOR["platform_matches_shell_version"]
+        self.assertTrue(matches(fedora, "GNOME Shell 51.1"))
+        self.assertTrue(matches(fedora, "51.1"))
+        self.assertFalse(matches(fedora, "GNOME Shell 50.9"))
+        self.assertFalse(matches(fedora, "GNOME Shell 51.x"))
+
     def test_plan_covers_every_supported_platform_and_client(self):
         self.assertEqual(CHECKER["validate_plan"](PLAN), [])
 

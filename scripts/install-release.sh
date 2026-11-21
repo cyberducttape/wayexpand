@@ -5,6 +5,7 @@
 set -eu
 
 release_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+. "$release_dir/scripts/desktop-compatibility.sh"
 enable_service=0
 service_name=
 for argument in "$@"; do
@@ -35,7 +36,7 @@ for argument in "$@"; do
 done
 if [ "$enable_service" -eq 1 ] && [ -z "$service_name" ]; then
     printf '%s\n' "error: --enable requires an explicit --service selection" >&2
-    printf '%s\n' "choose a service only after reviewing wayexpand doctor and accepting its documented limitations" >&2
+    printf '%s\n' "choose a service only after reviewing \"$HOME/.local/bin/wayexpand\" doctor and accepting its documented limitations" >&2
     exit 2
 fi
 if [ "$enable_service" -eq 1 ] && ! command -v systemctl >/dev/null 2>&1; then
@@ -69,12 +70,21 @@ case "$state_home" in
         exit 1
         ;;
 esac
+if [ "$(id -u)" -eq 0 ]; then
+    if [ -n "${SUDO_USER:-}" ]; then
+        printf '%s\n' "error: do not run the user installer with sudo; run it as $SUDO_USER" >&2
+    else
+        printf '%s\n' "error: this is a per-user installer; run it as your desktop user, not root" >&2
+    fi
+    exit 1
+fi
+wayexpand_print_desktop_compatibility
 # One consent-marker location for the CLI, installers, doctor, GUI and the
 # unit: systemd evaluates ConditionPathExists before any XDG environment
 # applies, so the marker never follows XDG_CONFIG_HOME. The evdev unit is
 # inert without it, and systemd reports a skipped condition as success, so
 # refuse rather than report an enabled service that never runs; never create
-# the marker here.
+# the marker here. Show compatibility above before asking users to create it.
 evdev_marker="$HOME/.config/wayexpand/evdev-sensitive-fields-ack"
 legacy_evdev_marker="$config_dir/evdev-sensitive-fields-ack"
 if [ "$enable_service" -eq 1 ] && [ "$service_name" = wayexpand-evdev.service ] \
@@ -90,14 +100,6 @@ if [ "$enable_service" -eq 1 ] && [ "$service_name" = wayexpand-evdev.service ] 
         printf '%s\n' "  install -m 0600 /dev/null $evdev_marker" >&2
     fi
     exit 2
-fi
-if [ "$(id -u)" -eq 0 ]; then
-    if [ -n "${SUDO_USER:-}" ]; then
-        printf '%s\n' "error: do not run the user installer with sudo; run it as $SUDO_USER" >&2
-    else
-        printf '%s\n' "error: this is a per-user installer; run it as your desktop user, not root" >&2
-    fi
-    exit 1
 fi
 for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     if [ ! -x "$release_dir/bin/$binary" ]; then
@@ -294,28 +296,38 @@ fi
 printf '%s\n' "Installed binaries in $bin_dir"
 printf '%s\n' "Installed user units in $unit_dir"
 printf '%s\n' "Installed desktop entry in $application_dir"
-printf '%s\n' "Staged IBus component in $library_dir/current/ibus (register it with \`wayexpand setup --backend ibus\`)"
+printf '%s\n' "Staged IBus component in $library_dir/current/ibus (register it with \"$bin_dir/wayexpand\" setup --backend ibus)"
 if [ -d "$release_dir/icons" ]; then
     printf '%s\n' "Installed application icon in $icon_base"
 fi
-printf '%s\n' "Next steps:"
+printf '%s\n' "Next action: open the setup guide with: \"$bin_dir/wayexpand-gui\""
+printf '%s\n' "You can also launch WayExpand from your desktop application menu."
+printf '%s\n' ""
+printf '%s\n' "Optional command-line setup:"
 printf '%s\n' "  export PATH=\"$bin_dir:\$PATH\""
-printf '%s\n' "  systemctl --user daemon-reload"
-printf '%s\n' "  wayexpand setup"
-printf '%s\n' "  wayexpand status"
-printf '%s\n' "  wayexpand doctor"
-printf '%s\n' "  # If named actions are configured, edit $config_dir/broker.toml and enable:"
+case "${SHELL##*/}" in
+    bash)
+        printf '%s\n' "For future Bash terminals, run once: printf '\\nexport PATH=\"$bin_dir:\$PATH\"\\n' >> \"$HOME/.bashrc\"" ;;
+    zsh)
+        printf '%s\n' "For future Zsh terminals, run once: printf '\\nexport PATH=\"$bin_dir:\$PATH\"\\n' >> \"$HOME/.zshrc\"" ;;
+    fish)
+        printf '%s\n' "For future Fish terminals, run once: fish_add_path \"$bin_dir\"" ;;
+    *)
+        printf '%s\n' "To keep this PATH in future terminals, see $release_dir/README.md" ;;
+esac
+printf '%s\n' "  \"$bin_dir/wayexpand\" setup     # guided setup; checks this session and explains the next step"
+printf '%s\n' "  \"$bin_dir/wayexpand\" doctor    # diagnose an unavailable route"
+printf '%s\n' "  # For named actions, edit $config_dir/broker.toml and enable:"
 printf '%s\n' "  systemctl --user enable --now wayexpand-action-broker.service"
-printf '%s\n' "  wayexpand explain-backend"
-printf '%s\n' "  wayexpand edit"
+printf '%s\n' "  \"$bin_dir/wayexpand\" edit      # edit snippets"
 if [ -f "$release_dir/polkit/org.wayexpand.action.policy" ] &&
     [ ! -f /usr/share/polkit-1/actions/org.wayexpand.action.policy ]; then
     printf '%s\n' "Broker actions require administrator installation of the polkit policy:"
     printf '%s\n' "  sudo install -m 0644 \"$release_dir/polkit/org.wayexpand.action.policy\" /usr/share/polkit-1/actions/"
 fi
 printf '%s\n' "Setup never grants raw-input permissions or portal consent. If it reports"
-printf '%s\n' "no safe automatic path, review doctor and the documented explicit modes."
-printf '%s\n' "To remove this installation later, run scripts/uninstall-user.sh."
+printf '%s\n' "no safe automatic path, review \"$bin_dir/wayexpand\" doctor and the documented explicit modes."
+printf '%s\n' "To remove this installation later, run \"$release_dir/scripts/uninstall-user.sh\"."
 
 if command -v systemctl >/dev/null 2>&1; then
     active_upgrade=0
@@ -331,7 +343,7 @@ if command -v systemctl >/dev/null 2>&1; then
             case "$runtime_check_output" in
                 *'Action: restart the affected service'*|*'Action: restart the active Action Broker service'*)
                     printf '%s\n' 'After reviewing the process details above, apply the restart and health check with:'
-                    printf '  %s/wayexpand upgrade --apply\n' "$bin_dir"
+                    printf '  "%s/wayexpand" upgrade --apply\n' "$bin_dir"
                     ;;
                 *)
                     printf '%s\n' 'The runtime check did not identify a managed daemon version mismatch; inspect the status above before restarting anything.'
@@ -339,7 +351,7 @@ if command -v systemctl >/dev/null 2>&1; then
             esac
         else
             printf '%s\n' "$runtime_check_output"
-            printf '%s\n' 'Could not complete the runtime check. Inspect the check output and rerun wayexpand upgrade --check before applying.'
+            printf '%s\n' "Could not complete the runtime check. Inspect the output and rerun \"$bin_dir/wayexpand\" upgrade --check before applying."
         fi
     fi
 fi

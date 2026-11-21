@@ -14,17 +14,17 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 const MAX_REPORT_BYTES: u64 = 1024 * 1024;
 const REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Produce a privacy-preserving support report from the same doctor and
-/// certification reports operators can run independently. Every nested
-/// structure is projected field-by-field; doctor JSON subtrees are never
+/// Produce a privacy-preserving support report from the same installation,
+/// doctor, and certification reports operators can run independently. Every
+/// nested structure is projected field-by-field; diagnostic JSON is never
 /// copied wholesale.
 pub(crate) fn support_bundle(args: Args) -> Result<()> {
     let mut output_path = None;
-    let mut gnome = false;
+    let mut force_gnome = false;
     let mut args = args;
     while let Some(argument) = args.next() {
-        if argument == "--gnome" && !gnome {
-            gnome = true;
+        if argument == "--gnome" && !force_gnome {
+            force_gnome = true;
         } else if argument == "--output" && output_path.is_none() {
             output_path =
                 Some(PathBuf::from(args.next().ok_or_else(|| {
@@ -35,14 +35,39 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
         }
     }
 
-    let doctor = read_report("doctor")?;
-    let certification = read_report("certify")?;
+    // These reports are independent read-only snapshots. Collect them
+    // concurrently so a slow probe does not add up to four separate
+    // ten-second waits when the support preview runs during setup.
+    let (installation, doctor, certification, why) = thread::scope(|scope| {
+        let installation = scope.spawn(|| read_report("install-check"));
+        let doctor = scope.spawn(|| read_report("doctor"));
+        let certification = scope.spawn(|| read_report("certify"));
+        let why = scope.spawn(|| read_report("why"));
+        Ok::<_, Error>((
+            installation
+                .join()
+                .map_err(|_| anyhow::anyhow!("installation diagnostics worker panicked"))??,
+            doctor
+                .join()
+                .map_err(|_| anyhow::anyhow!("doctor diagnostics worker panicked"))??,
+            certification
+                .join()
+                .map_err(|_| anyhow::anyhow!("certification diagnostics worker panicked"))??,
+            why.join()
+                .map_err(|_| anyhow::anyhow!("why diagnostics worker panicked"))??,
+        ))
+    })?;
     let status = crate::doctor::status::read_daemon_status()
         .ok()
         .and_then(|raw| crate::doctor::status::status_as_json(&raw).ok());
     let services = service_health();
     let mut report = summarize_reports(&doctor, &certification, status.as_ref(), &services);
-    if gnome {
+    report["installation"] = installation_summary(&installation);
+    report["first_step"] = first_step(&why, &installation);
+    let include_gnome = force_gnome
+        || wayexpand_backend_selection::Compositor::detect()
+            == wayexpand_backend_selection::Compositor::Gnome;
+    if include_gnome {
         report["gnome"] = gnome_support_section(&doctor);
     }
     let bytes = serde_json::to_vec_pretty(&report).context("serializing support report")?;
@@ -51,12 +76,24 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
     }
 
     if let Some(path) = output_path {
-        let mut file = fs::OpenOptions::new()
+        let open_result = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(&path)
-            .with_context(|| format!("creating support report {}", path.display()))?;
+            .open(&path);
+        let mut file = match open_result {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                bail!(
+                    "support report path {} already exists; choose a different --output path (existing reports are never overwritten)",
+                    path.display()
+                );
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("creating support report {}", path.display()));
+            }
+        };
         if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
             drop(file);
             let _ = fs::remove_file(&path);
@@ -211,6 +248,80 @@ fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
         "test_outcomes": check_map,
         "error_ids": errors,
         "privacy": {"keystrokes": "excluded", "snippet_contents": "excluded", "clipboard": "excluded", "environment_secrets": "excluded"},
+    })
+}
+
+/// Prefer an actionable installation repair over route advice when required
+/// files are missing. Otherwise keep the conclusion from `wayexpand why`
+/// without copying its detailed route telemetry into the support bundle.
+fn first_step(why: &serde_json::Value, installation: &serde_json::Value) -> serde_json::Value {
+    if installation["ready"].as_bool() == Some(false) {
+        return serde_json::json!({
+            "state": "installation_incomplete",
+            "answer": "The installation audit found one or more missing required components.",
+            "next_action": "Run `wayexpand repair --check` to review safe repairs. Apply only listed repairs, then rerun `wayexpand install-check`; if no safe repair applies, rerun the WayExpand installer.",
+        });
+    }
+    let identity = &installation["installation_identity"];
+    if identity["path_shadow_detected"].as_bool() == Some(true)
+        || identity["mixed_cli_daemon_installation"].as_bool() == Some(true)
+    {
+        return serde_json::json!({
+            "state": "installation_identity_mismatch",
+            "answer": "The CLI, PATH, or running daemon resolves to a different WayExpand installation.",
+            "next_action": "Run `wayexpand upgrade --check` from the installation you intend to use, follow its reported action, and rerun `wayexpand why` before trusting route history.",
+        });
+    }
+    let diagnosis = &why["diagnosis"];
+    let safe_text = |key: &str| {
+        diagnosis
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| {
+                !value.is_empty() && value.len() <= 2048 && !value.chars().any(char::is_control)
+            })
+            .map(|value| {
+                let home = std::env::var("HOME").ok();
+                home.filter(|home| !home.is_empty()).map_or_else(
+                    || value.to_owned(),
+                    |home| value.replace(home.as_str(), "~"),
+                )
+            })
+    };
+    serde_json::json!({
+        "state": safe_token(diagnosis.get("state")),
+        "answer": safe_text("answer"),
+        "next_action": safe_text("next_action"),
+    })
+}
+
+/// Keep component-level install evidence while omitting local paths and raw
+/// check details, which can contain usernames or installation locations.
+fn installation_summary(installation: &serde_json::Value) -> serde_json::Value {
+    let checks = installation["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|check| {
+            let component = safe_token(check.get("component"))?;
+            let status = check
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .filter(|status| matches!(*status, "pass" | "fail" | "optional"))?;
+            Some(serde_json::json!({"component":component,"status":status}))
+        })
+        .collect::<Vec<_>>();
+    let identity = installation.get("installation_identity");
+    serde_json::json!({
+        "ready": copy(installation, "ready"),
+        "checks": checks,
+        "identity": {
+            "cli_method": identity.and_then(|value| safe_token(value.get("cli_method"))),
+            "path_method": identity.and_then(|value| safe_token(value.get("path_method"))),
+            "daemon_method": identity.and_then(|value| safe_token(value.get("daemon_method"))),
+            "path_shadow_detected": identity.and_then(|value| value.get("path_shadow_detected")).and_then(serde_json::Value::as_bool),
+            "mixed_cli_daemon_installation": identity.and_then(|value| value.get("mixed_cli_daemon_installation")).and_then(serde_json::Value::as_bool),
+        },
     })
 }
 
@@ -374,10 +485,9 @@ fn read_report(command_name: &str) -> Result<serde_json::Value> {
             }
         }
     };
-    // `doctor --json` intentionally exits unsuccessfully for unhealthy hosts,
-    // but still emits the full machine-readable report. Certification also
-    // emits a useful report when no live scenario has been run.
-    if !status.success() && command_name != "doctor" {
+    // These read-only audits intentionally exit unsuccessfully when they find
+    // problems, but still emit useful machine-readable reports.
+    if !status.success() && !matches!(command_name, "install-check" | "doctor" | "why") {
         bail!("{command_name} diagnostics could not be collected");
     }
     serde_json::from_slice(&bytes)
@@ -466,34 +576,70 @@ pub(crate) fn summarize_reports(
         .as_array()
         .into_iter()
         .flatten()
-        .map(|route| serde_json::json!({
-            "id": safe_token(route.get("id")),
-            "standing": safe_token(route.get("standing")),
-            "capture": safe_token(route.get("capture")),
-            "injection": safe_token(route.get("injection")),
-            "certification": safe_token(route.get("certification")),
-            "sensitive_field_protection": route.get("sensitive_field_protection").and_then(serde_json::Value::as_bool),
-            "assessment": {
-                "installed": safe_token(route["assessment"].get("installed")),
-                "supported": safe_token(route["assessment"].get("supported")),
-                "authorized": safe_token(route["assessment"].get("authorized")),
-                "connected": safe_token(route["assessment"].get("connected")),
-                "policy_allowed": route["assessment"].get("policy_allowed").and_then(serde_json::Value::as_bool),
-                "certified": route["assessment"].get("certified").and_then(serde_json::Value::as_bool),
-                "requires_user_action": route["assessment"].get("requires_user_action").and_then(serde_json::Value::as_bool),
-                "limitations": route["assessment"]["limitations"].as_array().into_iter().flatten().filter_map(|value| safe_token(Some(value))).collect::<Vec<_>>(),
-                "portal": route["assessment"].get("portal").filter(|value| value.is_object()).map(|portal| serde_json::json!({
-                    "provider_candidate": portal.get("provider_candidate").and_then(serde_json::Value::as_bool),
-                    "implementation_discovered": safe_token(portal.get("implementation_discovered")),
-                    "interface_available": safe_token(portal.get("interface_available")),
-                    "authorization": safe_token(portal.get("authorization")),
-                    "direct_eis_socket_configured": portal.get("direct_eis_socket_configured").and_then(serde_json::Value::as_bool),
-                    "eis_connected": safe_token(portal.get("eis_connected")),
-                    "injection_negotiated": safe_token(portal.get("injection_negotiated")),
-                    "injection_verified": safe_token(portal.get("injection_verified")),
-                })),
-            },
-        }))
+        .map(|route| {
+            let integrity_gaps = route["production_integrity_gaps"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|gap| {
+                    matches!(
+                        *gap,
+                        "destination identity unavailable"
+                            | "destination identity not verified on a real compositor"
+                            | "atomic replacement unavailable"
+                            | "physical-input interruption not observable"
+                            | "physical-input interruption not verified on a real compositor"
+                            | "sensitive-field state not observable"
+                            | "sensitive-field handling not certified"
+                            | "application result unobservable"
+                            | "recovery outcome unknown"
+                            | "trigger not verified against target text"
+                            | "route not production-supported"
+                    )
+                })
+                .collect::<Vec<_>>();
+            serde_json::json!({
+                "id": safe_token(route.get("id")),
+                "standing": safe_token(route.get("standing")),
+                "capture": safe_token(route.get("capture")),
+                "injection": safe_token(route.get("injection")),
+                "certification": safe_token(route.get("certification")),
+                "sensitive_field_protection": route.get("sensitive_field_protection").and_then(serde_json::Value::as_bool),
+                "production_integrity": {
+                    "ready": route.get("production_integrity_ready").and_then(serde_json::Value::as_bool),
+                    "destination_identity_available": route.get("destination_identity_available").and_then(serde_json::Value::as_bool),
+                    "destination_identity_verified": route.get("destination_identity_verified").and_then(serde_json::Value::as_bool),
+                    "atomic_replacement": route.get("atomic_replace").and_then(serde_json::Value::as_bool),
+                    "physical_input_interruption_observable": route.get("physical_input_interruption_observable").and_then(serde_json::Value::as_bool),
+                    "physical_input_interruption_verified": route.get("physical_input_interruption_verified").and_then(serde_json::Value::as_bool),
+                    "sensitive_field_state_observable": route.get("sensitive_field_state_observable").and_then(serde_json::Value::as_bool),
+                    "application_result": safe_token(route.get("application_result")),
+                    "recovery_outcome_known": route.get("recovery_outcome_known").and_then(serde_json::Value::as_bool),
+                    "gaps": integrity_gaps,
+                },
+                "assessment": {
+                    "installed": safe_token(route["assessment"].get("installed")),
+                    "supported": safe_token(route["assessment"].get("supported")),
+                    "authorized": safe_token(route["assessment"].get("authorized")),
+                    "connected": safe_token(route["assessment"].get("connected")),
+                    "policy_allowed": route["assessment"].get("policy_allowed").and_then(serde_json::Value::as_bool),
+                    "certified": route["assessment"].get("certified").and_then(serde_json::Value::as_bool),
+                    "requires_user_action": route["assessment"].get("requires_user_action").and_then(serde_json::Value::as_bool),
+                    "limitations": route["assessment"]["limitations"].as_array().into_iter().flatten().filter_map(|value| safe_token(Some(value))).collect::<Vec<_>>(),
+                    "portal": route["assessment"].get("portal").filter(|value| value.is_object()).map(|portal| serde_json::json!({
+                        "provider_candidate": portal.get("provider_candidate").and_then(serde_json::Value::as_bool),
+                        "implementation_discovered": safe_token(portal.get("implementation_discovered")),
+                        "interface_available": safe_token(portal.get("interface_available")),
+                        "authorization": safe_token(portal.get("authorization")),
+                        "direct_eis_socket_configured": portal.get("direct_eis_socket_configured").and_then(serde_json::Value::as_bool),
+                        "eis_connected": safe_token(portal.get("eis_connected")),
+                        "injection_negotiated": safe_token(portal.get("injection_negotiated")),
+                        "injection_verified": safe_token(portal.get("injection_verified")),
+                    })),
+                },
+            })
+        })
         .collect::<Vec<_>>();
     let protocol_probes = [
         "input_method_v2",
@@ -530,7 +676,7 @@ pub(crate) fn summarize_reports(
     );
     let diagnostics = diagnostic_summaries(doctor, services);
     serde_json::json!({
-        "schema": 4,
+        "schema": 5,
         "generated_at_unix": SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -824,7 +970,13 @@ mod tests {
             "route_plan": {"routes": [{
                 "id":"ibus", "standing":"available", "capture":"input_method",
                 "injection":"commit", "certification":"uncertified",
-                "sensitive_field_protection":false, "reason":"/home/alice/private reason"
+                "application_result":"unobservable", "atomic_replace":false,
+                "destination_identity_available":false, "destination_identity_verified":false,
+                "physical_input_interruption_observable":false, "physical_input_interruption_verified":false,
+                "recovery_outcome_known":false, "production_integrity_ready":false,
+                "production_integrity_gaps":["application result unobservable", "/home/alice/private reason"],
+                "sensitive_field_state_observable":true, "sensitive_field_protection":false,
+                "reason":"/home/alice/private reason"
             }]},
             "expansions": [{ "trigger": ":secret", "replacement": "private snippet" }]
         });
@@ -874,7 +1026,7 @@ mod tests {
             summary["protocol_probes"]["input_method_v2"]["status"],
             "unavailable"
         );
-        assert_eq!(summary["schema"], 4);
+        assert_eq!(summary["schema"], 5);
         assert_eq!(summary["services"]["units"][0]["restart_count"], 3);
         assert_eq!(summary["services"]["units"][0]["exit_code"], 1);
         assert_eq!(summary["recent_events"]["input_backend_restarts"], 2);
@@ -891,7 +1043,24 @@ mod tests {
             .unwrap()
             .iter()
             .any(|finding| { finding["id"] == "WX-SERVICE-003" }));
-        assert!(summary["route_plan"]["routes"][0].get("reason").is_none());
+        assert!(summary["selection"]["route_plan"][0]
+            .get("reason")
+            .is_none());
+        assert_eq!(
+            summary["selection"]["route_plan"][0]["production_integrity"]["ready"],
+            false
+        );
+        assert_eq!(
+            summary["selection"]["route_plan"][0]["production_integrity"]["gaps"][0],
+            "application result unobservable"
+        );
+        assert_eq!(
+            summary["selection"]["route_plan"][0]["production_integrity"]["gaps"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         assert!(summary["protocol_probes"]["input_method_v2"]
             .get("detail")
             .is_none());

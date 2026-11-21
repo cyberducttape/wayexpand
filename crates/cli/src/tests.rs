@@ -1062,6 +1062,14 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "output_transaction",
             "application_result",
             "atomic_replace",
+            "destination_identity_available",
+            "destination_identity_verified",
+            "physical_input_interruption_observable",
+            "physical_input_interruption_verified",
+            "recovery_outcome_known",
+            "production_integrity_ready",
+            "production_integrity_gaps",
+            "sensitive_field_state_observable",
             "sensitive_field_detection"
         ])
     );
@@ -1079,6 +1087,14 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "output_transaction",
             "application_result",
             "atomic_replace",
+            "destination_identity_available",
+            "destination_identity_verified",
+            "physical_input_interruption_observable",
+            "physical_input_interruption_verified",
+            "recovery_outcome_known",
+            "production_integrity_ready",
+            "production_integrity_gaps",
+            "sensitive_field_state_observable",
             "sensitive_field_protection",
             "assessment"
         ])

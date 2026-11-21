@@ -124,7 +124,12 @@
       "setup_detail": "toolkit-aware committed text; capture stays off until the field reports a non-sensitive content type, and replacements require matching surrounding text; no raw keyboard access",
       "trigger_precondition": "surrounding_text_matches_trigger",
       "output_transaction": "separate_delete_and_commit",
-      "application_result": "unobservable"
+      "application_result": "unobservable",
+      "destination_identity_available": false,
+      "destination_identity_verified": false,
+      "physical_input_interruption_observable": false,
+      "physical_input_interruption_verified": false,
+      "recovery_outcome_known": false
     },
     {
       "id": "kde-evdev-libei",
@@ -151,7 +156,12 @@
       "setup_detail": "explicit evdev compatibility fallback with libei output; observes global keyboard input and has no password-field awareness",
       "trigger_precondition": "focus_checked_with_compatibility_consent",
       "output_transaction": "separate_delete_and_key_events",
-      "application_result": "unobservable"
+      "application_result": "unobservable",
+      "destination_identity_available": true,
+      "destination_identity_verified": false,
+      "physical_input_interruption_observable": true,
+      "physical_input_interruption_verified": false,
+      "recovery_outcome_known": false
     },
     {
       "id": "sway-evdev-wlroots",
@@ -178,7 +188,12 @@
       "setup_detail": "explicit evdev compatibility fallback with wlroots virtual-keyboard output; observes global keyboard input and has no password-field awareness",
       "trigger_precondition": "none",
       "output_transaction": "separate_delete_and_key_events",
-      "application_result": "unobservable"
+      "application_result": "unobservable",
+      "destination_identity_available": false,
+      "destination_identity_verified": false,
+      "physical_input_interruption_observable": true,
+      "physical_input_interruption_verified": false,
+      "recovery_outcome_known": false
     },
     {
       "id": "input-method-v2",
@@ -205,7 +220,12 @@
       "setup_detail": "exclusive text capture; unsupported-key pass-through and compositor behavior require certification",
       "trigger_precondition": "surrounding_text_matches_trigger",
       "output_transaction": "atomic_protocol_batch",
-      "application_result": "unobservable"
+      "application_result": "unobservable",
+      "destination_identity_available": true,
+      "destination_identity_verified": false,
+      "physical_input_interruption_observable": false,
+      "physical_input_interruption_verified": false,
+      "recovery_outcome_known": false
     }
   ]
 }

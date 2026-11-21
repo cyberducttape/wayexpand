@@ -71,9 +71,35 @@ local, offline, no account, no telemetry.
 **Package availability (audited 2026-11-18):** GitHub release 1.3.6 has prebuilt binaries with checksums (`.tar.gz`, `.deb`, `.rpm`). PPA experimental daily builds for Ubuntu 26.04 (Resolute) (amd64), Ubuntu 26.10 (Stonking) (amd64). PPA packages for Ubuntu 24.04 (Noble) (0.2.0, stale), Ubuntu 22.04 (Jammy) (0.2.0, stale) lag behind; prefer the GitHub release there. Fedora Copr: not published yet. Package availability is separate from desktop certification.
 <!-- generated-install-status:end -->
 
+This guide follows the current source checkout; published packages may not yet
+include newer commands or fixes. Check the installed build with
+`wayexpand --version` (source builds include `-dev+<commit>`). If an option in
+this guide is unavailable, run `wayexpand help 'COMMAND'` with the command name
+to see what your installed version supports.
+
 None of these channels is compositor-certified yet; see the
 [packaging status](docs/PACKAGING.md) and the
 [certification matrix](docs/CERTIFICATION_MATRIX.md).
+
+### Desktop compatibility
+
+Check the likely setup path for your desktop before choosing an integration:
+
+| Desktop/session | Likely path | Evidence and limits |
+| --- | --- | --- |
+| GNOME Shell 46, 48, 50, or 51 | IBus with the WayExpand Shell extension | Headless integration-tested; no real GNOME session is production-certified. |
+| GNOME Shell 49 | GNOME extension support is not declared | German and French layout switching has not been verified in a real GNOME 49 session. Do not treat the extension route as working; Quick Picker can copy snippets for manual paste. |
+| Another GNOME Shell major | GNOME extension support is not declared | Compatibility is unknown. Check the setup guide before enabling an integration; Quick Picker can copy snippets for manual paste. |
+| KDE Plasma / Wayland | Guided IBus setup; KWin tracking where available | Setup checks this session, but no route is production-certified. Verify in each target application. |
+| Sway, Hyprland, or another Wayland desktop | Session-dependent or experimental route | Setup checks live capabilities. Use Quick Picker copy-and-paste if no route is available. |
+
+On GNOME, check the installed Shell version with `gnome-shell --version` and
+match it to the table before starting setup. Per-application GNOME results
+across keyboard layouts are in the
+[physical-session compatibility table](docs/GNOME_APPLICATION_COMPATIBILITY.md).
+Recommended setup does not grant raw keyboard access. Treat any explicit evdev
+request as a separate privacy choice; it observes keyboard events even in
+password fields. See [sensitive-field limits](docs/BACKENDS_SENSITIVE_FIELDS.md).
 
 ### Release packages
 
@@ -106,8 +132,10 @@ Rust 1.92; build from source there.
 ```sh
 # 1. Native build tools (pick your distribution)
 sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev git   # Debian, Ubuntu
-sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel git      # Fedora
+sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel git    # Fedora, RHEL-family
 sudo pacman -S --needed base-devel wayland libxkbcommon git                       # Arch
+sudo zypper install gcc pkg-config wayland-devel libxkbcommon-devel git         # openSUSE
+sudo apk add build-base pkgconf wayland-dev libxkbcommon-dev git                # Alpine
 
 # 2. Rust 1.92 or newer; skip if `cargo --version` already shows one.
 #    Distribution Rust is often too old (Ubuntu 24.04 ships 1.75).
@@ -117,7 +145,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone --depth 1 https://github.com/cyberducttape/wayexpand
 cd wayexpand
 ./scripts/install-user.sh
-wayexpand-gui
+"$HOME/.local/bin/wayexpand-gui"
 ```
 
 The minimum supported Rust is 1.92 (`rust-version`, tested in CI). The
@@ -130,10 +158,19 @@ installed 1.92 or newer through `cargo +<version> build`.
 ### Release archive
 
 ```sh
-sha256sum --check wayexpand-*-linux-x86_64.tar.gz.sha256
-tar -xzf wayexpand-*-linux-x86_64.tar.gz
-./wayexpand-*-linux-x86_64/scripts/install-release.sh
+arch="$(uname -m)"
+sha256sum --check wayexpand-*-linux-"$arch".tar.gz.sha256
+tar -xzf wayexpand-*-linux-"$arch".tar.gz
+./wayexpand-*-linux-"$arch"/scripts/install-release.sh
 ```
+
+Download the release archive and matching checksum for your machine's
+architecture (`x86_64` or `aarch64`) into the same directory before running
+these commands.
+
+Before installing, the source and release installers show the desktop
+compatibility summary and identify the active GNOME Shell version when
+available, so you can see the likely route before continuing.
 
 The release archive and source installer install for your user only. They never
 run as root, enable services, grant raw-input access, or accept portal consent
@@ -143,7 +180,24 @@ out and back in before resuming.
 
 ### After installing
 
+If your terminal says `wayexpand: command not found`, run the installed CLI
+directly as `"$HOME/.local/bin/wayexpand"`, or add its directory to this
+terminal's PATH with the command below; then the short-name examples later in
+this guide will work in this terminal. If you keep PATH unchanged, prefix
+each example with `"$HOME/.local/bin/wayexpand"` instead:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+To keep that path in future terminals, run the one command for your shell
+once: Bash, `printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.bashrc"`;
+Zsh, `printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.zshrc"`;
+Fish, `fish_add_path "$HOME/.local/bin"`.
+
 Launch **WayExpand** from the desktop application menu or run `wayexpand-gui`.
+For a per-user installation when `~/.local/bin` is not on PATH, run
+`"$HOME/.local/bin/wayexpand-gui"`.
 Its first-run guide checks the installation and route, then asks you to verify
 an exact insertion in a real application before it records setup as working.
 `wayexpand setup --check` reports missing integration dependencies without
@@ -153,6 +207,10 @@ the guide offers a copy-only Quick Picker for manual paste.
 ## Your first minute
 
 ![WayExpand's first-run screen in the Terminal Blue color pack with the steps Connect your desktop, Create a snippet, Test it, and an optional Quick Picker shortcut](docs/images/wayexpand-first-run.png)
+
+Quick Picker opens across supported sessions, but it inserts directly only
+when the route can verify the destination and supports atomic insertion.
+Otherwise it copies the snippet for you to paste.
 
 1. **Connect your desktop** — *Turn on WayExpand* in the GUI, or run
    `wayexpand setup` in a terminal. Setup configures the supported input route
@@ -176,11 +234,28 @@ certification notes, with *Open diagnostics* for the full report.
 Useful commands:
 
 ```sh
-wayexpand doctor          # what this desktop supports, and what is missing
-wayexpand status          # is the daemon running, and on which path
-wayexpand upgrade-status  # is the running daemon from this CLI build?
-wayexpand test ';sig'     # check matching without the desktop
+wayexpand why              # the most likely cause, with one next step
+wayexpand install-check    # are the installed files and integrations present?
+wayexpand doctor           # is an input route available in this desktop session?
+wayexpand debug            # detailed, content-free route diagnostics
+wayexpand debug --test     # test a harmless expansion in a disposable text field
+wayexpand test ';sig'      # check matching only; does not test desktop typing
 ```
+
+If setup or expansion is stuck, start with `wayexpand why` and follow its
+suggested next step. Use `wayexpand install-check` for an installation
+problem, or `wayexpand doctor` for a desktop-session problem. After applying a
+fix, run `wayexpand debug --test` in a disposable text field to check the
+actual route. For the full symptom-by-symptom guide, see
+[Troubleshooting](docs/TROUBLESHOOTING.md).
+
+If you need to ask for help, open **Diagnostics → Export support report** to
+preview the redacted report before saving it; GNOME sessions include GNOME
+Shell, IBus source, and extension checks automatically. From a terminal, run
+`wayexpand support-bundle --output wayexpand-support.json`; GNOME checks are
+included automatically on GNOME. Use `--gnome` to request them on another
+desktop. The report includes the likely cause and one suggested next action.
+Review it before sharing.
 
 For a sysadmin first task, see the [HTTP 503 incident triage
 walkthrough](docs/HTTP503_WALKTHROUGH.md). It generates a validated,
@@ -212,7 +287,7 @@ Built in: `dockerfile` (plus `-python`, `-node`, `-rust`), `compose`,
 `wayexpand new --show playbook`. Jinja and GitHub `{{ … }}` expressions are
 written as `{{{{ … }}}}`. See [Templates](docs/TEMPLATES.md).
 
-## Desktop compatibility
+## Compatibility limits
 
 - **Committed text only.** WayExpand does not see IME preedit/composition;
   finish CJK, dead-key, and Compose sequences before expecting a trigger to

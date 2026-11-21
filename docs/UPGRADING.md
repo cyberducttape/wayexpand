@@ -21,22 +21,22 @@ sudo apt update && sudo apt upgrade wayexpand
 git pull && makepkg -si
 ```
 
-The installer does not restart a running user service. It preserves the
-current process while replacing the binaries, so the new binary is not active
-until you explicitly restart the selected service. Validate the configuration
-first, then restart and verify the service:
+After upgrading, ask WayExpand which action the active installation needs:
 
 ```bash
-wayexpand validate ~/.config/wayexpand/expansions.toml
-systemctl --user restart wayexpand-input-method.service
-systemctl --user is-active wayexpand-input-method.service
+wayexpand upgrade --check
 wayexpand upgrade-status
-wayexpand doctor --json
+wayexpand why
 ```
 
-For an evdev deployment, use `wayexpand-evdev.service` in the restart and
-verification commands instead. Keep the previous release available until the
-health check and a real expansion test pass.
+`upgrade --check` identifies a build mismatch and the exact restart or setup
+action for the active route. Follow that action, then confirm `upgrade-status`
+reports `current`. Finally, test one harmless expansion in the application
+where you use WayExpand. Keep the previous release available until that test
+works.
+
+For a release archive or per-user source install, prefix these commands with
+`"$HOME/.local/bin/wayexpand"` when `~/.local/bin` is not on PATH.
 
 `wayexpand upgrade-status` must report `current` before relying on the new
 build. A `restart-required` result means the responding daemon is still running
@@ -151,12 +151,12 @@ journalctl --user -u wayexpand-input-method.service -n 20
 
 2. **Missing backend**
    - You upgraded but your systemd service points to an unavailable backend
-   - Solution: Run `wayexpand doctor` and enable the correct service
-   - Example: `systemctl --user enable --now wayexpand-input-method.service`
+   - Run `wayexpand why` and follow its suggested action for the active route
+   - If the service is running an older build, run `wayexpand upgrade --check`
 
 3. **Socket permission error**
-   - Old socket file is still present
-   - Solution: Remove it and restart: `rm $XDG_RUNTIME_DIR/wayexpand.sock && systemctl --user restart wayexpand-input-method.service`
+   - Run `wayexpand doctor` and note the socket check and affected service
+   - Inspect that service's recent log with `journalctl --user -u <unit> -n 20`
 
 ### Expansions not working after upgrade
 
@@ -167,7 +167,9 @@ journalctl --user -u wayexpand-input-method.service -n 20
 
 ### GUI shows old settings after upgrade
 
-Restart the GUI: `pkill -f wayexpand-gui && wayexpand-gui`
+Close the WayExpand window, then reopen it from the applications menu. For a
+release archive or per-user source installation, launch it directly with
+`"$HOME/.local/bin/wayexpand-gui"` if `wayexpand-gui` is not on PATH.
 
 ---
 

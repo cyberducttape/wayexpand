@@ -121,7 +121,12 @@ plan retains every required cell and validates reviewed per-platform JSON
 reports without accepting missing or unsupported cells as passes. Each
 application result is a separate scenario × keyboard-profile cell and links to
 reviewable evidence. Report validation rejects headless sessions and requires
-a physical keyboard and reviewer identity. CI runs the headless GNOME IBus
+a physical keyboard and reviewer identity. Every `real-trigger-replacement`
+cell separately records whether WayExpand captured the trigger, removed the
+original trigger, inserted the replacement occurrence count, and retained
+focus in the intended field. A cell cannot pass unless those observations are
+`true`, `true`, `1`, and `true`, respectively; `null` means the observation
+could not be made and leaves the report incomplete. CI runs the headless GNOME IBus
 acceptance test on Ubuntu 24.04/GNOME 46, Debian 13/GNOME 48,
 Ubuntu 26.04/GNOME 50, and Fedora 45/GNOME 51. GNOME 49 (Fedora 43, RHEL 10.2)
 passes everything except the German and French layout cases, where its
@@ -132,6 +137,59 @@ replacement, Unicode, password-purpose pass-through, source switching between
 US, German, and French layouts, and Shell restart/extension upgrade behavior.
 It exercises Chromium's safe pass-through behavior. These hosted jobs validate
 their stated headless scope only; they do not fill the real-session matrix.
+
+The current application-by-layout physical-session results are published in
+the [GNOME application compatibility table](GNOME_APPLICATION_COMPATIBILITY.md).
+It is generated from reviewed per-platform reports; missing reports remain
+`Not tested` and headless results are never promoted into those cells. After
+reviewing a new report, refresh it with:
+
+```sh
+scripts/render-gnome-application-compatibility.py \
+  --report REPORT.json \
+  --output docs/GNOME_APPLICATION_COMPATIBILITY.md
+```
+
+Start a per-platform report while logged into the physical GNOME Wayland
+session being evaluated. For example:
+
+```sh
+python3 scripts/new-gnome-acceptance-report.py \
+  --platform ubuntu-24.04-gnome \
+  --output evidence/ubuntu-24.04-gnome.json \
+  --package-identity 'WayExpand 1.2.3 release archive sha256:…' \
+  --physical-keyboard 'lab keyboard asset KBD-014' \
+  --reviewed-by 'Reviewer Name' \
+  --confirm-physical-session
+```
+
+The command checks that the selected platform matches `/etc/os-release` and
+that the session identifies as GNOME Wayland, detects or accepts the exact
+Shell version and validates a pinned major, records the current commit only
+when the checkout is clean, and creates the report without overwriting an
+existing file. If the checkout is dirty, pass `--wayexpand-commit` with the
+full commit used to build the tested package.
+`--confirm-physical-session` is an operator attestation; the environment
+cannot prove that a physical keyboard is connected. Override the commit or
+Shell version when recording a separately built package with
+`--wayexpand-commit` or `--gnome-shell-version`. The generated template starts
+every application/layout/scenario and lifecycle result as `not-tested`. To
+record results without editing JSON by hand, run:
+
+```sh
+python3 scripts/record-gnome-acceptance-results.py \
+  --report evidence/ubuntu-24.04-gnome.json
+```
+
+The recorder walks each application/scenario/layout cell, then lifecycle
+checks. Perform the displayed test in the named application first; record its
+exact identity, version, input route, result, and evidence reference. For each
+real trigger replacement, it also asks for the four direct observations.
+Progress is saved after every cell, and rerunning resumes at the next
+`not-tested` result. `q` exits safely. Run the printed
+`scripts/check-gnome-acceptance-matrix.py --report …` command when finished.
+The recorder does not observe the tests itself; creating or filling the report
+is not a certification result until its evidence has been reviewed.
 
 The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
@@ -182,11 +240,21 @@ replacement in every GTK/Qt/browser/terminal application.
 They must not be counted as physical-session passes in the platform matrix
 below.
 
-| Platform/session | GTK 3 | GTK 4 | Qt | Firefox / Chromium | Electron | Terminal | Unicode / layouts / password | Restart / upgrade / uninstall | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Fedora 45 / GNOME 51 | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Ubuntu 24.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Ubuntu 26.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Platform/session | GTK 3 | GTK 4 | Qt | Firefox | Chromium | Electron | Terminal | Unicode / layouts / password | Restart / upgrade / uninstall | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Fedora 45 / GNOME 51 | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Ubuntu 24.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Ubuntu 26.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+
+Report each application separately for both the US and German keyboard
+layouts. An application cell must record the four observed results as `trigger
+captured / original trigger removed / replacement appeared exactly once /
+intended field retained focus`, using `pass`, `fail`, or `not tested` for each
+result. For example, `pass / pass / fail / pass` means the trigger was
+captured and removed, but the replacement did not appear exactly once. Keep
+the exact desktop, application, and version in the physical-session report.
+Do not infer a result for Chromium from Firefox, or for one toolkit from
+another.
 
 Each cell requires a separate result. Lifecycle coverage includes clean-user
 installation, component registration, GNOME source activation, a real trigger
@@ -200,14 +268,46 @@ production report demonstrates the required target-integrity and sensitive-
 field contracts. A route without those guarantees stays experimental or
 refuses automatic replacement, regardless of its CI status.
 
+The route contract separates capability availability from real-session
+verification. A production route must have destination identity available and
+verified, atomic replacement, observable and verified physical-input
+interruption, certified sensitive-field handling, and a known recovery
+outcome. A backend acknowledgement is not a known application recovery
+outcome; the application must report whether the transaction was applied or
+rejected. Accordingly, a production route's `application_result` must be
+`observable` and `recovery_outcome_known` must be true; a successful protocol
+write alone does not satisfy either requirement. `wayexpand backend list` and
+`wayexpand doctor --json` report the unsatisfied integrity requirements for
+each route so a missing guarantee has a concrete explanation.
+
 <!-- generated:route-contract:start -->
-| Route | Capture | Injection | Trigger precondition | Output transaction | Application result | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | App identity | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ibus` (IBus) | ibus | ibus | surrounding_text_matches_trigger | separate_delete_and_commit | unobservable | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
-| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | focus_checked_with_compatibility_consent | separate_delete_and_key_events | unobservable | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
-| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | none | separate_delete_and_key_events | unobservable | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
-| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | surrounding_text_matches_trigger | atomic_protocol_batch | unobservable | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
+| Route | Capture | Injection | Trigger precondition | Output transaction | Application result | Destination identity (available / verified) | Physical-input interruption (observable / verified) | Recovery outcome known | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replacement | App identity | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ibus` (IBus) | ibus | ibus | surrounding_text_matches_trigger | separate_delete_and_commit | unobservable | no / not verified | no / not verified | no | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
+| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | focus_checked_with_compatibility_consent | separate_delete_and_key_events | unobservable | yes / not verified | yes / not verified | no | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | none | separate_delete_and_key_events | unobservable | no / not verified | yes / not verified | no | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
+| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | surrounding_text_matches_trigger | atomic_protocol_batch | unobservable | yes / not verified | no / not verified | no | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
+
+### Output prevention and recovery
+
+These route properties answer different questions. Focus tracking reports the
+target WayExpand currently observes; it does not bind a later synthetic key
+event to that application. `atomic_replace` describes whether trigger removal
+and replacement are one protocol operation. `application_result` describes
+whether WayExpand can know what the client finally applied; it is currently
+`unobservable` on every route.
+
+For a split delete-and-output transaction, cancellation and physical-input
+monitoring can stop later output after WayExpand observes an invalidation. They
+cannot recall keys already delivered to an application. The daemon records an
+uncertain or partial outcome, quarantines it, and never replays it; this is
+containment, not repair or proof that the field is intact. A route is not
+production-ready based on focus tracking or successful cancellation alone.
+Its required destination identity, atomicity, interruption observability,
+sensitive-field behavior, and recovery outcome must each be demonstrated on
+the actual compositor and target applications. Missing evidence remains
+unverified in the matrices below.
 
 ## Current evidence
 

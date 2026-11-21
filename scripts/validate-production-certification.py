@@ -132,7 +132,12 @@ def validate_matrix(
             and route.get("atomic_replace") is True
             and route.get("output_transaction") == "atomic_protocol_batch"
             and route.get("trigger_precondition") == "surrounding_text_matches_trigger"
-            and route.get("application_result") == "unobservable"
+            and route.get("application_result") == "observable"
+            and route.get("destination_identity_available") is True
+            and route.get("destination_identity_verified") is True
+            and route.get("physical_input_interruption_observable") is True
+            and route.get("physical_input_interruption_verified") is True
+            and route.get("recovery_outcome_known") is True
             and route.get("sensitive_fields") is True
             and isinstance(support, dict)
             and support.get("implemented") is True
@@ -140,7 +145,8 @@ def validate_matrix(
         ):
             errors.append(
                 f"{label}: the declared route contract does not provide certified "
-                "sensitive-field handling and atomic verified replacement"
+                "destination identity, interruption handling, recovery, sensitive-field "
+                "handling, and atomic verified replacement"
             )
             continue
         if not required or not is_production_evidence(

@@ -61,5 +61,11 @@
     "result",
     "reviewed_by"
   ],
+  "real_trigger_observations": [
+    "trigger_captured",
+    "original_trigger_removed",
+    "replacement_occurrences",
+    "intended_field_retained_focus"
+  ],
   "evidence_requirement": "Every platform × application × required application scenario and every platform × lifecycle scenario requires an independently reviewed result bound to exact package, WayExpand commit, distribution release, GNOME Shell version, application/version where applicable, route, keyboard profiles, and date. Headless IBus protocol tests do not satisfy physical-session evidence. A platform remains not-tested until all required cells have evidence; no result is inferred from another toolkit, browser, package, or distro."
 }

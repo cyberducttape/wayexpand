@@ -578,6 +578,16 @@ impl GuiApp {
                 .and_then(|capabilities| capabilities.inject_atomic_replace),
             gnome_ibus || kde_ibus || ibus_only,
         );
+        let detected_gnome_version = self
+            .compositor_info
+            .strip_prefix("GNOME Shell · ")
+            .filter(|version| *version != "version unavailable")
+            .map(str::to_owned);
+        let detected_gnome_major = detected_gnome_version
+            .as_deref()
+            .and_then(|version| version.split('.').next())
+            .filter(|major| !major.is_empty() && major.chars().all(|ch| ch.is_ascii_digit()))
+            .map(str::to_owned);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -595,6 +605,78 @@ impl GuiApp {
                     ui.label(RichText::new(self.strings.welcome_intro()).color(palette.muted));
                 });
                 ui.add_space(14.0);
+                // Keep first run focused on the one next action: show only
+                // the detected desktop here and fold the full table away.
+                theme::card(ui, palette, |ui| {
+                    ui.set_width(ui.available_width());
+                    if wayexpand_backend_selection::Compositor::detect()
+                        == wayexpand_backend_selection::Compositor::Gnome
+                    {
+                        let version_hint = detected_gnome_version
+                            .as_deref()
+                            .map(|version| {
+                                self.strings.desktop_compatibility_detected_version(version)
+                            })
+                            .unwrap_or_else(|| {
+                                self.strings.desktop_compatibility_version_hint().to_owned()
+                            });
+                        ui.label(RichText::new(version_hint).small().color(palette.muted));
+                    }
+                    egui::CollapsingHeader::new(self.strings.desktop_compatibility_heading())
+                        .id_salt("first_run_desktop_compatibility_details")
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            egui::Grid::new("first_run_desktop_compatibility")
+                                .num_columns(2)
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    let rows = self.strings.desktop_compatibility_rows();
+                                    let detected_major_is_listed =
+                                        detected_gnome_major.as_deref().is_some_and(|major| {
+                                            rows.iter().any(|(desktop, _)| {
+                                                desktop.strip_prefix("GNOME ").is_some_and(
+                                                    |versions| {
+                                                        versions
+                                                            .split(',')
+                                                            .any(|version| version.trim() == major)
+                                                    },
+                                                )
+                                            })
+                                        });
+                                    for (desktop, route) in rows {
+                                        let is_detected =
+                                            detected_gnome_major.as_deref().is_some_and(|major| {
+                                                desktop.strip_prefix("GNOME ").is_some_and(
+                                                    |versions| {
+                                                        versions
+                                                            .split(',')
+                                                            .any(|version| version.trim() == major)
+                                                    },
+                                                ) || desktop.starts_with("Other GNOME")
+                                                    && !detected_major_is_listed
+                                            });
+                                        if is_detected {
+                                            let color = if detected_gnome_major
+                                                .as_deref()
+                                                .is_some_and(|major| {
+                                                    matches!(major, "46" | "48" | "50" | "51")
+                                                }) {
+                                                palette.accent
+                                            } else {
+                                                palette.warning
+                                            };
+                                            ui.label(RichText::new(desktop).strong().color(color));
+                                            ui.label(RichText::new(route).color(color));
+                                        } else {
+                                            ui.label(RichText::new(desktop).strong());
+                                            ui.label(route);
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+                });
+                ui.add_space(10.0);
                 if self.gnome_setup_resume_pending {
                     theme::card(ui, palette, |ui| {
                         ui.set_width(ui.available_width());
@@ -703,7 +785,12 @@ impl GuiApp {
                                         .color(palette.muted),
                                 );
                             });
-                        } else if !(daemon_running || ibus_only) {
+                        } else if !(daemon_running
+                            || ibus_only
+                            || self.current_next_step().is_some_and(|(problem, _)| {
+                                problem == super::Problem::InstallationIncomplete
+                            }))
+                        {
                             ui.label(
                                 RichText::new(self.strings.onboarding_turn_on_help())
                                     .color(palette.muted),
@@ -722,6 +809,12 @@ impl GuiApp {
                                 palette.success,
                                 self.strings.first_run_connected(&route_state_detail),
                             );
+                            if compatibility_replacement_active {
+                                ui.colored_label(
+                                    palette.warning,
+                                    self.strings.compatibility_replacement_active(),
+                                );
+                            }
                         } else {
                             // One problem and one action: the same answer the
                             // banner under the header gives after first run.
@@ -733,11 +826,32 @@ impl GuiApp {
                                         self.strings.problem_text(problem),
                                     );
                                     let help = match problem {
+                                        super::Problem::InstallationIncomplete
+                                            if !self
+                                                .installation_audit
+                                                .failed_components
+                                                .is_empty() =>
+                                        {
+                                            let components = self
+                                                .installation_audit
+                                                .failed_components
+                                                .iter()
+                                                .map(|component| {
+                                                    self.strings
+                                                        .dg_installation_component(component)
+                                                })
+                                                .collect::<Vec<_>>()
+                                                .join(", ");
+                                            Some(
+                                                self.strings
+                                                    .dg_installation_components(&components),
+                                            )
+                                        }
                                         super::Problem::InputSourceNotSetUp => {
-                                            Some(self.strings.gnome_register_help())
+                                            Some(self.strings.gnome_register_help().to_owned())
                                         }
                                         super::Problem::InputSourceNotSelected => {
-                                            Some(self.strings.gnome_select_help())
+                                            Some(self.strings.gnome_select_help().to_owned())
                                         }
                                         _ => None,
                                     };
@@ -801,6 +915,17 @@ impl GuiApp {
                                     }
                                 }
                             }
+                        }
+                        if !route_ready
+                            && theme::secondary_button(
+                                ui,
+                                palette,
+                                self.strings.onboarding_open_diagnostics(),
+                            )
+                            .clicked()
+                        {
+                            self.diagnostics_open = true;
+                            self.refresh_diagnostics(false);
                         }
                         // A healthy terminal-scoped route can still be too
                         // narrow for a user's browser/editor workflow. Keep the
@@ -1105,12 +1230,6 @@ impl GuiApp {
                         if let Some(assurance) = route_assurance {
                             ui.label(note(assurance));
                         }
-                        if compatibility_replacement_active {
-                            ui.colored_label(
-                                palette.warning,
-                                self.strings.compatibility_replacement_active(),
-                            );
-                        }
                         if let Some(route) = recommendation {
                             ui.label(note(&format!(
                                 "{recommended_route} · {recommended_route_detail}"
@@ -1253,7 +1372,7 @@ mod guided_setup_tests {
         let strings = crate::lang::Strings::new(crate::lang::Language::English);
         assert!(strings
             .compatibility_replacement_active()
-            .contains("Compatibility replacement is enabled (non-atomic)"));
+            .contains("deletes the trigger and types the replacement separately"));
     }
 
     #[test]

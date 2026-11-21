@@ -1,6 +1,32 @@
 //! Diagnostics window text.
 
 impl super::Strings {
+    pub(crate) fn dg_report_likely_cause(&self) -> &'static str {
+        match self.lang {
+            super::Language::English => "Likely cause",
+            super::Language::German => "Wahrscheinliche Ursache",
+            super::Language::Indonesian => "Kemungkinan penyebab",
+        }
+    }
+
+    pub(crate) fn dg_report_next_action(&self) -> &'static str {
+        match self.lang {
+            super::Language::English => "Next action",
+            super::Language::German => "Nächster Schritt",
+            super::Language::Indonesian => "Tindakan berikutnya",
+        }
+    }
+
+    pub(crate) fn dg_likely_cause_and_next_action(&self) -> &'static str {
+        match self.lang {
+            super::Language::English => "Likely cause and one suggested next action",
+            super::Language::German => {
+                "Wahrscheinliche Ursache und ein empfohlener nächster Schritt"
+            }
+            super::Language::Indonesian => "Kemungkinan penyebab dan satu tindakan yang disarankan",
+        }
+    }
+
     pub(crate) fn dg_installation_identity_issue(&self, issue: &str) -> &'static str {
         match (self.lang, issue) {
             (super::Language::English, "path") => {

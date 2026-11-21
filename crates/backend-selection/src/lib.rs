@@ -931,7 +931,7 @@ mod tests {
     fn route_maturity_is_a_known_value_and_none_is_certified_yet() {
         for route in catalog_for_tests() {
             assert!(
-                matches!(route.status.as_str(), "experimental" | "certified"),
+                matches!(route.status.as_str(), "experimental" | "supported"),
                 "{} has unknown status {:?}",
                 route.id,
                 route.status

@@ -305,8 +305,8 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
         raise ValueError("certification matrix targets must be an array")
     target_ids = {target.get("id") for target in targets if isinstance(target, dict)}
     rows = [
-        "| Route | Capture | Injection | Trigger precondition | Output transaction | Application result | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | App identity | Status |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Route | Capture | Injection | Trigger precondition | Output transaction | Application result | Destination identity (available / verified) | Physical-input interruption (observable / verified) | Recovery outcome known | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replacement | App identity | Status |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     seen: set[str] = set()
     for route in routes:
@@ -315,6 +315,9 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
         required = (
             "id", "label", "path", "capture", "injection", "sensitive_fields", "sensitive_field_support",
             "trigger_precondition", "output_transaction", "application_result", "atomic_replace",
+            "destination_identity_available", "destination_identity_verified",
+            "physical_input_interruption_observable", "physical_input_interruption_verified",
+            "recovery_outcome_known",
             "app_identity", "focus_tracking", "status",
             "setup_backend", "setup_detail", "certification_targets",
         )
@@ -326,9 +329,18 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
         for key in ("label", "path", "capture", "injection", "app_identity", "status", "setup_backend", "setup_detail"):
             if not isinstance(route[key], str) or not route[key]:
                 raise ValueError(f"{route_id}: {key} must be a non-empty string")
-        for key in ("sensitive_fields", "atomic_replace", "focus_tracking"):
+        for key in (
+            "sensitive_fields", "atomic_replace", "focus_tracking",
+            "destination_identity_available", "destination_identity_verified",
+            "physical_input_interruption_observable", "physical_input_interruption_verified",
+            "recovery_outcome_known",
+        ):
             if not isinstance(route[key], bool):
                 raise ValueError(f"{route_id}: {key} must be boolean")
+        if route["destination_identity_verified"] and not route["destination_identity_available"]:
+            raise ValueError(f"{route_id}: verified destination identity must be available")
+        if route["physical_input_interruption_verified"] and not route["physical_input_interruption_observable"]:
+            raise ValueError(f"{route_id}: verified interruption must be observable")
         if route["trigger_precondition"] not in {
             "surrounding_text_matches_trigger",
             "focus_checked_with_compatibility_consent",
@@ -341,8 +353,10 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
             "atomic_protocol_batch",
         }:
             raise ValueError(f"{route_id}: invalid output_transaction")
-        if route["application_result"] != "unobservable":
-            raise ValueError(f"{route_id}: application_result must remain unobservable")
+        if route["application_result"] not in {"observable", "unobservable"}:
+            raise ValueError(f"{route_id}: application_result must be observable or unobservable")
+        if route["recovery_outcome_known"] and route["application_result"] != "observable":
+            raise ValueError(f"{route_id}: a known recovery outcome requires an observable application result")
         if route["atomic_replace"] != (route["output_transaction"] == "atomic_protocol_batch"):
             raise ValueError(f"{route_id}: atomic_replace disagrees with output_transaction")
         support = route["sensitive_field_support"]
@@ -369,7 +383,11 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
         rows.append(
             f"| `{route_id}` ({route['label']}) | {route['capture']} | {route['injection']} | "
             f"{route['trigger_precondition']} | {route['output_transaction']} | "
-            f"{route['application_result']} | {'available' if route['focus_tracking'] else 'unavailable'} | "
+            f"{route['application_result']} | "
+            f"{'yes' if route['destination_identity_available'] else 'no'} / {'verified' if route['destination_identity_verified'] else 'not verified'} | "
+            f"{'yes' if route['physical_input_interruption_observable'] else 'no'} / {'verified' if route['physical_input_interruption_verified'] else 'not verified'} | "
+            f"{'yes' if route['recovery_outcome_known'] else 'no'} | "
+            f"{'available' if route['focus_tracking'] else 'unavailable'} | "
             f"{'implemented' if support['implemented'] else 'not implemented'} | "
             f"{support['protocol_signal']} | {support['compositor_observation']} | "
             f"{'certified' if support['certified'] else 'not certified'} | "

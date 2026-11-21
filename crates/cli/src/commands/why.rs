@@ -179,6 +179,7 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
                 "Run `wayexpand upgrade --check` with the CLI from the active installation. Resolve the build identity warning, then run `wayexpand why` again.",
             )
         };
+        let next_action = daemon_build_recovery_action(state, next_action);
         if json {
             println!(
                 "{}",
@@ -215,7 +216,12 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
         }
         return Err(classified_error(
             CliErrorKind::Daemon,
-            format!("WX-VERSION-001: {answer} Run `wayexpand upgrade --check` before trusting route diagnostics."),
+            format!(
+                "WX-VERSION-001: {answer} {}",
+                runnable_cli_suggestion(
+                    "Run `wayexpand upgrade --check` before trusting route diagnostics."
+                )
+            ),
         ));
     }
     let daemon = status.as_ref().and_then(daemon_route);
@@ -268,17 +274,16 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
         )
     });
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report_json(
-                daemon.as_ref(),
-                ibus_field.as_ref(),
-                now,
-                daemon_status_schema,
-                daemon_status_compatible,
-                input_method_guidance.as_ref(),
-            ))?
+        let mut report = report_json(
+            daemon.as_ref(),
+            ibus_field.as_ref(),
+            now,
+            daemon_status_schema,
+            daemon_status_compatible,
+            input_method_guidance.as_ref(),
         );
+        make_report_actions_runnable(&mut report);
+        println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         print_report(
             daemon.as_ref(),
@@ -553,7 +558,7 @@ fn diagnose_input_method_route(
             return Some(InputMethodGuidance {
                 state: "trigger_not_matched",
                 answer: "WayExpand received input in a recent IBus field, but no configured trigger matched its latest input.",
-                action: "Check the exact trigger, enabled state, match mode, and application filters with `wayexpand explain 'THE_TRIGGER'`. Then type the trigger in the affected application and verify the visible replacement; a matcher result alone does not prove delivery. Use `wayexpand-gui --picker --copy-only` and paste if this field cannot be replaced safely.",
+                action: "Replace `TRIGGER` with the exact trigger you typed, then run `wayexpand explain 'TRIGGER'` to check its enabled state, match mode, and application filters. Type it in the affected application and verify the visible replacement; a matcher result alone does not prove delivery. Use `wayexpand-gui --picker --copy-only` and paste if this field cannot be replaced safely.",
             });
         }
         let verdict = IbusFieldVerdict::of(field);
@@ -852,6 +857,60 @@ fn report_json(
     })
 }
 
+fn make_report_actions_runnable(report: &mut serde_json::Value) {
+    for section in ["diagnosis", "desktop_input_route"] {
+        let Some(action) = report
+            .get_mut(section)
+            .and_then(|section| section.get_mut("next_action"))
+            .and_then(|action| action.as_str())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if let Some(target) = report
+            .get_mut(section)
+            .and_then(|section| section.get_mut("next_action"))
+        {
+            *target = serde_json::Value::String(runnable_cli_suggestion(&action));
+        }
+    }
+}
+
+fn runnable_cli_suggestion(suggestion: &str) -> String {
+    let cli = crate::commands::install::make_cli_command_runnable("wayexpand".into());
+    let gui = crate::commands::install::make_cli_command_runnable("wayexpand-gui".into());
+    suggestion
+        .replace("`wayexpand-gui ", &format!("`{gui} "))
+        .replace("`wayexpand-gui`", &format!("`{gui}`"))
+        .replace("`wayexpand ", &format!("`{cli} "))
+        .replace("`wayexpand`", &format!("`{cli}`"))
+}
+
+/// Point a build-mismatch diagnosis at the CLI that can actually inspect the
+/// active payload. A checkout or stale CLI cannot safely tell the user to
+/// apply a restart based on its own install identity.
+fn daemon_build_recovery_action(state: &str, fallback: &str) -> String {
+    let install = crate::doctor::status::cli_install_identity();
+    let Some(active_cli) = install
+        .active_user_cli
+        .filter(|path| install.cli_matches_active_user_install == Some(false) && path.is_file())
+    else {
+        return runnable_cli_suggestion(fallback);
+    };
+    let cli = crate::commands::shell_single_quote(&active_cli.to_string_lossy());
+    let check = format!("{cli} upgrade --check");
+    let why = format!("{cli} why");
+    if state == "restart_required" {
+        format!(
+            "Run `{check}` with the active installation, follow its reported action, then run `{why}` again."
+        )
+    } else {
+        format!(
+            "Run `{check}` with the active installation and resolve its build identity warning, then run `{why}` again."
+        )
+    }
+}
+
 fn print_report(
     daemon: Option<&DaemonRoute>,
     ibus_field: Option<&IbusFieldEvidence>,
@@ -869,7 +928,12 @@ fn print_report(
                 .map(|schema| schema.to_string())
                 .unwrap_or_else(|| "unknown".into())
         );
-        println!("  Fix: run `wayexpand upgrade --check` before trusting route diagnostics.");
+        println!(
+            "  Fix: {}",
+            runnable_cli_suggestion(
+                "run `wayexpand upgrade --check` before trusting route diagnostics."
+            )
+        );
         if ibus_field.is_some() {
             println!();
         } else {
@@ -883,8 +947,14 @@ fn print_report(
         && daemon_status_compatible != Some(false)
     {
         println!("No WayExpand typing route is running, so nothing can expand.");
-        println!("Next: run `wayexpand setup`, then `wayexpand doctor`.");
-        println!("For manual insertion meanwhile: open `wayexpand-gui --picker --copy-only` and paste the selected snippet.");
+        println!(
+            "Next: {}",
+            runnable_cli_suggestion("run `wayexpand setup`, then `wayexpand doctor`.")
+        );
+        println!(
+            "For manual insertion meanwhile: open {} and paste the selected snippet.",
+            runnable_cli_suggestion("`wayexpand-gui --picker --copy-only`")
+        );
         return;
     }
     if let Some(guidance) = scope_guidance.as_ref().or(input_method) {
@@ -898,7 +968,7 @@ fn print_report(
             guidance.state.replace('_', " ")
         );
         println!("  {}", guidance.answer);
-        println!("  Next: {}", guidance.action);
+        println!("  Next: {}", runnable_cli_suggestion(guidance.action));
         println!(
             "  Trigger match: {}. Text delivery: {}.",
             pattern_match_text(pattern_match),
@@ -931,15 +1001,24 @@ fn print_report(
                         delivery_status_text(delivery_status)
                     );
                     println!("  {}", sentence(verdict.explanation()));
-                    println!("  Next: {}", ibus_field_action(verdict, field.latest_match));
+                    println!(
+                        "  Next: {}",
+                        runnable_cli_suggestion(ibus_field_action(verdict, field.latest_match))
+                    );
                 }
                 None if field.keys_seen > 0 => {
                     println!("  IBus received typing in this login session, but has no recent field-level input evidence.");
-                    println!("  Next: {}", ibus_no_current_field_action(field.keys_seen));
+                    println!(
+                        "  Next: {}",
+                        runnable_cli_suggestion(ibus_no_current_field_action(field.keys_seen))
+                    );
                 }
                 None => {
                     println!("  No typing has reached the IBus engine in this login session.");
-                    println!("  Next: {}", ibus_no_current_field_action(0));
+                    println!(
+                        "  Next: {}",
+                        runnable_cli_suggestion(ibus_no_current_field_action(0))
+                    );
                 }
             }
             println!();
@@ -998,7 +1077,7 @@ fn print_report(
             );
             println!("  {answer}");
             if let Some(fix) = fix {
-                println!("  Fix: {fix}");
+                println!("  Fix: {}", runnable_cli_suggestion(&fix));
             }
             if !diagnosis.recent.is_empty() {
                 println!("  Recent expansions (newest first; no text is recorded):");
@@ -1028,7 +1107,7 @@ fn print_report(
             {
                 println!("  Focus changed since this input; the application is not identified by this telemetry.");
             }
-            println!("  Next: {}", guidance.action);
+            println!("  Next: {}", runnable_cli_suggestion(guidance.action));
             println!("  Trigger match: not established. Text delivery: not established.");
             println!("  A matcher preview checks the rule only; it does not verify insertion into the field.");
         }
@@ -1170,7 +1249,7 @@ fn verdict_text(
                     ""
                 }
             ),
-            Some("Run `wayexpand explain 'the trigger you typed'` to check the pattern and app filter; this does not test desktop input or insertion. Then run `wayexpand debug --test` in the affected app and inspect the visible text.".to_owned()),
+            Some("Replace `TRIGGER` with the exact trigger you typed, then run `wayexpand explain 'TRIGGER'` to check the pattern and app filter; this does not test desktop input or insertion. Then run `wayexpand debug --test` in the affected app and inspect the visible text.".to_owned()),
         ),
         Verdict::LastStopped(kind) => {
             let completion = diagnosis
@@ -1197,11 +1276,11 @@ fn stopped_text(kind: OutcomeKind, completion: &str) -> (String, Option<String>)
         ),
         K::Unknown => (
             "The route could not tell whether the app received the last expansion.".into(),
-            Some("check the field before typing on"),
+            Some("inspect the intended field and any field that may have received output; correct partial or misplaced text by hand, and do not retry until the result is clear"),
         ),
         K::Partial => (
             "The last expansion was only partly written.".into(),
-            Some("check the field and correct it by hand"),
+            Some("inspect the intended field and any field that may have received output; correct partial or misplaced text by hand, and do not retry this expansion"),
         ),
         K::BlockedByPolicy => (
             "Organization or command policy stopped the last expansion.".into(),
@@ -1267,7 +1346,7 @@ fn ibus_field_action(
 ) -> &'static str {
     use IbusFieldVerdict as V;
     if latest_match == telemetry::IbusLatestMatch::NoMatch {
-        return "Check the exact trigger, enabled state, match mode, and application filters with `wayexpand explain 'THE_TRIGGER'`. Then type the trigger in the affected application and verify the visible replacement; a matcher result alone does not prove delivery. Use `wayexpand-gui --picker --copy-only` and paste if this field cannot be replaced safely.";
+        return "Replace `TRIGGER` with the exact trigger you typed, then run `wayexpand explain 'TRIGGER'` to check its enabled state, match mode, and application filters. Type it in the affected application and verify the visible replacement; a matcher result alone does not prove delivery. Use `wayexpand-gui --picker --copy-only` and paste if this field cannot be replaced safely.";
     }
     match verdict {
         V::OutputEmittedUnverified => {
@@ -1286,7 +1365,7 @@ fn ibus_field_action(
             "This field cannot support safe automatic replacement. Open `wayexpand-gui --picker --copy-only` and paste manually."
         }
         V::Mismatch => {
-            "Check the exact trigger with `wayexpand explain 'THE_TRIGGER'`; inspect the field before trying again."
+            "Replace `TRIGGER` with the exact trigger you typed, then run `wayexpand explain 'TRIGGER'`; inspect the field before trying again."
         }
         V::Policy => {
             "Run `wayexpand policy check --json` and `wayexpand doctor --security`; ask the policy administrator before changing a restriction."

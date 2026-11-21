@@ -70,6 +70,7 @@ install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$release_dir/ibus/com
 install -m 0644 "$project_dir/expansions.toml" "$release_dir/expansions.toml"
 install -m 0600 "$project_dir/broker.toml.example" "$release_dir/broker.toml.example"
 install -m 0755 "$project_dir/scripts/install-release.sh" "$release_dir/scripts/"
+install -m 0644 "$project_dir/scripts/desktop-compatibility.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/install-xdg-systemd-dropins.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/hash-install-payload.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/uninstall-user.sh" "$release_dir/scripts/"
@@ -135,7 +136,7 @@ grep -F 'Process to restart: /test/wayexpand-daemon (PID 4242)' \
     "$test_root/release-install.out" >/dev/null
 grep -F 'Service: wayexpand-evdev.service (systemd --user)' \
     "$test_root/release-install.out" >/dev/null
-grep -F 'wayexpand upgrade --apply' "$test_root/release-install.out" >/dev/null
+grep -F '/wayexpand" upgrade --apply' "$test_root/release-install.out" >/dev/null
 
 PATH="$stub_bin:$PATH" UPGRADE_REPORT=broker \
 HOME="$test_root/broker-home" XDG_CONFIG_HOME="$test_root/broker-config" \
@@ -144,12 +145,12 @@ grep -F 'Action Broker process to restart: /test/wayexpand-action-broker (PID 43
     "$test_root/broker-install.out" >/dev/null
 grep -F 'Service: wayexpand-action-broker.service (systemd --user)' \
     "$test_root/broker-install.out" >/dev/null
-grep -F 'wayexpand upgrade --apply' "$test_root/broker-install.out" >/dev/null
+grep -F '/wayexpand" upgrade --apply' "$test_root/broker-install.out" >/dev/null
 
 PATH="$stub_bin:$PATH" UPGRADE_REPORT=none \
 HOME="$test_root/no-upgrade-home" XDG_CONFIG_HOME="$test_root/no-upgrade-config" \
 "$release_dir/scripts/install-release.sh" >"$test_root/no-upgrade-install.out" 2>&1
-if grep -F 'wayexpand upgrade --apply' "$test_root/no-upgrade-install.out" >/dev/null; then
+if grep -F '/wayexpand" upgrade --apply' "$test_root/no-upgrade-install.out" >/dev/null; then
     printf '%s\n' 'release installer recommended an upgrade without a runtime mismatch' >&2
     exit 1
 fi

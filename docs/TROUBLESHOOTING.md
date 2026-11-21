@@ -4,6 +4,21 @@
 
 ---
 
+## Start with the symptom
+
+| What is wrong? | First step |
+| --- | --- |
+| `wayexpand` is not found in this terminal | For a per-user install, run `"$HOME/.local/bin/wayexpand"` directly; if that works, add `~/.local/bin` to `PATH`. For a distro package, verify the package installed. |
+| The installer failed or its CLI file is missing | Repeat the selected method from [Install](../README.md#install). Per-user installs place the CLI in `~/.local/bin`; distro packages provide `wayexpand` on `PATH`. `install-check` needs an installed CLI. |
+| Installed components are missing or an update failed | Run `wayexpand install-check` to see which files need repair. |
+| Desktop integration or route is not ready | Run `wayexpand setup --check` for the desktop checks and next action; it does not change setup. |
+| WayExpand opens, but a trigger does not expand | Type the trigger once in the affected field, then run `wayexpand why`. |
+| You need help from someone else | Open **Diagnostics → Export support report**, preview it, then save and review the redacted report before sharing. |
+
+For a release archive or per-user source install, prefix the other commands in
+this guide with `"$HOME/.local/bin/wayexpand"` when `~/.local/bin` is not on
+`PATH`.
+
 Start with the direct answer to **“Why didn't my expansion work?”**:
 
 ```sh
@@ -21,6 +36,18 @@ The report keeps the stages distinct: a local matcher preview can show that a
 rule matches, but only a real application test can verify that replacement
 text appeared in that application's field. Even an acknowledged output
 operation does not prove the application changed its text.
+
+To share diagnostics, open **Diagnostics → Export support report** and preview
+the redacted report before saving. GNOME sessions automatically include GNOME
+Shell, IBus source, and extension checks. From a terminal, run
+`wayexpand support-bundle --output wayexpand-support.json`; GNOME sessions
+include GNOME-specific checks automatically. Use `--gnome` to request those
+checks on another desktop. Current source builds include a `first_step`
+diagnosis with the likely cause and one suggested action, alongside detailed
+route evidence and a redacted installation audit. Older installed versions
+may only include the detailed sections; check `wayexpand --version` if the
+`first_step` field is missing. Component names and states are included, while
+installation paths are omitted. Inspect the report before sending it to anyone.
 
 For more detailed, content-free diagnostics, use:
 
@@ -113,8 +140,9 @@ remote-desktop, or sandboxed-app behavior.
 `debug --test` is an interactive desktop integration check that chooses a
 known harmless tutorial snippet, if one is configured. It never picks an
 arbitrary personal snippet automatically. If no tutorial is available, create
-one in the GUI or review a snippet with `wayexpand preview TRIGGER` and pass
-its trigger explicitly. Review the expected text first with
+one in the GUI or replace `TRIGGER` with the exact trigger (keep the quotes for
+punctuation) and review a snippet with `wayexpand preview 'TRIGGER'`. Pass
+that same trigger explicitly. Review the expected text first with
 `wayexpand preview`, select the target application class, and confirm before
 typing the trigger. It waits for sanitized capture/output evidence and then
 asks you to confirm exact visible text. It never presses Enter, never retries
@@ -234,8 +262,9 @@ through GNOME Shell, then independently verify the IBus engine.
 Configuration readiness does not prove that a text field receives input or
 that an application applied a replacement. Run `wayexpand debug --test` to
 use the harmless tutorial snippet when configured. If it is unavailable,
-review an enabled static snippet with `wayexpand preview TRIGGER`, then pass
-that exact trigger to `wayexpand debug --test 'TRIGGER'`. Confirm the visible
+replace `TRIGGER` with the exact trigger (keep the quotes for punctuation),
+review it with `wayexpand preview 'TRIGGER'`, then pass that trigger to
+`wayexpand debug --test 'TRIGGER'`. Confirm the visible
 result in the affected application.
 
 ### GNOME setup continuation
@@ -700,16 +729,20 @@ wayexpand-daemon /tmp/test-expansions.toml  # Test without installing
 ## Getting Help
 
 **Before reporting an issue:**
-1. Run `wayexpand doctor` and save the output
-2. Check the logs: `journalctl --user -u wayexpand-input-method.service -n 100`
-3. Search existing issues: https://github.com/cyberducttape/wayexpand/issues
-4. Try the steps above in this guide
+1. Start with `wayexpand why` and follow its next action
+2. Try the result once in a harmless text field
+3. Preview and save **Diagnostics → Export support report**, or create one with
+   `wayexpand support-bundle --output wayexpand-support.json`
+4. Search existing issues: https://github.com/cyberducttape/wayexpand/issues
 
 **When reporting:**
-- Include output from `wayexpand doctor --json`
-- Include relevant log excerpts (never include snippet content or passwords)
+- Review the redacted support report before attaching it
 - Include your desktop/compositor version
-- Describe the exact steps to reproduce
+- Describe the exact steps to reproduce and what appeared in the test field
+
+Do not attach raw journal output or configuration files unless a maintainer
+asks for them; they can contain paths or other information that the support
+report deliberately omits.
 
 **Resources:**
 - [GETTING_STARTED.md](GETTING_STARTED.md) — Installation and first steps

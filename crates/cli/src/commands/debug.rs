@@ -208,6 +208,13 @@ struct DesktopTestOptions {
     controlled_client: bool,
 }
 
+/// Keep recovery commands usable when this CLI was launched by absolute path
+/// because its install directory is not on PATH.
+fn runnable_cli_suggestion(suggestion: &str) -> String {
+    let cli = crate::commands::install::make_cli_command_runnable("wayexpand".into());
+    suggestion.replace("`wayexpand ", &format!("`{cli} "))
+}
+
 pub(crate) fn debug_command(args: Args) -> Result<()> {
     let mut live = false;
     let mut json = false;
@@ -504,7 +511,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                         anyhow::anyhow!("configuration check failed: {}", error.safe_summary())
                     })?;
                 safe_default_desktop_test_trigger(&config).ok_or_else(|| {
-                    anyhow::anyhow!("no dedicated harmless test snippet is available; create one with the WayExpand GUI Test Expansion flow, or review a specific snippet with `wayexpand preview TRIGGER` and select it explicitly with `wayexpand debug --test TRIGGER`")
+                    anyhow::anyhow!("no dedicated harmless test snippet is available; create one with the WayExpand GUI Test Expansion flow, or replace `TRIGGER` with the exact trigger (keep the quotes for punctuation), review it with `wayexpand preview 'TRIGGER'`, then select it explicitly with `wayexpand debug --test 'TRIGGER'`")
                 })?
             }
         };
@@ -697,7 +704,9 @@ fn desktop_test_for(
         .iter()
         .find(|item| item.is_keyboard_matchable() && item.answers_to(trigger))
     else {
-        bail!("no enabled expansion matches that trigger; run `wayexpand debug --trigger <trigger>` to inspect matching")
+        bail!("{}", runnable_cli_suggestion(
+            "no enabled expansion matches that trigger; replace `TRIGGER` with the exact text you typed, then run `wayexpand debug --trigger 'TRIGGER'` to inspect matching (keep the quotes for punctuation)"
+        ))
     };
     if expansion.command.is_some() || expansion.replacement.contains("{{") {
         bail!("desktop test is limited to static text snippets; command-backed and templated snippets are excluded")
@@ -806,7 +815,10 @@ fn desktop_test_for(
         }
     }
     let quoted_trigger = crate::commands::shell_single_quote(trigger);
-    println!("\nReview the expected text with `wayexpand preview {quoted_trigger}` first.");
+    let preview_command = crate::commands::install::make_cli_command_runnable(format!(
+        "wayexpand preview {quoted_trigger}"
+    ));
+    println!("\nReview the expected text with `{preview_command}` first.");
     println!("This test types the configured replacement into the focused application when you type {trigger:?}.");
     let application_class = if let Some(application_class) = options.application_class.as_deref() {
         application_class.trim().to_owned()
@@ -876,7 +888,9 @@ fn desktop_test_for(
         println!(
             "Capture [{test_id}]: FAIL — no sanitized input activity reached WayExpand within 30 seconds."
         );
-        println!("Next: check the active input method with `wayexpand ibus status` and inspect `wayexpand debug --live`.");
+        println!("{}", runnable_cli_suggestion(
+            "Next: check the active input method with `wayexpand ibus status` and inspect `wayexpand debug --live`."
+        ));
         println!("DESKTOP TEST RESULT: INPUT NOT OBSERVED");
         if gnome {
             println!("Problem: WX-GNOME-IM-003 — GNOME/IBus is configured, but no safe-field input activity was observed. Check the selected GNOME source and whether this application uses IBus.");
@@ -922,7 +936,9 @@ fn desktop_test_for(
     }
     if !output_seen {
         println!("Output [{test_id}]: NO CORRELATED RESULT — no output completion was reported during this test window.");
-        println!("No second insertion was attempted. Inspect `wayexpand debug --live` and the target field.");
+        println!("{}", runnable_cli_suggestion(
+            "No second insertion was attempted. Inspect `wayexpand debug --live` and the target field."
+        ));
         println!("DESKTOP TEST RESULT: NO OUTPUT OUTCOME");
         if gnome {
             println!("Problem: WX-GNOME-IM-004 — activity was observed, but no expansion outcome was correlated with this test window. Check matching, configuration and replacement consent.");
@@ -990,7 +1006,9 @@ fn desktop_test_for(
 fn gnome_interactive_test() -> Result<()> {
     let report = wayexpand_backend_ibus::chain::diagnose();
     if report.desktop != wayexpand_backend_ibus::chain::IbusDesktop::Gnome {
-        bail!("--gnome --interactive requires a GNOME session; run `wayexpand doctor --gnome` for available diagnostics");
+        bail!("{}", runnable_cli_suggestion(
+            "--gnome --interactive requires a GNOME session; run `wayexpand doctor --gnome` for available diagnostics"
+        ));
     }
     println!("GNOME interactive test — no keystrokes or snippet contents are recorded.");
     for id in [
@@ -1019,7 +1037,9 @@ fn gnome_interactive_test() -> Result<()> {
                     _ => "WX-GNOME-IM-001",
                 });
                 println!("Problem: {problem}");
-                println!("Next: run `wayexpand doctor --gnome` and follow its fix. The test stopped before inserting anything.");
+                println!("{}", runnable_cli_suggestion(
+                    "Next: run `wayexpand doctor --gnome` and follow its fix. The test stopped before inserting anything."
+                ));
                 return Ok(());
             }
         }
@@ -1043,7 +1063,9 @@ fn gnome_interactive_test() -> Result<()> {
     } else if test_result == DesktopTestResult::NotTested {
         println!("GNOME test was cancelled; no final insertion result is available.");
     } else {
-        println!("GNOME test not verified. Run `wayexpand doctor --gnome` for the next likely failing stage.");
+        println!("{}", runnable_cli_suggestion(
+            "GNOME test not verified. Run `wayexpand doctor --gnome` for the next likely failing stage."
+        ));
     }
     Ok(())
 }

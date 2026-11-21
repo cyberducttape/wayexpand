@@ -475,6 +475,8 @@ jobs:
         run: bash scripts/test-build-identity.sh
       - name: Test release ancestry check
         run: bash scripts/test-release-ancestry.sh
+      - name: Test Launchpad build check
+        run: python3 scripts/test-launchpad-builds.py
 
   docs:
     name: Documentation Validation

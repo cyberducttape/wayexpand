@@ -1117,6 +1117,61 @@ fn setup_next_action(
     )
 }
 
+/// Make setup's copyable next-step commands work when the user launched the
+/// CLI by absolute path because its install directory is not on PATH.
+pub(crate) fn make_cli_command_runnable(command: String) -> String {
+    let (binary, remainder) = if let Some(remainder) = command.strip_prefix("wayexpand ") {
+        ("wayexpand", format!(" {remainder}"))
+    } else if command == "wayexpand" {
+        ("wayexpand", String::new())
+    } else if let Some(remainder) = command.strip_prefix("wayexpand-gui ") {
+        ("wayexpand-gui", format!(" {remainder}"))
+    } else if command == "wayexpand-gui" {
+        ("wayexpand-gui", String::new())
+    } else {
+        return command;
+    };
+
+    let Ok(current_executable) = env::current_exe() else {
+        return command;
+    };
+    let executable = if binary == "wayexpand" {
+        if current_executable
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some("wayexpand")
+        {
+            return command;
+        }
+        current_executable
+    } else {
+        let Some(directory) = current_executable.parent() else {
+            return command;
+        };
+        directory.join(binary)
+    };
+    if !executable.is_file() {
+        return command;
+    }
+
+    let canonical_executable = fs::canonicalize(&executable).unwrap_or_else(|_| executable.clone());
+    let available_by_name = env::var_os("PATH").is_some_and(|path| {
+        env::split_paths(&path).any(|directory| {
+            let candidate = directory.join(binary);
+            fs::canonicalize(candidate).is_ok_and(|candidate| candidate == canonical_executable)
+        })
+    });
+    if available_by_name {
+        return command;
+    }
+
+    format!(
+        "{}{}",
+        crate::commands::shell_single_quote(&executable.to_string_lossy()),
+        remainder
+    )
+}
+
 pub(crate) fn setup_check(json: bool) -> Result<()> {
     let rows = checks();
     let caps = wayexpand_backend_selection::probe_capabilities();
@@ -1169,16 +1224,16 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
         daemon_status.as_ref(),
     );
     let manual_test_command = first_run_test_trigger.as_deref().map(|trigger| {
-        format!(
+        make_cli_command_runnable(format!(
             "wayexpand debug --test {}",
             crate::commands::shell_single_quote(trigger)
-        )
+        ))
     });
     let test_preview_command = first_run_test_trigger.as_deref().map(|trigger| {
-        format!(
+        make_cli_command_runnable(format!(
             "wayexpand preview {}",
             crate::commands::shell_single_quote(trigger)
-        )
+        ))
     });
     let (next_action, next_action_reason) = setup_next_action(
         &integration,
@@ -1193,11 +1248,12 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
             first_run_test_command: manual_test_command.as_deref(),
         },
     );
-    let activation_command = if setup_backend == "unavailable" {
+    let next_action = make_cli_command_runnable(next_action);
+    let activation_command = make_cli_command_runnable(if setup_backend == "unavailable" {
         "wayexpand setup --apply".to_owned()
     } else {
         format!("wayexpand setup --backend {setup_backend} --apply")
-    };
+    });
     let activation_state = if activation_active {
         "running"
     } else if configured_backend == Some(setup_backend) {
@@ -1215,7 +1271,8 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     };
     let recommended_route_command = configured_backend
         .filter(|backend| *backend != recommendation.backend.as_str())
-        .map(|_| "wayexpand setup --mode recommended --apply");
+        .map(|_| "wayexpand setup --mode recommended --apply".to_owned())
+        .map(make_cli_command_runnable);
     if json {
         println!(
             "{}",
@@ -1239,7 +1296,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                 // means a route candidate exists and setup can select it.
                 "route_ready":route_available,
                 "installation_checks":rows,
-                "desktop":{"session":crate::doctor::backends::session_description(),"recommended_input":recommendation.label,"recommended_backend":recommendation.backend,"recommended_route_command":recommended_route_command,"configured_backend":configured_backend,"setup_backend":setup_backend,"setup_backend_reason":if configured_backend.is_some() {"preserve_configured_route"} else {"automatic_recommendation"},"reason":recommendation.detail},
+                "desktop":{"session":crate::doctor::backends::session_description(),"recommended_input":recommendation.label,"recommended_backend":recommendation.backend,"recommended_route_command":recommended_route_command.as_deref(),"configured_backend":configured_backend,"setup_backend":setup_backend,"setup_backend_reason":if configured_backend.is_some() {"preserve_configured_route"} else {"automatic_recommendation"},"reason":recommendation.detail},
                 "route_assessments":route_plan.routes.iter().map(|planned| serde_json::json!({
                     "id":planned.contract.id,
                     "standing":planned.standing.as_str(),
@@ -1258,11 +1315,22 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
             })
         );
     } else {
-        println!("WayExpand Setup Check\n\nInstalled artifacts:");
+        println!("WayExpand Setup Check\n\nNext action: {next_action}");
+        println!(
+            "{}\n",
+            crate::help::wrap(&next_action_reason, 8, crate::help::WIDTH)
+        );
+        println!("Evidence: installed artifacts:");
         for r in &rows {
             print!("{}", check_row(r.status, r.component, &r.path));
         }
-        println!("\nIntegration:");
+        if setup_backend == "ibus" {
+            println!("\nIntegration:");
+        } else {
+            println!(
+                "\nIntegration (IBus checks describe an alternative route; selected route: {setup_backend}):"
+            );
+        }
         for check in &integration {
             print!(
                 "{}",
@@ -1354,6 +1422,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
             (
                 "Switch route:",
                 recommended_route_command
+                    .as_deref()
                     .unwrap_or("not needed")
                     .to_owned(),
             ),
@@ -1392,11 +1461,6 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
         ] {
             print!("{}", labelled_row(label, &value));
         }
-        println!("\nNext: {next_action}");
-        println!(
-            "{}\n",
-            crate::help::wrap(&next_action_reason, 6, crate::help::WIDTH)
-        );
         print!(
             "{}",
             crate::help::wrap(
