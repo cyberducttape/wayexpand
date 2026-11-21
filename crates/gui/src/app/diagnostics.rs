@@ -2552,6 +2552,17 @@ impl GuiApp {
                 }
                 if let Some(report) = &mut self.support_preview {
                     ui.separator();
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(report) {
+                        let first_step = &value["first_step"];
+                        if let Some(answer) = first_step["answer"].as_str() {
+                            ui.strong(self.strings.dg_report_likely_cause());
+                            ui.label(answer);
+                        }
+                        if let Some(action) = first_step["next_action"].as_str() {
+                            ui.strong(self.strings.dg_report_next_action());
+                            ui.label(action);
+                        }
+                    }
                     egui::ScrollArea::vertical()
                         .max_height(260.0)
                         .show(ui, |ui| {
