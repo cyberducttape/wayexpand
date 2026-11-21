@@ -162,6 +162,17 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
         })
         .map(str::trim)
         .unwrap_or("Run `wayexpand setup --check` and address the reported prerequisite.");
+    let cli_missing = combined.contains("could not find the `wayexpand` CLI");
+    let (summary, stage, problem_id, remedy) = if cli_missing {
+        (
+                "The WayExpand command-line component is missing from this installation.",
+                "Starting the WayExpand command-line component",
+                "WX-INSTALL-001",
+                "Reinstall WayExpand using the same package, release archive, or per-user installer as this GUI, then reopen it.",
+            )
+    } else {
+        (summary, stage, problem_id, remedy)
+    };
     let lower = combined.to_ascii_lowercase();
     let rollback = if lower.contains("rollback was incomplete")
         || lower.contains("rollback failed")
