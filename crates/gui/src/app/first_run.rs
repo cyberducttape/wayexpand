@@ -729,7 +729,11 @@ impl GuiApp {
                                         .color(palette.muted),
                                 );
                             });
-                        } else if !(daemon_running || ibus_only) {
+                        } else if !(daemon_running || ibus_only)
+                            && !self.current_next_step().is_some_and(|(problem, _)| {
+                                problem == super::Problem::InstallationIncomplete
+                            })
+                        {
                             ui.label(
                                 RichText::new(self.strings.onboarding_turn_on_help())
                                     .color(palette.muted),
