@@ -189,12 +189,7 @@ fn serve_picker_requests(
         match listener.accept() {
             Ok((mut stream, _)) => {
                 let _ = stream.set_read_timeout(Some(PICKER_SOCKET_READ_TIMEOUT));
-                let mut request = [0u8; 8];
-                if stream
-                    .read(&mut request)
-                    .is_ok_and(|size| &request[..size] == b"focus")
-                    && sender.try_send(()).is_ok()
-                {
+                if read_focus_request(&mut stream) && sender.try_send(()).is_ok() {
                     if let Ok(context) = repaint_context.lock() {
                         if let Some(context) = context.as_ref() {
                             context.request_repaint();
@@ -206,6 +201,13 @@ fn serve_picker_requests(
             Err(_) => break,
         }
     }
+}
+
+/// Unix stream reads may return only part of an application-level request.
+/// Each connection carries exactly one fixed-size command.
+fn read_focus_request(stream: &mut UnixStream) -> bool {
+    let mut request = [0u8; b"focus".len()];
+    stream.read_exact(&mut request).is_ok() && request == *b"focus"
 }
 
 fn picker_runtime_dir() -> anyhow::Result<PathBuf> {
@@ -2207,7 +2209,9 @@ mod tests {
     fn picker_launches_focus_the_single_live_instance_and_cleanup_releases_ownership() {
         use std::{
             fs,
+            io::Write,
             os::unix::fs::PermissionsExt,
+            os::unix::net::UnixStream,
             path::PathBuf,
             thread,
             time::{Duration, Instant},
@@ -2238,6 +2242,25 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         assert!(got_focus_request, "second launch notifies the live picker");
+
+        let mut split_request = UnixStream::connect(&socket).unwrap();
+        split_request.write_all(b"fo").unwrap();
+        thread::sleep(Duration::from_millis(25));
+        split_request.write_all(b"cus").unwrap();
+        drop(split_request);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut got_split_focus_request = false;
+        while !got_split_focus_request && Instant::now() < deadline {
+            got_split_focus_request = primary.take_focus_request();
+            if got_split_focus_request {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            got_split_focus_request,
+            "a focus request split across writes still focuses the live picker"
+        );
 
         drop(primary);
         assert!(!socket.exists(), "closing the picker removes its socket");

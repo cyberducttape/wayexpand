@@ -209,6 +209,26 @@ refuses automatic replacement, regardless of its CI status.
 | `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | surrounding_text_matches_trigger | atomic_protocol_batch | unobservable | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
+### Output prevention and recovery
+
+These route properties answer different questions. Focus tracking reports the
+target WayExpand currently observes; it does not bind a later synthetic key
+event to that application. `atomic_replace` describes whether trigger removal
+and replacement are one protocol operation. `application_result` describes
+whether WayExpand can know what the client finally applied; it is currently
+`unobservable` on every route.
+
+For a split delete-and-output transaction, cancellation and physical-input
+monitoring can stop later output after WayExpand observes an invalidation. They
+cannot recall keys already delivered to an application. The daemon records an
+uncertain or partial outcome, quarantines it, and never replays it; this is
+containment, not repair or proof that the field is intact. A route is not
+production-ready based on focus tracking or successful cancellation alone.
+Its required destination identity, atomicity, interruption observability,
+sensitive-field behavior, and recovery outcome must each be demonstrated on
+the actual compositor and target applications. Missing evidence remains
+unverified in the matrices below.
+
 ## Current evidence
 
 The latest exact-head structured smoke report is
