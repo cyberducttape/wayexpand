@@ -8,8 +8,8 @@
 
 | What is wrong? | First step |
 | --- | --- |
-| `wayexpand` is not found in this terminal | If `"$HOME/.local/bin/wayexpand"` exists, run it directly or add `~/.local/bin` to `PATH`. |
-| The installer failed, or `~/.local/bin/wayexpand` is missing | Repeat the install method from [Install](../README.md#install); `install-check` needs an installed CLI. |
+| `wayexpand` is not found in this terminal | For a per-user install, run `"$HOME/.local/bin/wayexpand"` directly; if that works, add `~/.local/bin` to `PATH`. For a distro package, verify the package installed. |
+| The installer failed or its CLI file is missing | Repeat the selected method from [Install](../README.md#install). Per-user installs place the CLI in `~/.local/bin`; distro packages provide `wayexpand` on `PATH`. `install-check` needs an installed CLI. |
 | Installed components are missing or an update failed | Run `wayexpand install-check` to see which files need repair. |
 | Desktop integration or route is not ready | Run `wayexpand setup --check` for the desktop checks and next action; it does not change setup. |
 | WayExpand opens, but a trigger does not expand | Type the trigger once in the affected field, then run `wayexpand why`. |
