@@ -1276,11 +1276,11 @@ fn stopped_text(kind: OutcomeKind, completion: &str) -> (String, Option<String>)
         ),
         K::Unknown => (
             "The route could not tell whether the app received the last expansion.".into(),
-            Some("check the field before typing on"),
+            Some("inspect the intended field and any field that may have received output; correct partial or misplaced text by hand, and do not retry until the result is clear"),
         ),
         K::Partial => (
             "The last expansion was only partly written.".into(),
-            Some("check the field and correct it by hand"),
+            Some("inspect the intended field and any field that may have received output; correct partial or misplaced text by hand, and do not retry this expansion"),
         ),
         K::BlockedByPolicy => (
             "Organization or command policy stopped the last expansion.".into(),
