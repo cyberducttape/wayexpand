@@ -37,11 +37,13 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
 
     let doctor = read_report("doctor")?;
     let certification = read_report("certify")?;
+    let why = read_report("why")?;
     let status = crate::doctor::status::read_daemon_status()
         .ok()
         .and_then(|raw| crate::doctor::status::status_as_json(&raw).ok());
     let services = service_health();
     let mut report = summarize_reports(&doctor, &certification, status.as_ref(), &services);
+    report["first_step"] = first_step(&why);
     let include_gnome = force_gnome
         || wayexpand_backend_selection::Compositor::detect()
             == wayexpand_backend_selection::Compositor::Gnome;
@@ -217,6 +219,33 @@ fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
     })
 }
 
+/// Keep the actionable conclusion from `wayexpand why` without copying its
+/// detailed route telemetry into the support bundle. The command may print a
+/// nonzero exit status when it has diagnosed a problem; its JSON remains useful.
+fn first_step(why: &serde_json::Value) -> serde_json::Value {
+    let diagnosis = &why["diagnosis"];
+    let safe_text = |key: &str| {
+        diagnosis
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| {
+                !value.is_empty() && value.len() <= 2048 && !value.chars().any(char::is_control)
+            })
+            .map(|value| {
+                let home = std::env::var("HOME").ok();
+                home.filter(|home| !home.is_empty()).map_or_else(
+                    || value.to_owned(),
+                    |home| value.replace(home.as_str(), "~"),
+                )
+            })
+    };
+    serde_json::json!({
+        "state": safe_token(diagnosis.get("state")),
+        "answer": safe_text("answer"),
+        "next_action": safe_text("next_action"),
+    })
+}
+
 fn support_activation_result(
     registered: Option<bool>,
     live_source: Option<&(String, String)>,
@@ -377,10 +406,10 @@ fn read_report(command_name: &str) -> Result<serde_json::Value> {
             }
         }
     };
-    // `doctor --json` intentionally exits unsuccessfully for unhealthy hosts,
-    // but still emits the full machine-readable report. Certification also
-    // emits a useful report when no live scenario has been run.
-    if !status.success() && command_name != "doctor" {
+    // `doctor --json` and `why --json` intentionally exit unsuccessfully for
+    // unhealthy hosts, but still emit a useful machine-readable report.
+    // Certification also reports when no live scenario has been run.
+    if !status.success() && !matches!(command_name, "doctor" | "why") {
         bail!("{command_name} diagnostics could not be collected");
     }
     serde_json::from_slice(&bytes)

@@ -27,7 +27,9 @@ the redacted report before saving. GNOME sessions automatically include GNOME
 Shell, IBus source, and extension checks. From a terminal, run
 `wayexpand support-bundle --output wayexpand-support.json`; GNOME sessions
 include GNOME-specific checks automatically. Use `--gnome` to request those
-checks on another desktop. Inspect the report before sending it to anyone.
+checks on another desktop. The report includes a `first_step` diagnosis with
+the likely cause and one suggested action, alongside the detailed route
+evidence. Inspect the report before sending it to anyone.
 
 For more detailed, content-free diagnostics, use:
 

@@ -217,7 +217,8 @@ preview the redacted report before saving it; GNOME sessions include GNOME
 Shell, IBus source, and extension checks automatically. From a terminal, run
 `wayexpand support-bundle --output wayexpand-support.json`; GNOME checks are
 included automatically on GNOME. Use `--gnome` to request them on another
-desktop. Review the report before sharing it.
+desktop. The report includes the likely cause and one suggested next action.
+Review it before sharing.
 
 For a sysadmin first task, see the [HTTP 503 incident triage
 walkthrough](docs/HTTP503_WALKTHROUGH.md). It generates a validated,
