@@ -230,8 +230,9 @@ is an SBOM-style dependency inventory; compare it with the source archive and
 retain it with your deployment record.
 
 Install only from a verified release artifact. Keep the previous binary and
-configuration backup available until the new service has passed `wayexpand
-doctor --json` and a real expansion test.
+configuration backup available until the new service has passed
+`"$HOME/.local/bin/wayexpand" doctor --json` (or `wayexpand doctor --json`
+when `~/.local/bin` is on `PATH`) and a real expansion test.
 
 ```sh
 printf 'Release version (without v): '
@@ -241,7 +242,7 @@ archive="wayexpand-${version}-linux-${arch}.tar.gz"
 tar -xzf "$archive"
 cd "${archive%.tar.gz}"
 ./scripts/install-release.sh
-wayexpand explain-backend
+"$HOME/.local/bin/wayexpand" explain-backend
 # Enable the selected service explicitly; do not implicitly enable
 # input-method-v2 because unsupported non-text keys may be lost.
 ```
