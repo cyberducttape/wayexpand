@@ -22,6 +22,11 @@ rule matches, but only a real application test can verify that replacement
 text appeared in that application's field. Even an acknowledged output
 operation does not prove the application changed its text.
 
+To share diagnostics, open **Diagnostics → Export support report** and preview
+the redacted report before saving. From a terminal, run
+`wayexpand support-bundle --gnome --output wayexpand-support.json` to include
+GNOME-specific checks; inspect the report before sending it to anyone.
+
 For more detailed, content-free diagnostics, use:
 
 ```sh

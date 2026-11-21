@@ -437,6 +437,11 @@ impl GuiApp {
             {
                 self.refresh_diagnostics(true);
             }
+            if ui.button(self.strings.dg_export_support_report()).clicked() {
+                self.support_export_open = true;
+                self.support_preview = None;
+                self.support_preview_error = None;
+            }
             if self.diagnostics_running {
                 ui.spinner();
             }
@@ -1354,11 +1359,6 @@ impl GuiApp {
             });
         }
         ui.separator();
-        if ui.button(self.strings.dg_export_support_report()).clicked() {
-            self.support_export_open = true;
-            self.support_preview = None;
-            self.support_preview_error = None;
-        }
         if let Some(action) = why_action {
             self.perform_next_step(action);
         }
