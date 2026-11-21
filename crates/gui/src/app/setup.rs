@@ -161,7 +161,9 @@ fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
             line.starts_with("Next:") || line.starts_with("Fix:") || line.starts_with("Remedy:")
         })
         .map(str::trim)
-        .unwrap_or("Run `wayexpand setup --check` and address the reported prerequisite.");
+        .unwrap_or(
+            "Run `wayexpand setup --check` and address the reported prerequisite. For a per-user install when `wayexpand` is not on PATH, run `\"$HOME/.local/bin/wayexpand\" setup --check`.",
+        );
     let cli_missing = combined.contains("could not find the `wayexpand` CLI");
     let (summary, stage, problem_id, remedy) = if cli_missing {
         (
