@@ -1043,17 +1043,19 @@ mod tests {
             .unwrap()
             .iter()
             .any(|finding| { finding["id"] == "WX-SERVICE-003" }));
-        assert!(summary["route_plan"]["routes"][0].get("reason").is_none());
+        assert!(summary["selection"]["route_plan"][0]
+            .get("reason")
+            .is_none());
         assert_eq!(
-            summary["route_plan"]["routes"][0]["production_integrity"]["ready"],
+            summary["selection"]["route_plan"][0]["production_integrity"]["ready"],
             false
         );
         assert_eq!(
-            summary["route_plan"]["routes"][0]["production_integrity"]["gaps"][0],
+            summary["selection"]["route_plan"][0]["production_integrity"]["gaps"][0],
             "application result unobservable"
         );
         assert_eq!(
-            summary["route_plan"]["routes"][0]["production_integrity"]["gaps"]
+            summary["selection"]["route_plan"][0]["production_integrity"]["gaps"]
                 .as_array()
                 .unwrap()
                 .len(),

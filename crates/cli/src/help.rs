@@ -233,7 +233,7 @@ pub(crate) const COMMANDS: &[Command] = &[
     command("health", Troubleshoot, "Report readiness with a stable monitoring exit code", &["health [--json]"]).advanced(),
     command("install-check", Troubleshoot, "Check that WayExpand's components are installed", &["install-check [--json] [--config PATH]"])
         .details("Read-only audit of the installed files, desktop integration, services, and active configuration. It identifies missing components without changing the installation; use `repair --check` to review safe repairs.")
-        .examples(&[("wayexpand install-check", "Check whether the installation is complete")]),
+        .examples(&[("wayexpand install-check", "Check whether the installation is complete")]).advanced(),
     command("repair", Troubleshoot, "Show or apply installation repairs", &["repair --check|--apply [--json]", "repair --gnome-input-source [--json]"]),
     command("reset", Troubleshoot, "Preview and apply a scoped recovery reset", &["reset --integration|--services|--preferences [--check|--apply --yes] [--json]"]).advanced(),
     command("support-bundle", Troubleshoot, "Write a redacted report to attach to a bug report", &["support-bundle [--gnome] [--output FILE]"])
@@ -463,7 +463,7 @@ fn main_help(style: &Style, version: &str, all: bool) -> String {
         help.push_str(&format!("  {example:<34}{meaning}\n"));
     }
     help.push_str(&format!(
-        "\nRun `wayexpand help 'COMMAND'` for its options (replace COMMAND with a command name){}.\n",
+        "\nRun `wayexpand help 'COMMAND'` for a command's options{}.\n",
         if all { "" } else { "; `help --all` lists all" }
     ));
     help
