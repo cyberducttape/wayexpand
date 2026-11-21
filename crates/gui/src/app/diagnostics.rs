@@ -2409,6 +2409,24 @@ impl GuiApp {
         if !self.setup_failure_report_open {
             return;
         }
+        let summary = self
+            .setup_failure_report
+            .as_deref()
+            .and_then(|report| {
+                report
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Summary: "))
+            })
+            .map(str::to_owned);
+        let remedy = self
+            .setup_failure_report
+            .as_deref()
+            .and_then(|report| {
+                report
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Suggested remedy: "))
+            })
+            .map(str::to_owned);
         let mut open = self.setup_failure_report_open;
         egui::Window::new(self.strings.dg_setup_diagnostic_report())
             .id(egui::Id::new("setup_failure_diagnostic_report"))
@@ -2426,6 +2444,14 @@ impl GuiApp {
                     .small()
                     .color(palette.muted),
                 );
+                if let Some(summary) = &summary {
+                    ui.strong(self.strings.dg_failure_summary());
+                    ui.label(summary);
+                }
+                if let Some(remedy) = &remedy {
+                    ui.strong(self.strings.dg_suggested_remedy());
+                    ui.label(remedy);
+                }
                 ui.horizontal(|ui| {
                     if ui.button(self.strings.dg_copy_report()).clicked() {
                         if let Some(report) = &self.setup_failure_report {
@@ -2436,13 +2462,18 @@ impl GuiApp {
                         self.diagnostics_open = true;
                     }
                 });
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
+                egui::CollapsingHeader::new(self.strings.dg_technical_details())
+                    .default_open(false)
                     .show(ui, |ui| {
-                        if let Some(report) = &self.setup_failure_report {
-                            ui.add(egui::Label::new(RichText::new(report).monospace()).wrap());
-                        }
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                if let Some(report) = &self.setup_failure_report {
+                                    ui.add(
+                                        egui::Label::new(RichText::new(report).monospace()).wrap(),
+                                    );
+                                }
+                            });
                     });
             });
         self.setup_failure_report_open = open;
