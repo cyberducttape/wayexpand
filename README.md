@@ -117,7 +117,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone --depth 1 https://github.com/cyberducttape/wayexpand
 cd wayexpand
 ./scripts/install-user.sh
-wayexpand-gui
+"$HOME/.local/bin/wayexpand-gui"
 ```
 
 The minimum supported Rust is 1.92 (`rust-version`, tested in CI). The
@@ -148,6 +148,8 @@ out and back in before resuming.
 ### After installing
 
 Launch **WayExpand** from the desktop application menu or run `wayexpand-gui`.
+For a per-user installation when `~/.local/bin` is not on PATH, run
+`"$HOME/.local/bin/wayexpand-gui"`.
 Its first-run guide checks the installation and route, then asks you to verify
 an exact insertion in a real application before it records setup as working.
 `wayexpand setup --check` reports missing integration dependencies without
@@ -181,7 +183,8 @@ Useful commands:
 
 If your terminal says `wayexpand: command not found`, run the installed CLI
 directly as `"$HOME/.local/bin/wayexpand"`, or add its directory to this
-terminal's PATH with:
+terminal's PATH with the command below; then the short-name examples that
+follow will work in this terminal:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
