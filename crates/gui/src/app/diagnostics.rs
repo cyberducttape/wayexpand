@@ -2463,6 +2463,7 @@ impl GuiApp {
             .show(ctx, |ui| {
                 ui.label(RichText::new(self.strings.dg_this_report_includes()).strong());
                 for item in [
+                    self.strings.dg_likely_cause_and_next_action(),
                     self.strings.dg_wayexpand_version_and_desktop_session(),
                     self.strings.dg_backend_and_route_availability(),
                     self.strings.dg_service_states_exit_codes_restart_counts(),
