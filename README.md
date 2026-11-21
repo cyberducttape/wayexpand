@@ -203,6 +203,10 @@ the guide offers a copy-only Quick Picker for manual paste.
 
 ![WayExpand's first-run screen in the Terminal Blue color pack with the steps Connect your desktop, Create a snippet, Test it, and an optional Quick Picker shortcut](docs/images/wayexpand-first-run.png)
 
+Quick Picker opens across supported sessions, but it inserts directly only
+when the route can verify the destination and supports atomic insertion.
+Otherwise it copies the snippet for you to paste.
+
 1. **Connect your desktop** — *Turn on WayExpand* in the GUI, or run
    `wayexpand setup` in a terminal. Setup configures the supported input route
    without manual IBus commands, and says what is missing if it cannot.
