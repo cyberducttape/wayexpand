@@ -15,6 +15,18 @@ ROOT = Path(__file__).resolve().parents[1]
 PLAN_PATH = ROOT / "tests/certification/gnome-ibus-matrix.json"
 
 
+def is_gnome_session():
+    desktop_value = os.environ.get("XDG_CURRENT_DESKTOP", "").strip()
+    if not desktop_value:
+        desktop_value = os.environ.get("XDG_SESSION_DESKTOP", "")
+    tokens = {
+        token.strip().casefold()
+        for token in desktop_value.replace(";", ":").split(":")
+        if token.strip()
+    }
+    return any(token == "gnome" or token.startswith("gnome-") for token in tokens)
+
+
 def shell_version():
     try:
         result = subprocess.run(
@@ -51,16 +63,20 @@ def main():
     parser.add_argument(
         "--confirm-physical-session",
         action="store_true",
-        help="attest that this is a physical Wayland desktop session with a physical keyboard",
+        help="attest that this is a physical GNOME Wayland session with a physical keyboard",
     )
     args = parser.parse_args()
 
     if not args.confirm_physical_session:
         parser.error("report creation requires --confirm-physical-session")
+    if not is_gnome_session():
+        parser.error(
+            "the session does not identify as GNOME; run this command inside the GNOME Wayland session being documented"
+        )
     if os.environ.get("XDG_SESSION_TYPE", "").lower() != "wayland" or not os.environ.get(
         "WAYLAND_DISPLAY"
     ):
-        parser.error("run this command inside the physical Wayland session being documented")
+        parser.error("run this command inside the physical GNOME Wayland session being documented")
     for field, value in (
         ("--package-identity", args.package_identity),
         ("--physical-keyboard", args.physical_keyboard),
