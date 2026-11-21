@@ -504,7 +504,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                         anyhow::anyhow!("configuration check failed: {}", error.safe_summary())
                     })?;
                 safe_default_desktop_test_trigger(&config).ok_or_else(|| {
-                    anyhow::anyhow!("no dedicated harmless test snippet is available; create one with the WayExpand GUI Test Expansion flow, or replace `TRIGGER` with the exact trigger (keep the quotes for punctuation), review it with `wayexpand preview 'TRIGGER'`, then select it explicitly with `wayexpand debug --test 'TRIGGER'")
+                    anyhow::anyhow!("no dedicated harmless test snippet is available; create one with the WayExpand GUI Test Expansion flow, or replace `TRIGGER` with the exact trigger (keep the quotes for punctuation), review it with `wayexpand preview 'TRIGGER'`, then select it explicitly with `wayexpand debug --test 'TRIGGER'`")
                 })?
             }
         };
