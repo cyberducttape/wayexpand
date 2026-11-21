@@ -179,7 +179,7 @@ pub(crate) fn why_command(args: Args) -> Result<()> {
                 "Run `wayexpand upgrade --check` with the CLI from the active installation. Resolve the build identity warning, then run `wayexpand why` again.",
             )
         };
-        let next_action = runnable_cli_suggestion(next_action);
+        let next_action = daemon_build_recovery_action(state, next_action);
         if json {
             println!(
                 "{}",
@@ -884,6 +884,31 @@ fn runnable_cli_suggestion(suggestion: &str) -> String {
         .replace("`wayexpand-gui`", &format!("`{gui}`"))
         .replace("`wayexpand ", &format!("`{cli} "))
         .replace("`wayexpand`", &format!("`{cli}`"))
+}
+
+/// Point a build-mismatch diagnosis at the CLI that can actually inspect the
+/// active payload. A checkout or stale CLI cannot safely tell the user to
+/// apply a restart based on its own install identity.
+fn daemon_build_recovery_action(state: &str, fallback: &str) -> String {
+    let install = crate::doctor::status::cli_install_identity();
+    let Some(active_cli) = install
+        .active_user_cli
+        .filter(|path| install.cli_matches_active_user_install == Some(false) && path.is_file())
+    else {
+        return runnable_cli_suggestion(fallback);
+    };
+    let cli = crate::commands::shell_single_quote(&active_cli.to_string_lossy());
+    let check = format!("{cli} upgrade --check");
+    let why = format!("{cli} why");
+    if state == "restart_required" {
+        format!(
+            "Run `{check}` with the active installation, follow its reported action, then run `{why}` again."
+        )
+    } else {
+        format!(
+            "Run `{check}` with the active installation and resolve its build identity warning, then run `{why}` again."
+        )
+    }
 }
 
 fn print_report(
