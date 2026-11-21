@@ -20,7 +20,7 @@ pub(crate) const GNOME_APP_FILTER_SUPPORT_DETAIL: &str = "Focused-window trackin
 /// Stable, automation-friendly diagnostic output for service managers and
 /// fleet health checks. Probes are bounded and non-interactive; portal
 /// authorization and other state-changing checks are deliberately excluded.
-pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
+pub(crate) fn print_json_diagnostics(path: &Path) -> Result<(bool, Option<String>)> {
     let config_result = Config::load(path);
     let config_ok = config_result.is_ok();
     let broker = broker_diagnostics(config_result.as_ref().ok());
@@ -204,6 +204,9 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
     // remains in the route report and does not by itself fail host health;
     // a stable route check marked unknown must fail closed.
     let selected_ibus_has_problem = selected_ibus_has_problem(&ibus_route);
+    let failure_hint = selected_ibus_has_problem
+        .then(|| selected_ibus_problem_hint(&ibus_route))
+        .flatten();
     let healthy = config_ok
         && policy_ok
         && display_session_available()
@@ -272,7 +275,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
             },
         })
     );
-    Ok(healthy)
+    Ok((healthy, failure_hint))
 }
 
 fn route_plan_entry(planned: &wayexpand_backend_selection::PlannedRoute) -> serde_json::Value {
@@ -314,6 +317,33 @@ pub(crate) fn selected_ibus_has_problem(route: &serde_json::Value) -> bool {
         && checks.iter().any(|check| {
             matches!(check["state"].as_str(), Some("fail" | "warn" | "unknown"))
                 && check["problem_id"].as_str().is_some()
+        })
+}
+
+fn selected_ibus_problem_hint(route: &serde_json::Value) -> Option<String> {
+    let checks = route["checks"].as_array()?;
+    let has_problem_id = |check: &&serde_json::Value| {
+        matches!(check["state"].as_str(), Some("fail" | "warn" | "unknown"))
+            && check["problem_id"].as_str().is_some()
+    };
+    let first_failure = route["first_failure"].as_str();
+    checks
+        .iter()
+        .find(|check| check["id"].as_str() == first_failure && has_problem_id(check))
+        .or_else(|| checks.iter().find(has_problem_id))
+        .map(|check| {
+            let id = check["problem_id"].as_str().unwrap_or("WX-IBUS-UNKNOWN");
+            let detail = check["detail"]
+                .as_str()
+                .or_else(|| check["title"].as_str())
+                .unwrap_or("the selected IBus route did not pass a readiness check");
+            let fix = check["fix"].as_str();
+            match fix {
+                Some(fix) => format!("{id}: {detail}. Fix: {fix}"),
+                None => format!(
+                    "{id}: {detail}. Inspect `wayexpand ibus status --json` for the next step."
+                ),
+            }
         })
 }
 

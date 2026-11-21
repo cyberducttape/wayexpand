@@ -594,8 +594,11 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         .transpose()?
         .unwrap_or_else(default_config_path);
     if requested_json {
-        let healthy = print_json_diagnostics(&config_path)?;
+        let (healthy, failure_hint) = print_json_diagnostics(&config_path)?;
         if !healthy {
+            if let Some(hint) = failure_hint {
+                bail!("doctor found an unhealthy selected IBus route: {hint}");
+            }
             bail!("doctor reported unhealthy host readiness or runtime health; inspect the JSON checks for details");
         }
         return Ok(());
