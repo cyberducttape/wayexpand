@@ -2454,9 +2454,17 @@ impl GuiApp {
                     ui.label(remedy);
                 }
                 ui.horizontal(|ui| {
-                    if ui.button(self.strings.dg_copy_report()).clicked() {
+                    if ui
+                        .button(if self.setup_failure_report_copied {
+                            self.strings.dg_report_copied()
+                        } else {
+                            self.strings.dg_copy_report()
+                        })
+                        .clicked()
+                    {
                         if let Some(report) = &self.setup_failure_report {
                             ui.ctx().copy_text(report.clone());
+                            self.setup_failure_report_copied = true;
                         }
                     }
                     if ui.button(self.strings.dg_open_diagnostics()).clicked() {

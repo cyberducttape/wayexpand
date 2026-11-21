@@ -626,6 +626,7 @@ impl GuiApp {
         if is_setup {
             self.setup_failure_report = None;
             self.setup_failure_report_open = false;
+            self.setup_failure_report_copied = false;
         }
         self.cli_task_kind = None;
         let (sender, receiver) = mpsc::channel();
@@ -753,6 +754,7 @@ impl GuiApp {
                     let summary = setup_failure_summary(&report);
                     self.setup_failure_report = Some(report);
                     self.setup_failure_report_open = true;
+                    self.setup_failure_report_copied = false;
                     self.diagnostics_open = true;
                     self.status = Status::error(self.strings.status_setup_failed(&summary));
                 } else {
@@ -1232,6 +1234,7 @@ impl GuiApp {
                             );
                             self.setup_failure_report = Some(report);
                             self.setup_failure_report_open = true;
+                            self.setup_failure_report_copied = false;
                             self.diagnostics_open = open_diagnostics;
                             outcome
                         } else if task_kind.as_deref() == Some("picker-shortcut") {
@@ -1270,6 +1273,7 @@ impl GuiApp {
                             .0;
                             self.setup_failure_report = Some(report);
                             self.setup_failure_report_open = true;
+                            self.setup_failure_report_copied = false;
                             self.diagnostics_open = true;
                             outcome
                         } else {
@@ -1295,6 +1299,7 @@ impl GuiApp {
                     let summary = setup_failure_summary(&report);
                     self.setup_failure_report = Some(report);
                     self.setup_failure_report_open = true;
+                    self.setup_failure_report_copied = false;
                     self.diagnostics_open = true;
                     self.status = Status::error(self.strings.status_setup_failed(&summary));
                 } else if task_kind.as_deref() == Some("setup-preflight") {
