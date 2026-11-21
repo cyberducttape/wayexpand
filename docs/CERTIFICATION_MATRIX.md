@@ -238,11 +238,21 @@ replacement in every GTK/Qt/browser/terminal application.
 They must not be counted as physical-session passes in the platform matrix
 below.
 
-| Platform/session | GTK 3 | GTK 4 | Qt | Firefox / Chromium | Electron | Terminal | Unicode / layouts / password | Restart / upgrade / uninstall | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Fedora 45 / GNOME 51 | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Ubuntu 24.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Ubuntu 26.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Platform/session | GTK 3 | GTK 4 | Qt | Firefox | Chromium | Electron | Terminal | Unicode / layouts / password | Restart / upgrade / uninstall | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Fedora 45 / GNOME 51 | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Ubuntu 24.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Ubuntu 26.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+
+Report each application separately for both the US and German keyboard
+layouts. An application cell must record the four observed results as `trigger
+captured / original trigger removed / replacement appeared exactly once /
+intended field retained focus`, using `pass`, `fail`, or `not tested` for each
+result. For example, `pass / pass / fail / pass` means the trigger was
+captured and removed, but the replacement did not appear exactly once. Keep
+the exact desktop, application, and version in the physical-session report.
+Do not infer a result for Chromium from Firefox, or for one toolkit from
+another.
 
 Each cell requires a separate result. Lifecycle coverage includes clean-user
 installation, component registration, GNOME source activation, a real trigger
