@@ -26,8 +26,8 @@ use commands::metrics::metrics_command;
 use commands::new::new_command;
 use commands::profile::profile_command;
 use commands::system::{
-    backend_command, certify_command, doctor_command, explain_backend_command, explain_command,
-    policy_command, portal_command, setup_command, upgrade_status_command,
+    certify_command, doctor_command, explain_backend_command, explain_command, policy_command,
+    portal_command, setup_command,
 };
 use commands::Args;
 use doctor::backends::{
@@ -186,8 +186,8 @@ fn run() -> Result<()> {
         Some("doctor") => doctor_command(args)?,
         Some("debug") => commands::debug::debug_command(args)?,
         Some("policy") => policy_command(args)?,
-        Some("upgrade-status") => upgrade_status_command(args)?,
-        Some("upgrade") => commands::system::upgrade_command(args)?,
+        Some("upgrade-status") => commands::upgrade::upgrade_status_command(args)?,
+        Some("upgrade") => commands::upgrade::upgrade_command(args)?,
         Some("explain") => explain_command(args)?,
         Some("why") => commands::why::why_command(args)?,
         Some("stats") => stats_command(args)?,
@@ -195,7 +195,7 @@ fn run() -> Result<()> {
         Some("certify") => certify_command(args)?,
         Some("support-bundle") => support_bundle(args)?,
         Some("support") => support_bundle(args)?,
-        Some("backend") => backend_command(args)?,
+        Some("backend") => commands::backend::backend_command(args)?,
         Some("explain-backend") => explain_backend_command(args)?,
         Some("fleet") => fleet_command(args)?,
         Some("metrics") => metrics_command(args)?,

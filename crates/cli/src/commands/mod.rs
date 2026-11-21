@@ -1,5 +1,6 @@
 //! One function per `wayexpand` subcommand; `run` dispatches to them.
 
+pub(crate) mod backend;
 pub(crate) mod check;
 pub(crate) mod compatibility;
 pub(crate) mod config;
@@ -23,6 +24,7 @@ pub(crate) mod restore;
 pub(crate) mod service;
 pub(crate) mod shortcut;
 pub(crate) mod system;
+pub(crate) mod upgrade;
 pub(crate) mod why;
 pub(crate) mod workflow;
 
