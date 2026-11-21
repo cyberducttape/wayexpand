@@ -712,16 +712,20 @@ wayexpand-daemon /tmp/test-expansions.toml  # Test without installing
 ## Getting Help
 
 **Before reporting an issue:**
-1. Run `wayexpand doctor` and save the output
-2. Check the logs: `journalctl --user -u wayexpand-input-method.service -n 100`
-3. Search existing issues: https://github.com/cyberducttape/wayexpand/issues
-4. Try the steps above in this guide
+1. Start with `wayexpand why` and follow its next action
+2. Try the result once in a harmless text field
+3. Preview and save **Diagnostics → Export support report**, or create one with
+   `wayexpand support-bundle --output wayexpand-support.json`
+4. Search existing issues: https://github.com/cyberducttape/wayexpand/issues
 
 **When reporting:**
-- Include output from `wayexpand doctor --json`
-- Include relevant log excerpts (never include snippet content or passwords)
+- Review the redacted support report before attaching it
 - Include your desktop/compositor version
-- Describe the exact steps to reproduce
+- Describe the exact steps to reproduce and what appeared in the test field
+
+Do not attach raw journal output or configuration files unless a maintainer
+asks for them; they can contain paths or other information that the support
+report deliberately omits.
 
 **Resources:**
 - [GETTING_STARTED.md](GETTING_STARTED.md) — Installation and first steps
