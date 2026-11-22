@@ -108,9 +108,32 @@ if [ -n "$active_processes" ]; then
     exit 1
 fi
 
+# Current installers link into this user's payload directory; the first
+# installers copied regular files (including the legacy wayexpand.service).
+# Remove regular files as before, and a symlink only when it points into the
+# payload, so damaged installs lose dangling links while another
+# application's same-named link survives.
+is_wayexpand_install_link() {
+    link_path=$1
+    [ -L "$link_path" ] || return 1
+    link_target=$(readlink -- "$link_path") || return 1
+    case "$link_target" in
+        "$library_dir"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+remove_managed_file() {
+    managed_path=$1
+    if [ -L "$managed_path" ]; then
+        is_wayexpand_install_link "$managed_path" || return 1
+    elif [ ! -e "$managed_path" ]; then
+        return 1
+    fi
+    rm -f -- "$managed_path"
+}
+
 for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
-    if [ -e "$bin_dir/$binary" ] || [ -L "$bin_dir/$binary" ]; then
-        rm -f -- "$bin_dir/$binary"
+    if remove_managed_file "$bin_dir/$binary"; then
         printf '%s\n' "Removed $bin_dir/$binary"
     fi
 done
@@ -124,34 +147,27 @@ if [ -f "$gnome_extension_dir/metadata.json" ] \
     rmdir -- "$gnome_extension_dir" 2>/dev/null || true
     printf '%s\n' "Removed $gnome_extension_dir"
 fi
-if [ -e "$ibus_component_dir/wayexpand.xml" ]; then
-    rm -f -- "$ibus_component_dir/wayexpand.xml"
+if remove_managed_file "$ibus_component_dir/wayexpand.xml"; then
     printf '%s\n' "Removed $ibus_component_dir/wayexpand.xml"
-elif [ -L "$ibus_component_dir/wayexpand.xml" ]; then
-    rm -f -- "$ibus_component_dir/wayexpand.xml"
 fi
-if [ -e "$ibus_component_dir/wayexpand-ibus.xml" ]; then
-    rm -f -- "$ibus_component_dir/wayexpand-ibus.xml"
+if remove_managed_file "$ibus_component_dir/wayexpand-ibus.xml"; then
     printf '%s\n' "Removed $ibus_component_dir/wayexpand-ibus.xml"
 fi
 
 for unit in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
-    if [ -e "$unit_dir/$unit" ]; then
-        rm -f -- "$unit_dir/$unit"
+    if remove_managed_file "$unit_dir/$unit"; then
         printf '%s\n' "Removed $unit_dir/$unit"
     fi
 done
 for service in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
     dropin="$unit_dir/$service.d/10-xdg-paths.conf"
-    if [ -e "$dropin" ]; then
-        rm -f -- "$dropin"
+    if remove_managed_file "$dropin"; then
         rmdir "${dropin%/*}" 2>/dev/null || true
         printf '%s\n' "Removed $dropin"
     fi
 done
 legacy_broker_dropin="$unit_dir/wayexpand-action-broker.service.d/10-state-directory.conf"
-if [ -e "$legacy_broker_dropin" ]; then
-    rm -f -- "$legacy_broker_dropin"
+if remove_managed_file "$legacy_broker_dropin"; then
     rmdir "${legacy_broker_dropin%/*}" 2>/dev/null || true
     printf '%s\n' "Removed $legacy_broker_dropin"
 fi
@@ -159,16 +175,14 @@ if command -v systemctl >/dev/null 2>&1; then
     systemctl --user daemon-reload || true
 fi
 
-if [ -e "$application_dir/wayexpand.desktop" ]; then
-    rm -f -- "$application_dir/wayexpand.desktop"
+if remove_managed_file "$application_dir/wayexpand.desktop"; then
     printf '%s\n' "Removed $application_dir/wayexpand.desktop"
 fi
 
 for installed_file in \
     "$metainfo_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
     "$man_dir/wayexpand.1"; do
-    if [ -e "$installed_file" ]; then
-        rm -f -- "$installed_file"
+    if remove_managed_file "$installed_file"; then
         printf '%s\n' "Removed $installed_file"
     fi
 done
@@ -176,9 +190,7 @@ done
 icon_base="$data_home/icons/hicolor"
 for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
     icon_path="$icon_base/$size/apps/wayexpand.png"
-    if [ -e "$icon_path" ]; then
-        rm -f -- "$icon_path"
-    fi
+    remove_managed_file "$icon_path" || true
 done
 
 if [ -d "$library_dir" ]; then
