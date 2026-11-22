@@ -146,6 +146,7 @@ pub struct IbusEngineAdapter {
     capability_block: Option<String>,
     pending_output: Option<ExpansionResult>,
     last_expansion_outcome: Option<IbusExpansionOutcome>,
+    last_replacement_state: Option<IbusReplacementState>,
     /// GNOME window identity observed when this IBus input context received
     /// focus. App filters are enabled only while the authenticated Shell
     /// tracker continues to report that same focused window.
@@ -160,6 +161,18 @@ pub enum IbusExpansionOutcome {
     EmittedUnverified,
     /// Output failed after one or more actions may have reached the client.
     UnknownPartialEmission,
+}
+
+/// Latest replacement transaction stage for diagnostics and host reporting.
+/// IBus has no client-document receipt, so `AppliedVerified` is intentionally
+/// unreachable for this backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IbusReplacementState {
+    Prepared,
+    Emitted,
+    AppliedVerified,
+    PartialUnknown,
+    Refused,
 }
 
 impl IbusEngineAdapter {
@@ -219,6 +232,7 @@ impl IbusEngineAdapter {
             capability_block,
             pending_output: None,
             last_expansion_outcome: None,
+            last_replacement_state: None,
             gnome_focus_binding: None,
             ibus_context_identity: None,
         }
@@ -387,14 +401,17 @@ impl IbusEngineAdapter {
             // so the whole trigger (and any delimiter) is in the document.
             let (delivered, actions) = replacement_actions(&result, true);
             if !self.surrounding_confirms(delivered.as_str()) {
+                self.last_replacement_state = Some(IbusReplacementState::Refused);
                 self.note_surrounding_refusal();
                 warn!("IBus surrounding text no longer matches the trigger; replacement discarded");
                 self.engine.restore_deferred_match(&result.matched_text);
                 self.reset();
                 continue;
             }
+            self.last_replacement_state = Some(IbusReplacementState::Prepared);
             let output_started = Instant::now();
             if let Err(error) = emit(&actions) {
+                self.last_replacement_state = Some(IbusReplacementState::PartialUnknown);
                 self.last_expansion_outcome = Some(IbusExpansionOutcome::UnknownPartialEmission);
                 let target_identity_state = self.target_identity_state();
                 let duration_us = output_started.elapsed().as_micros().min(u64::MAX as u128) as u64;
@@ -412,6 +429,7 @@ impl IbusEngineAdapter {
             }
             let duration_us = output_started.elapsed().as_micros().min(u64::MAX as u128) as u64;
             self.engine.commit_emitted_unverified_expansion(&result);
+            self.last_replacement_state = Some(IbusReplacementState::Emitted);
             self.last_expansion_outcome = Some(IbusExpansionOutcome::EmittedUnverified);
             self.record_emitted(&actions);
             let target_identity_state = self.target_identity_state();
@@ -579,6 +597,7 @@ impl IbusEngineAdapter {
     pub fn output_failed_after(&mut self, duration_us: Option<u64>) {
         self.note(|telemetry, field| telemetry.output_failure(field));
         if let Some(result) = self.pending_output.take() {
+            self.last_replacement_state = Some(IbusReplacementState::PartialUnknown);
             self.last_expansion_outcome = Some(IbusExpansionOutcome::UnknownPartialEmission);
             let target_identity_state = self.target_identity_state();
             self.note(|telemetry, field| {
@@ -605,6 +624,7 @@ impl IbusEngineAdapter {
 
     pub fn output_succeeded_after(&mut self, duration_us: Option<u64>) {
         if let Some(result) = self.pending_output.take() {
+            self.last_replacement_state = Some(IbusReplacementState::Emitted);
             let target_identity_state = self.target_identity_state();
             self.note(|telemetry, field| {
                 telemetry.expansion(field);
@@ -633,6 +653,10 @@ impl IbusEngineAdapter {
 
     pub fn last_expansion_outcome(&self) -> Option<IbusExpansionOutcome> {
         self.last_expansion_outcome
+    }
+
+    pub fn last_replacement_state(&self) -> Option<IbusReplacementState> {
+        self.last_replacement_state
     }
 
     /// Process an IBus key press. `keyval` is an XKB keysym, as specified by
@@ -813,6 +837,7 @@ impl IbusEngineAdapter {
                     // rest of the trigger sits right before the cursor.
                     let (delivered, replacement) = replacement_actions(&result, false);
                     if !self.surrounding_confirms(delivered.as_str()) {
+                        self.last_replacement_state = Some(IbusReplacementState::Refused);
                         self.note_surrounding_refusal();
                         warn!(
                             "IBus surrounding text does not confirm the trigger; replacement refused"
@@ -846,6 +871,7 @@ impl IbusEngineAdapter {
                     }
                     actions.extend(replacement);
                     self.pending_output = Some(result);
+                    self.last_replacement_state = Some(IbusReplacementState::Prepared);
                 }
                 PendingExpansionDispatch::Queued => {
                     // The current key has not reached the client yet. Commit
@@ -1414,7 +1440,15 @@ replacement = "sigtext"
         // CommitText: the host cannot claim the expansion was applied.
         let failed_after_delete = result.actions.len() > 1;
         assert!(failed_after_delete);
+        assert_eq!(
+            adapter.last_replacement_state(),
+            Some(IbusReplacementState::Prepared)
+        );
         adapter.output_failed();
+        assert_eq!(
+            adapter.last_replacement_state(),
+            Some(IbusReplacementState::PartialUnknown)
+        );
         assert_eq!(
             adapter.last_expansion_outcome(),
             Some(IbusExpansionOutcome::UnknownPartialEmission)
@@ -1810,6 +1844,10 @@ replacement = "世界 🌍"
         assert_eq!(
             adapter.last_expansion_outcome(),
             Some(IbusExpansionOutcome::EmittedUnverified)
+        );
+        assert_eq!(
+            adapter.last_replacement_state(),
+            Some(IbusReplacementState::Emitted)
         );
         assert!(adapter
             .engine()
@@ -2220,6 +2258,10 @@ timeout_ms = 1000
         adapter.set_surrounding_text(&text, 3, 1);
         let result = adapter.process_key_event('g' as u32, 0, 0);
         assert_eq!(result.actions, vec![IbusAction::CommitText("g".into())]);
+        assert_eq!(
+            adapter.last_replacement_state(),
+            Some(IbusReplacementState::Refused)
+        );
     }
 
     #[test]
