@@ -156,6 +156,21 @@ unit_dir="$config_home/systemd/user"
 application_dir="$data_home/applications"
 metainfo_dir="$data_home/metainfo"
 man_dir="$data_home/man/man1"
+reject_directory_target() {
+    destination=$1
+    if [ -d "$destination" ] && [ ! -L "$destination" ]; then
+        printf 'error: installation target is a directory: %s\n' "$destination" >&2
+        return 1
+    fi
+}
+for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
+    reject_directory_target "$bin_dir/$binary"
+done
+for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
+    reject_directory_target "$unit_dir/$unit"
+    reject_directory_target "$unit_dir/$unit.d/10-xdg-paths.conf"
+done
+reject_directory_target "$application_dir/wayexpand.desktop"
 # One consent-marker location for the CLI, installers, doctor, GUI and the
 # unit: systemd evaluates ConditionPathExists before any XDG environment
 # applies, so the marker never follows XDG_CONFIG_HOME. The evdev unit is
@@ -354,13 +369,12 @@ ln -s "$version" "$next_link"
 # atomic rename, rollback is safe whether the old or new link is visible.
 version_switch_started=1
 mv -Tf "$next_link" "$library_dir/current"
-install -d -m 0755 "$bin_dir"
+install -d -m 0755 "$bin_dir" "$unit_dir" "$application_dir"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
-    ln -sfn "$library_dir/current/bin/$binary" "$bin_dir/$binary"
+    ln -sfnT "$library_dir/current/bin/$binary" "$bin_dir/$binary"
 done
-install -d -m 0755 "$unit_dir" "$application_dir"
 for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
-    ln -sfn "$library_dir/current/systemd/$unit" "$unit_dir/$unit"
+    ln -sfnT "$library_dir/current/systemd/$unit" "$unit_dir/$unit"
 done
 # ibus-daemon never reads per-user component directories, so a manifest
 # there cannot register the engine. Remove the link older installers made;
@@ -373,7 +387,7 @@ if [ -L "$stale_ibus_component" ]; then
 fi
 "$project_dir/scripts/install-xdg-systemd-dropins.sh" \
     "$unit_dir" "$config_home" "$config_dir" "$state_home" "$state_dir" "$library_dir/current/bin"
-ln -sfn "$library_dir/current/desktop/wayexpand.desktop" "$application_dir/wayexpand.desktop"
+ln -sfnT "$library_dir/current/desktop/wayexpand.desktop" "$application_dir/wayexpand.desktop"
 install -Dm644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
     "$metainfo_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
 install -Dm644 "$project_dir/docs/wayexpand.1" "$man_dir/wayexpand.1"
@@ -403,6 +417,11 @@ printf '%s\n' "Installed user units in $unit_dir"
 printf '%s\n' "Installed desktop entry in $application_dir"
 printf '%s\n' "Staged IBus component in $library_dir/current/ibus (not registered with the system IBus daemon)"
 printf '%s\n' "Installed application icon in $icon_base"
+printf '%s\n' ""
+printf '%s\n' "=== NEXT STEP ==="
+printf '%s\n' "Open WayExpand from your desktop application menu, or run: \"$bin_dir/wayexpand-gui\""
+printf '%s\n' "The setup guide checks your desktop route and walks you through a real-app insertion test."
+printf '%s\n' "If setup or expansion does not work, run: \"$bin_dir/wayexpand\" why"
 printf '%s\n' ""
 printf '%s\n' "=== OPTIONAL COMMAND-LINE SETUP ==="
 printf '%s\n' ""
@@ -506,5 +525,4 @@ done
 
 printf '%s\n' ""
 printf '%s\n' "=== INSTALLATION COMPLETE ==="
-printf '%s\n' "Next action: open the setup guide with: \"$bin_dir/wayexpand-gui\""
-printf '%s\n' "You can also launch WayExpand from your desktop application menu."
+printf '%s\n' "Next: open WayExpand from your application menu (or run \"$bin_dir/wayexpand-gui\")."

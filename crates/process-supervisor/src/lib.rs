@@ -235,12 +235,10 @@ fn record_root_dedication(root: &std::path::Path) {
         return;
     }
     let me = std::process::id();
-    let dedicated = std::fs::read_to_string(root.join("cgroup.procs")).is_ok_and(|procs| {
-        procs
-            .lines()
-            .filter_map(|line| line.trim().parse::<u32>().ok())
-            .all(|pid| pid == me || parent_pid(pid).is_none_or(|parent| parent == me))
-    });
+    // An unknown parent is not evidence that a member is ours: treat the root
+    // as shared unless every lookup succeeds and this process is listed.
+    let dedicated = std::fs::read_to_string(root.join("cgroup.procs"))
+        .is_ok_and(|procs| root_members_are_dedicated(&procs, me, parent_pid));
     if !dedicated {
         tracing::warn!(
             cgroup = %root.display(),
@@ -256,6 +254,26 @@ fn record_root_dedication(root: &std::path::Path) {
 #[cfg(target_os = "linux")]
 fn root_is_dedicated(root: &std::path::Path) -> bool {
     dedicated_roots().get(root).copied().unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn root_members_are_dedicated(
+    procs: &str,
+    me: u32,
+    mut parent: impl FnMut(u32) -> Option<u32>,
+) -> bool {
+    let mut found_self = false;
+    for line in procs.lines() {
+        let Ok(pid) = line.trim().parse::<u32>() else {
+            return false;
+        };
+        if pid == me {
+            found_self = true;
+        } else if parent(pid) != Some(me) {
+            return false;
+        }
+    }
+    found_self
 }
 
 #[cfg(target_os = "linux")]
@@ -338,6 +356,136 @@ fn kill_if_escaped(pid: u32, me: u32, expected_cgroup: &str) {
     tracing::warn!(
         pid,
         "killing a command descendant that left its command cgroup"
+    );
+    // SAFETY: the descriptor is a valid pidfd; the info pointer may be null.
+    unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            fd.as_raw_fd(),
+            libc::SIGKILL,
+            std::ptr::null::<libc::siginfo_t>(),
+            0,
+        );
+    }
+}
+
+/// Before the command cgroup is killed, kill processes that left it but whose
+/// live parent chain still proves they descend from the command. This works in
+/// shared service cgroups too, because it never relies on cgroup membership
+/// alone.
+#[cfg(target_os = "linux")]
+fn sweep_command_descendants(root: &std::path::Path, owner_pid: u32) {
+    let Ok(relative) = root.strip_prefix("/sys/fs/cgroup") else {
+        return;
+    };
+    let expected_root = format!("/{}", relative.display());
+    let mut pids = Vec::new();
+    collect_cgroup_pids(root, &mut pids);
+    sweep_owned_pids(
+        pids,
+        owner_pid,
+        &expected_root,
+        |pid| std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok(),
+        parent_pid,
+        |pid| kill_owned_pid(pid, owner_pid, &expected_root),
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn collect_cgroup_pids(path: &std::path::Path, pids: &mut Vec<u32>) {
+    if let Ok(contents) = std::fs::read_to_string(path.join("cgroup.procs")) {
+        pids.extend(
+            contents
+                .lines()
+                .filter_map(|line| line.trim().parse::<u32>().ok()),
+        );
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            collect_cgroup_pids(&entry.path(), pids);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn cgroup_is_in_subtree(contents: &str, expected_root: &str) -> bool {
+    contents.lines().any(|line| {
+        line.strip_prefix("0::").is_some_and(|path| {
+            path == expected_root
+                || path
+                    .strip_prefix(expected_root)
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+        })
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn sweep_owned_pids(
+    pids: impl IntoIterator<Item = u32>,
+    owner_pid: u32,
+    expected_root: &str,
+    mut cgroup_contents: impl FnMut(u32) -> Option<String>,
+    mut parent: impl FnMut(u32) -> Option<u32>,
+    mut kill: impl FnMut(u32),
+) {
+    for pid in pids {
+        if pid == owner_pid
+            || !cgroup_contents(pid)
+                .as_deref()
+                .is_some_and(|contents| cgroup_is_in_subtree(contents, expected_root))
+            || !is_descendant_of(pid, owner_pid, &mut parent)
+        {
+            continue;
+        }
+        kill(pid);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn is_descendant_of(pid: u32, ancestor: u32, parent: &mut impl FnMut(u32) -> Option<u32>) -> bool {
+    let mut current = pid;
+    for _ in 0..128 {
+        let Some(next) = parent(current) else {
+            return false;
+        };
+        if next == ancestor {
+            return true;
+        }
+        if next <= 1 || next == current {
+            return false;
+        }
+        current = next;
+    }
+    false
+}
+
+#[cfg(target_os = "linux")]
+fn kill_owned_pid(pid: u32, owner_pid: u32, expected_root: &str) {
+    let Ok(pid_t) = libc::pid_t::try_from(pid) else {
+        return;
+    };
+    // Pin the process first, then confirm through /proc that it is still in
+    // the service cgroup and is still a descendant of the command owner. If
+    // the PID was reused after opening the pidfd, the signal remains pinned
+    // to the original process and fails safely.
+    // SAFETY: pidfd_open has no memory-safety preconditions.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid_t, 0) };
+    if fd < 0 {
+        return;
+    }
+    // SAFETY: the kernel returned a new descriptor that nothing else owns.
+    let fd = unsafe { OwnedFd::from_raw_fd(fd as std::os::fd::RawFd) };
+    let in_subtree = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+        .is_ok_and(|cgroup| cgroup_is_in_subtree(&cgroup, expected_root));
+    if !in_subtree || !is_descendant_of(pid, owner_pid, &mut parent_pid) {
+        return;
+    }
+    tracing::warn!(
+        pid,
+        "killing a verified command descendant that left its command cgroup"
     );
     // SAFETY: the descriptor is a valid pidfd; the info pointer may be null.
     unsafe {
@@ -930,6 +1078,12 @@ impl ChildSupervisor {
     /// invalidate the process-group identifier.
     pub fn kill_group(&mut self) {
         let cgroup_finished = if let Some(cgroup) = self.cgroup.as_mut() {
+            // Sweep while the command PID is still pinned by the unreaped
+            // Child, so /proc can prove live ancestry before cgroup.kill
+            // terminates the command and orphans its descendants.
+            if let (Some(owner_pid), Some(root)) = (self.pid, cgroup.path.parent()) {
+                sweep_command_descendants(root, owner_pid);
+            }
             if let Err(error) = cgroup.kill_and_remove() {
                 let total = KILL_FAILURES.fetch_add(1, Ordering::Relaxed) + 1;
                 tracing::error!(%error, kill_failures_total = total, "could not empty command cgroup; descendants may remain");
@@ -1050,6 +1204,57 @@ mod tests {
             containment_policy(Some(std::ffi::OsStr::new("disabled"))),
             "process-group-compatibility"
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn failed_parent_lookup_never_authorizes_cgroup_cleanup() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-cgroup-unknown-parent-{}-{}",
+            std::process::id(),
+            next_scope_id()
+        ));
+        let unrelated = root.join("unrelated-child");
+        std::fs::create_dir_all(&unrelated).unwrap();
+        std::fs::write(root.join("cgroup.procs"), "100\n200\n").unwrap();
+        std::fs::write(unrelated.join("cgroup.procs"), "900\n").unwrap();
+        std::fs::write(unrelated.join("cgroup.kill"), "untouched").unwrap();
+
+        assert!(!root_members_are_dedicated("100\n200\n", 100, |_| None));
+
+        let mut pids = Vec::new();
+        collect_cgroup_pids(&root, &mut pids);
+        let mut killed = Vec::new();
+        sweep_owned_pids(
+            pids,
+            100,
+            "/delegated/service",
+            |pid| (pid == 900).then(|| "0::/delegated/service/unrelated-child".to_owned()),
+            |_| None,
+            |pid| killed.push(pid),
+        );
+
+        assert!(
+            killed.is_empty(),
+            "unknown ancestry must not authorize a kill"
+        );
+        assert_eq!(
+            std::fs::read_to_string(unrelated.join("cgroup.kill")).unwrap(),
+            "untouched"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn root_dedication_requires_every_parent_lookup_to_succeed() {
+        assert!(root_members_are_dedicated("100\n101\n", 100, |pid| {
+            (pid == 101).then_some(100)
+        }));
+        assert!(!root_members_are_dedicated("100\n101\n", 100, |_| None));
+        assert!(!root_members_are_dedicated("100\nnot-a-pid\n", 100, |_| {
+            Some(100)
+        }));
     }
 
     #[test]

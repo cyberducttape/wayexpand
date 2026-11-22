@@ -66,22 +66,23 @@ input and already-committed text. Active IME/preedit composition is
 intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
-The latest current-source isolated KWin smoke run is preserved in
-[`docs/evidence/doctor-certify-d75ea528.json`](evidence/doctor-certify-d75ea528.json).
-It tested clean commit `d75ea5288b8f` on KWin 6.6.7 on 2026-11-21. Thirteen
-checks passed, five were not tested, and backend latency was measured. The
-private session used stdin-simulated capture and libei keysym fallback. Its 20
-injector samples for a small replacement (a two-character trigger replaced by
-one character) measured p50/p95/p99 of 25.112/25.349/25.390 ms. That is about
-twice the 12.6 ms of the 2026-10-30 run because backspaces are now paced 12 ms
-apart like typed keys; compositors dropped some unpaced backspaces and left
-part of the trigger behind. Re-running the 2026-10-30 commit `494aac93b15d` on
-the same KWin 6.6.7 still measured 12.751 ms, so the difference is that pacing,
-not the compositor. The harness no longer measures medium and large
-replacements. These measurements exclude keyboard capture and client paint.
-The run remains partial: physical capture, overlapping input, Unicode
+The latest isolated KWin smoke run is preserved in
+[`docs/evidence/doctor-certify-45f430bb3c2e.json`](evidence/doctor-certify-45f430bb3c2e.json).
+It tested clean commit `45f430bb3c2e` (from the PR #221 branch, which does not
+change the daemon or output code) on private KWin 6.6.7 on 2026-11-21.
+Thirteen checks passed, five were not tested, and backend latency was measured.
+The private session used stdin-simulated capture and libei keysym fallback. Its
+20 injector samples for a small replacement measured p50/p95/p99 of
+24.871/25.172/25.294 ms. That is about twice the 12.6 ms of the 2026-10-30
+run because backspaces are now paced 12 ms apart like typed keys; compositors
+dropped some unpaced backspaces and left part of the trigger behind.
+Re-running the 2026-10-30 commit `494aac93b15d` on the same KWin 6.6.7 still
+measured 12.751 ms, so the difference is that pacing, not the compositor. The
+harness no longer measures medium and large replacements. These measurements
+exclude keyboard capture and client paint. This remains a partial headless smoke run: it is not evidence from the
+active desktop session, and physical capture, overlapping input, Unicode
 insertion on this route, suspend/resume, password-field behavior, and
-long-running stability are not certified.
+long-running stability remain uncertified.
 
 The previous run, on commit `494aac93b15d` with KWin 6.6.6 on 2026-10-30, is
 preserved in
@@ -722,6 +723,16 @@ route currently meets the production contract. A release invocation therefore
 fails closed before runner discovery until a compatible real-session route is
 added. Manual and scheduled runs can still collect compatibility evidence from
 online compositor runners; those reports cannot satisfy the release gate.
+
+KWin's newer input-method-v1 support is not an atomic replacement route for
+WayExpand. In KWin's Plasma/6.7 implementation, `InputMethod::commitString`
+commits text-input-v3 state with `done()`, while
+`InputMethod::deleteSurroundingText` sends deletion and a separate `done()`.
+The two operations therefore remain separate client updates. See the
+[KWin input method implementation](https://invent.kde.org/plasma/kwin/-/blob/c1f623739f4e819d291b1ddda50d5a57674a54f5/src/inputmethod.cpp#L507)
+and its [surrounding-text deletion path](https://invent.kde.org/plasma/kwin/-/blob/c1f623739f4e819d291b1ddda50d5a57674a54f5/src/inputmethod.cpp#L581).
+Adding a WayExpand adapter for that path or upgrading KWin to 6.7 would not by
+itself satisfy the atomic replacement requirement.
 
 | Environment | Current workflow candidate | Certification eligibility |
 | --- | --- | --- |

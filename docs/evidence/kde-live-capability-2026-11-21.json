@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "evidence_type": "live-compositor-capability-probe",
+  "captured_at_utc": "2026-11-21T23:27:07Z",
+  "system": "Ubuntu 26.04.1 LTS",
+  "kernel": "7.0.0-44-generic",
+  "desktop": "KDE Plasma",
+  "plasma": "6.6.6",
+  "compositor": "KWin 6.6.7",
+  "wayexpand": {
+    "version": "1.3.6-dev+45f430bb3c2e",
+    "commit": "45f430bb3c2e",
+    "certified": false,
+    "selected_mode": "ibus",
+    "active_route": {
+      "state": "connected",
+      "source": "evdev",
+      "backend": "libei",
+      "route_id": "kde-evdev-libei",
+      "commit": "45f430bb3c2e",
+      "insertion_assurance": "compatibility",
+      "replacement_assurance": "focus-tracked-best-effort",
+      "atomic_replace": false,
+      "sensitive_focus": false
+    }
+  },
+  "probes": [
+    {
+      "name": "IBus engine installed",
+      "status": "available",
+      "detail": "IBus is a candidate for Recommended mode"
+    },
+    {
+      "name": "input-method-v2 protocol",
+      "status": "unsupported",
+      "detail": "the compositor did not expose a usable input-method-v2 interface"
+    },
+    {
+      "name": "wlroots virtual keyboard",
+      "status": "unsupported",
+      "detail": "the compositor did not expose zwp_virtual_keyboard_v1"
+    },
+    {
+      "name": "libei/EIS transport",
+      "status": "authorization-required",
+      "detail": "portal probing is intentionally non-interactive; run the selected mode to authorize it"
+    },
+    {
+      "name": "automatic mode selection",
+      "status": "available",
+      "detail": "automatic selection currently resolves to ibus"
+    },
+    {
+      "name": "active daemon route",
+      "status": "verified",
+      "detail": "state=connected; compatible active route is evdev + libei"
+    }
+  ],
+  "required_scenario_count": 48,
+  "limitations": [
+    "GTK and Qt client behavior still requires live certification",
+    "IME/preedit composition is not supported",
+    "surrounding-text behavior depends on the client toolkit",
+    "The static probe does not exercise any of the 48 required certification scenarios."
+  ]
+}

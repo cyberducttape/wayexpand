@@ -111,6 +111,7 @@
     "focus-change-during-expansion",
     "target-closes-during-expansion",
     "picker-same-app-title-focus-isolation",
+    "picker-focus-return-and-clipboard-lifetime",
     "config-reload",
     "daemon-restart",
     "daemon-restart-during-typing",

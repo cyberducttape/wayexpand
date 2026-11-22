@@ -77,7 +77,8 @@ fn backend_list_command(arguments: Vec<String>) -> Result<()> {
                 assessment["certified"],
             );
             println!(
-                "  trigger_precondition={} output_transaction={} application_result={}",
+                "  replacement_guarantee={} trigger_precondition={} output_transaction={} application_result={}",
+                route["replacement_guarantee"].as_str().unwrap_or("unknown"),
                 route["trigger_precondition"].as_str().unwrap_or("unknown"),
                 route["output_transaction"].as_str().unwrap_or("unknown"),
                 route["application_result"].as_str().unwrap_or("unknown"),
@@ -144,6 +145,7 @@ fn backend_route_json(planned: &wayexpand_backend_selection::PlannedRoute) -> se
         "trigger_precondition": contract.trigger_precondition,
         "output_transaction": contract.output_transaction,
         "application_result": contract.application_result,
+        "replacement_guarantee": contract.replacement_guarantee(),
         "atomic_replace": contract.atomic_replace,
         "destination_identity_available": contract.destination_identity_available,
         "destination_identity_verified": contract.destination_identity_verified,
@@ -404,8 +406,8 @@ mod tests {
         );
         assert_eq!(report["output_transaction"], "separate_delete_and_commit");
         assert_eq!(report["application_result"], "unobservable");
+        assert_eq!(report["replacement_guarantee"], "verified");
         assert_eq!(report["atomic_replace"], false);
-        assert!(report.get("replacement_assurance").is_none());
         let contract: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/contracts/cli-json-shapes.json"
         ))

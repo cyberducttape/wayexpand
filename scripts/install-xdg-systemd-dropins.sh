@@ -30,12 +30,16 @@ done
 write_dropin() {
     destination=$1
     content=$2
+    if [ -d "$destination" ] && [ ! -L "$destination" ]; then
+        printf 'error: installation target is a directory: %s\n' "$destination" >&2
+        return 1
+    fi
     directory=${destination%/*}
     install -d -m 0755 "$directory"
     temporary="$destination.tmp.$$"
     (umask 022; printf '%s\n' "$content" >"$temporary")
     chmod 0644 "$temporary"
-    mv -f -- "$temporary" "$destination"
+    mv -fT -- "$temporary" "$destination"
 }
 
 config_home_q=$(systemd_quote "$config_home")
