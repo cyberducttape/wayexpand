@@ -538,6 +538,8 @@ pack_signature_identity = "Verified signer: {signer} · trust source: {source} �
 pack_signature_reason = "Signature verification detail: {reason}"
 pack_install_result = "Install result: {output}"
 picker_copied = "Copied {trigger} · switch to your app and paste with Ctrl+V · return here to close the picker"
+picker_action_copy = "Destination: choose a field. Selecting a snippet copies it; switch to that field and paste with Ctrl+V. Keep this picker open until after pasting."
+picker_action_insert = "Destination: the original verified window. Selecting a snippet waits for that window to regain focus before typing."
 picker_inserting = "Inserting {trigger}…"
 picker_app_scope = "Automatic insertion only in any of: {scope}"
 
@@ -787,6 +789,11 @@ no_selection = "No snippet selected"
 
 [toolbar]
 header_status_details_hint = "Click for diagnostics"
+verification_badge_machine = "Test: {application} · observed"
+verification_badge_user = "Test: {application} · you confirmed"
+verification_badge_stale_machine = "Previous test: {application} · observed"
+verification_badge_stale_user = "Previous test: {application} · you confirmed"
+verification_scope = "This result covers only this application and session; other applications have not been verified."
 title = "Snippet library"
 unsaved_changes = "● Unsaved changes"
 settings = "Settings"

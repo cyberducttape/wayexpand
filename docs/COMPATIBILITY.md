@@ -14,10 +14,10 @@ This document defines the stability guarantees for WayExpand 1.x. Third-party to
 Every CLI build reports both its display version and the source commit:
 
 ```text
-wayexpand 1.3.3-dev+<short-sha> (commit <short-sha>)
+wayexpand <VERSION>-dev+<short-sha> (commit <short-sha>)
 ```
 
-An exact clean release tag reports the release version (`1.3.3`). A build from
+An exact clean release tag reports its tag version (`<VERSION>`). A build from
 an unreleased Git revision reports `-dev+<commit>` so bug reports can be tied to
 the source revision; dirty development builds append a deterministic digest
 of build inputs. If Git marks the worktree dirty but that digest cannot be
@@ -630,9 +630,9 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "backend_mode": "unknown",
   "status_schema": 34,
   "daemon_commit": "example-commit",
-  "daemon_version": "1.3.3-dev+example-commit",
+  "daemon_version": "<VERSION>-dev+example-commit",
   "client_commit": "example-commit",
-  "client_version": "1.3.3-dev+example-commit",
+  "client_version": "<VERSION>-dev+example-commit",
   "daemon_build_matches_client": true,
   "daemon_build_warning": null,
   "state": "connected",

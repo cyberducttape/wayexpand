@@ -105,6 +105,20 @@ pub struct SensitiveFieldSupport {
 }
 
 impl RouteContract {
+    /// The strongest trigger-replacement guarantee this route declares.
+    /// Application-level application of the result is reported separately.
+    pub fn replacement_guarantee(&self) -> &'static str {
+        if self.atomic_replace {
+            "atomic"
+        } else if self.trigger_precondition == "surrounding_text_matches_trigger" {
+            "verified"
+        } else if self.trigger_precondition == "focus_checked_with_compatibility_consent" {
+            "best-effort"
+        } else {
+            "unsupported"
+        }
+    }
+
     /// The production certification validator promotes reviewed routes to
     /// `supported`. Use that same catalog value when ranking routes and
     /// describing certification readiness.
