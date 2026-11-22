@@ -764,7 +764,7 @@ impl GuiApp {
                     detail.push_str(
                         &self
                             .strings
-                            .setup_changed_since_test(self.strings.setup_change(&change)),
+                            .setup_changed_since_test(self.strings.setup_change(change)),
                     );
                 }
                 let color = if stale.is_some() {
