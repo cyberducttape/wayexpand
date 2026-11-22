@@ -60,8 +60,11 @@ jobs:
     with:
       checkout_ref: ${{ inputs.release_ref || github.ref }}
 
-  # Uncertified builds may ship as preview prereleases. Only a successful
-  # physical-session certification run may publish a stable/latest release.
+  # Certification decides what the release may claim, not whether it ships.
+  # No compositor route is production-certified yet, and marking uncertified
+  # builds as prereleases would hide every new version from /releases/latest,
+  # which the README install links use. Uncertified releases are labeled an
+  # experimental preview in their notes instead.
   # Certification needs a production-eligible route and the runner token.
   # Without either it can only fail, which marked every release run red;
   # skip it instead and let the notes say the release is not certified.
@@ -398,8 +401,7 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
-          prerelease: ${{ needs.certification.result != 'success' }}
-          make_latest: ${{ needs.certification.result == 'success' && 'true' || 'false' }}
+          make_latest: true
           body: ${{ needs.certification.result == 'success' && env.CERTIFIED_NOTE || env.UNCERTIFIED_NOTE }}
           files: |
             wayexpand-*.tar.gz

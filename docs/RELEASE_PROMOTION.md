@@ -4,11 +4,11 @@ This guide covers the manual steps needed to promote releases on GitHub and mana
 
 ## Current release promotion
 
-The release workflow publishes uncertified builds as experimental preview
-prereleases. It marks a release stable and latest only after the production
-physical-session certification job succeeds. Do not manually promote a
-preview release: stable promotion requires attached desktop acceptance
-evidence and the certification security checks.
+The release workflow publishes every release that passes CI and marks it
+latest, so `/releases/latest` and the README install links always reach the
+newest version. Without a successful physical-session certification job, the
+release notes open with an experimental preview, not-compositor-certified
+notice; only a certified release may drop it.
 
 ### Manual Steps
 
@@ -16,8 +16,9 @@ evidence and the certification security checks.
    - Go to https://github.com/cyberducttape/wayexpand/releases
 
 2. **Verify the workflow classification**
-   - Confirm uncertified output is marked as an experimental preview prerelease
-   - Confirm a certified release is marked stable and latest
+   - Confirm the new release is marked latest
+   - Confirm an uncertified release's notes open with the experimental
+     preview notice
 
 3. **Verify**
    - Visit https://github.com/cyberducttape/wayexpand/releases/latest
@@ -25,7 +26,7 @@ evidence and the certification security checks.
 
 ### Why This Matters
 
-- Package managers and installation scripts check `/releases/latest`, which must resolve to a certified stable release
+- Package managers and installation scripts check `/releases/latest`, which must resolve to the newest published release
 - Users following default links get the newest stable version
 - Outdated defaults harm adoption and support (users on old versions)
 

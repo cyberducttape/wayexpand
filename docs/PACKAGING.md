@@ -151,9 +151,9 @@ This documents a local packaging path. Experimental daily packages are
 currently published for Ubuntu 26.04 (Resolute) and Ubuntu 26.10 (Stonking),
 amd64; check the shared publication status above and the PPA for the latest
 package and build state before installing. These daily packages are not
-certified releases. GitHub releases without a successful physical-session
-certification are published as experimental preview prereleases and are not
-marked latest; certification is required for stable/latest. CI also verifies
+certified releases. GitHub releases are published with binaries once CI
+passes and are marked latest; without a successful physical-session
+certification their notes label them an experimental preview. CI also verifies
 package installation on Ubuntu 24.04 LTS and 26.04 LTS.
 
 **To maintain:**
@@ -165,8 +165,7 @@ package installation on Ubuntu 24.04 LTS and 26.04 LTS.
 ### Fedora/RHEL
 
 **Status:** The release workflow attaches a local-install RPM
-for x86_64 to experimental preview releases and to stable releases after
-certification; no RPM is currently published. The
+for x86_64 to every GitHub release; no RPM is currently published. The
 RPM spec is maintained and built in CI, with package installation checked on
 Fedora 45. No official Copr repository is published, so DNF repository-based
 updates are not available.
