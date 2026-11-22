@@ -21,13 +21,14 @@ EOF
 chmod 0600 "$config_home/wayexpand/expansions.toml"
 
 report="$test_dir/report.json"
+scenario_count=$(jq '.required_scenarios | length' "$project_dir/tests/certification/compositor-matrix.json")
 XDG_CONFIG_HOME="$config_home" "$binary" support-bundle >"$report"
-jq -e '
+jq -e --argjson scenarios "$scenario_count" '
   .schema == 5 and
   .configuration.valid == true and
   (.application.version | type == "string") and
-  .certification.required_scenario_count == 48 and
-  (.certification.check_status_counts["not-run"] == 48)
+  .certification.required_scenario_count == $scenarios and
+  (.certification.check_status_counts["not-run"] == $scenarios)
 ' "$report" >/dev/null
 for secret in "$config_home" ':secret-support-trigger' 'SUPPORT_REPLACEMENT_SECRET'; do
     if grep -F "$secret" "$report" >/dev/null; then
