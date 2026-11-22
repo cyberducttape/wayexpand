@@ -20,7 +20,7 @@ safe to recommend for everyday desktop use.
 - [x] Publish the initial versioned certification record for KDE, GNOME, Sway,
       and Hyprland. CI and headless compositor results are separated from
       physical-session evidence and cannot mark a desktop production-safe. The
-      current 1.3.3-line record is
+      current release-line record is
       [CERTIFICATION_MATRIX](CERTIFICATION_MATRIX.md), with no certified route.
 - [ ] Update the certification record for every release and complete the
       physical-session matrix before promoting any desktop route.

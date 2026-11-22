@@ -1499,6 +1499,23 @@ impl eframe::App for PickerApp {
                     response.request_focus();
                     self.focus_requested = true;
                 }
+                theme::card(ui, &palette, |ui| {
+                    ui.set_width(ui.available_width());
+                    let instruction = if self.safe_direct_insert {
+                        self.strings.picker_action_insert()
+                    } else {
+                        self.strings.picker_action_copy()
+                    };
+                    ui.label(RichText::new(instruction).small());
+                    if let Some(trigger) = self.copied.as_deref() {
+                        ui.add_space(4.0);
+                        ui.colored_label(
+                            palette.success,
+                            RichText::new(self.strings.picker_copied(trigger)),
+                        );
+                    }
+                });
+                ui.add_space(8.0);
                 let has_unavailable = self
                     .search_index
                     .iter()
@@ -1672,22 +1689,16 @@ impl eframe::App for PickerApp {
                     });
 
                 ui.separator();
-                ui.horizontal(|ui| {
-                    let (text, color) = match (&self.copied, self.safe_direct_insert) {
-                        (Some(trigger), _) => {
-                            (self.strings.picker_copied(trigger), palette.success)
-                        }
-                        (None, true) => (
-                            self.strings.picker_footer_daemon().to_owned(),
-                            palette.muted,
-                        ),
-                        (None, false) => (
-                            self.strings.picker_footer_clipboard().to_owned(),
-                            palette.warning,
-                        ),
-                    };
-                    ui.label(RichText::new(text).small().color(color));
-                });
+                if self.copied.is_none() {
+                    ui.horizontal(|ui| {
+                        let (text, color) = if self.safe_direct_insert {
+                            (self.strings.picker_footer_daemon(), palette.muted)
+                        } else {
+                            (self.strings.picker_footer_clipboard(), palette.warning)
+                        };
+                        ui.label(RichText::new(text).small().color(color));
+                    });
+                }
             });
         if let Some(expansion_index) = chosen {
             let expansion = self.config.expansion[expansion_index].clone();

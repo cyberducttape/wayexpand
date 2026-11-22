@@ -30,6 +30,20 @@ pub enum HeaderState {
 }
 
 impl Strings {
+    pub(crate) fn verification_badge(
+        &self,
+        application: &str,
+        machine_observed: bool,
+        stale: bool,
+    ) -> String {
+        match (machine_observed, stale) {
+            (true, false) => self.verification_badge_machine(application),
+            (false, false) => self.verification_badge_user(application),
+            (true, true) => self.verification_badge_stale_machine(application),
+            (false, true) => self.verification_badge_stale_user(application),
+        }
+    }
+
     pub fn header_state(&self, state: HeaderState) -> &'static str {
         use HeaderState as S;
         match (self.lang, state) {
@@ -759,10 +773,10 @@ impl Strings {
     pub fn onboarding_evdev_setup(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Enable raw keyboard capture — no password-field detection (advanced)…"
+                "Enable global raw-keyboard observation — an app allowlist limits snippet matching only; keyboard events remain globally visible, including password fields (advanced)…"
             }
-            Language::Indonesian => "Aktifkan tangkapan papan ketik mentah — lanjutan…",
-            Language::German => "Rohe Tastaturerfassung aktivieren — erweitert…",
+            Language::Indonesian => "Aktifkan pengamatan papan ketik mentah secara global — daftar aplikasi hanya membatasi pencocokan cuplikan; kejadian tombol tetap terlihat secara global, termasuk di kolom sandi (lanjutan)…",
+            Language::German => "Globale Beobachtung roher Tastatureingaben aktivieren — eine App-Liste begrenzt nur den Snippet-Abgleich; Tastatureingaben bleiben global sichtbar, auch in Passwortfeldern (erweitert)…",
         }
     }
 }
