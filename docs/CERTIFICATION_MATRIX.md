@@ -60,7 +60,7 @@ machine-prove hardware use. Headless Wayland session evidence is rejected.
 
 | Desktop | Session evidence on record | Physical keyboard capture | Focused client and focus changes | Screen lock/unlock | Active layout changes | Suspend/resume | Portal revocation | Long-session soak | Release status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| KDE Plasma / KWin | Private headless KWin 6.6.6 reports; capture was simulated. Separate live tracker smoke checks passed on Ubuntu 26.04.1 / Plasma 6.6.6 / KWin 6.6.6 | Not tested | Live focused-window identity and tracker unload checked; no physical typing or focus-change matrix | Not tested | Headless `us,de` active-group limitation observed; physical switching not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
+| KDE Plasma / KWin | Live probe on Ubuntu 26.04.1 / Plasma 6.6.6 / KWin 6.6.7 and private headless smoke report for commit `45f430bb3c2e`; live probe found input-method-v2 unavailable, active route is evdev+libei | Not tested | Tracker identity and unload checks only; no physical typing or client focus-change matrix | Not tested | Headless `us,de` active-group limitation observed; physical switching not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
 | GNOME Shell / Mutter | No qualifying physical-session report recorded | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
 | Sway / wlroots | Headless CI coverage only; no qualifying physical-session report recorded | Not tested | Headless coverage only; not physical-session evidence | Not tested | Not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
 | Hyprland / wlroots | No qualifying physical-session report recorded | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
@@ -73,6 +73,17 @@ reviewed report tied to the exact WayExpand commit, compositor and version,
 route, physical keyboard, focused client, and test date. Failures, unavailable
 capabilities, and untested cases remain visible; they are not converted into
 passes by a green CI run.
+
+The [2026-11-21 live tracker check](evidence/kwin-tracker-live-2026-11-21.json)
+passed two KWin window-tracker component tests on this KDE machine. It did not
+exercise physical typing or application insertion and does not change the KDE
+release status above.
+
+The [2026-11-21 live capability probe](evidence/kde-live-capability-2026-11-21.json)
+found no usable input-method-v2 interface. The active evdev+libei route reports
+neither atomic replacement nor sensitive-field detection, so this session has
+no production-eligible route. All 48 live certification scenarios remain
+unrun.
 
 ### Narrow live KDE tracker observation — 2026-11-19
 
