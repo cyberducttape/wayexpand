@@ -64,7 +64,7 @@ local, offline, no account, no telemetry.
 | Anything else, or to build it yourself | [a source build](#build-from-source), about five minutes |
 
 <!-- generated-install-status:start -->
-**Package availability (audited 2026-11-18):** GitHub release 1.3.6 has prebuilt binaries with checksums (`.tar.gz`, `.deb`, `.rpm`). PPA experimental daily builds for Ubuntu 26.04 (Resolute) (amd64), Ubuntu 26.10 (Stonking) (amd64). PPA packages for Ubuntu 24.04 (Noble) (0.2.0, stale), Ubuntu 22.04 (Jammy) (0.2.0, stale) lag behind; prefer the GitHub release there. Fedora Copr: not published yet. Package availability is separate from desktop certification.
+**Package availability (audited 2026-11-18):** GitHub experimental-preview release 1.3.6 has prebuilt binaries with checksums (`.tar.gz`, `.deb`, `.rpm`). PPA experimental daily builds for Ubuntu 26.04 (Resolute) (amd64), Ubuntu 26.10 (Stonking) (amd64). PPA packages for Ubuntu 24.04 (Noble) (0.2.0, stale), Ubuntu 22.04 (Jammy) (0.2.0, stale) lag behind; prefer the GitHub release there. Fedora Copr: not published yet. Package availability is separate from desktop certification.
 <!-- generated-install-status:end -->
 
 This guide follows the current source checkout; published packages may not yet
@@ -83,7 +83,7 @@ Check the likely setup path for your desktop before choosing an integration:
 
 | Desktop/session | Likely path | Evidence and limits |
 | --- | --- | --- |
-| GNOME Shell 46, 48, 50, or 51 | IBus with the WayExpand Shell extension | Headless integration-tested; no real GNOME session is production-certified. |
+| GNOME Shell 46, 48, 50, or 51 | Experimental IBus integration with the WayExpand Shell extension | Runtime-gated and headless integration-tested only. No GNOME application has physical-session certification; do not treat these Shell versions as a validated expansion-support claim. |
 | GNOME Shell 49 | GNOME extension support is not declared | German and French layout switching has not been verified in a real GNOME 49 session. Do not treat the extension route as working; Quick Picker can copy snippets for manual paste. |
 | Another GNOME Shell major | GNOME extension support is not declared | Compatibility is unknown. Check the setup guide before enabling an integration; Quick Picker can copy snippets for manual paste. |
 | KDE Plasma / Wayland | Guided IBus setup; KWin tracking where available | Setup checks this session, but no route is production-certified. Verify in each target application. |

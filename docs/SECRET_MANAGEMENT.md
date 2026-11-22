@@ -4,7 +4,7 @@
 
 ---
 
-## Current State (v1.3.3)
+## Current State
 
 WayExpand does **not** provide built-in secret management. This is intentional:
 
