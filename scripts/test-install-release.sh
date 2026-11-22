@@ -343,6 +343,8 @@ ln -s "$library_dir/missing/desktop/wayexpand.desktop" \
 rm -f -- "$test_root/home/.local/bin/wayexpand-ibus"
 ln -s "$library_dir/missing/bin/wayexpand-ibus" \
     "$test_root/home/.local/bin/wayexpand-ibus"
+# The first installers copied a regular legacy unit; uninstall still removes it.
+printf '%s\n' '[Unit]' >"$test_root/config/systemd/user/wayexpand.service"
 PATH="$stub_bin:$PATH" \
 HOME="$test_root/home" \
 XDG_CONFIG_HOME="$test_root/config" \
@@ -376,6 +378,7 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ -L "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 [ "$(readlink "$test_root/config/systemd/user/wayexpand-evdev.service")" = "$test_root/unrelated-missing.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-control.service" ]
+[ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf" ]

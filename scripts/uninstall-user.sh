@@ -108,9 +108,11 @@ if [ -n "$active_processes" ]; then
     exit 1
 fi
 
-# Installer-managed launch links point into this user's immutable payload
-# directory. Follow ownership by link target so damaged installs can remove
-# dangling links without deleting another application's same-named entry.
+# Current installers link into this user's payload directory; the first
+# installers copied regular files (including the legacy wayexpand.service).
+# Remove regular files as before, and a symlink only when it points into the
+# payload, so damaged installs lose dangling links while another
+# application's same-named link survives.
 is_wayexpand_install_link() {
     link_path=$1
     [ -L "$link_path" ] || return 1
@@ -131,8 +133,7 @@ remove_managed_file() {
 }
 
 for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
-    if is_wayexpand_install_link "$bin_dir/$binary"; then
-        rm -f -- "$bin_dir/$binary"
+    if remove_managed_file "$bin_dir/$binary"; then
         printf '%s\n' "Removed $bin_dir/$binary"
     fi
 done
@@ -154,8 +155,7 @@ if remove_managed_file "$ibus_component_dir/wayexpand-ibus.xml"; then
 fi
 
 for unit in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
-    if is_wayexpand_install_link "$unit_dir/$unit"; then
-        rm -f -- "$unit_dir/$unit"
+    if remove_managed_file "$unit_dir/$unit"; then
         printf '%s\n' "Removed $unit_dir/$unit"
     fi
 done
@@ -175,8 +175,7 @@ if command -v systemctl >/dev/null 2>&1; then
     systemctl --user daemon-reload || true
 fi
 
-if is_wayexpand_install_link "$application_dir/wayexpand.desktop"; then
-    rm -f -- "$application_dir/wayexpand.desktop"
+if remove_managed_file "$application_dir/wayexpand.desktop"; then
     printf '%s\n' "Removed $application_dir/wayexpand.desktop"
 fi
 
