@@ -511,3 +511,4 @@ done
 
 printf '%s\n' ""
 printf '%s\n' "=== INSTALLATION COMPLETE ==="
+printf '%s\n' "Next: open WayExpand from your application menu (or run \"$bin_dir/wayexpand-gui\")."
