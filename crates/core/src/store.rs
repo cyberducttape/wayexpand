@@ -1,22 +1,25 @@
-use crate::{Config, ConfigError};
+use crate::{Config, ConfigError, ConfigRevision, LoadedConfig};
 use std::{
     fs,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::{mpsc, Arc, Mutex, PoisonError, RwLock},
-    time::SystemTime,
+    time::{Duration, Instant, SystemTime},
 };
 
 const MAX_RELOAD_ATTEMPTS: usize = 3;
+const RETRY_INITIAL_DELAY: Duration = Duration::from_millis(250);
+const RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 
 /// Shared validated configuration snapshot with generation notifications.
 pub struct ConfigStore {
     path: PathBuf,
     snapshot: RwLock<ConfigSnapshot>,
-    /// Metadata observed on the most recent poll, whether or not it parsed.
-    /// Keeping this separate from `applied_stamp` prevents unchanged invalid
-    /// content from being reparsed on every fallback-poll cycle.
+    /// Metadata last applied or rejected as persistent content/validation.
+    /// Transient read failures do not advance this stamp, so an unchanged file
+    /// is retried after the bounded backoff below.
     observed_stamp: Mutex<Option<FileStamp>>,
+    retry_state: Mutex<RetryState>,
     reload_error: Mutex<Option<String>>,
     subscribers: Mutex<Vec<mpsc::SyncSender<u64>>>,
 }
@@ -42,6 +45,7 @@ impl ConfigStore {
         let loaded = Config::load_versioned(&path)?;
         Ok(Arc::new(Self {
             observed_stamp: Mutex::new(metadata_stamp(&path)),
+            retry_state: Mutex::new(RetryState::default()),
             path,
             snapshot: RwLock::new(ConfigSnapshot {
                 config: Arc::new(loaded.config),
@@ -118,6 +122,19 @@ impl ConfigStore {
     }
     /// Invalid edits leave the last valid snapshot active.
     pub fn reload_if_changed(&self) -> Result<bool, ConfigError> {
+        self.reload_if_changed_with(
+            Instant::now(),
+            |path| Config::load_versioned(path),
+            |path, revision| Config::source_matches_revision(path, revision),
+        )
+    }
+
+    fn reload_if_changed_with(
+        &self,
+        now: Instant,
+        mut load: impl FnMut(&Path) -> Result<LoadedConfig, ConfigError>,
+        mut verify: impl FnMut(&Path, &ConfigRevision) -> Result<bool, ConfigError>,
+    ) -> Result<bool, ConfigError> {
         let current = metadata_stamp(&self.path);
         let mut observed_stamp = self
             .observed_stamp
@@ -126,17 +143,39 @@ impl ConfigStore {
         if current == *observed_stamp {
             return Ok(false);
         }
+        let mut retry_state = self
+            .retry_state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if retry_state.stamp != current {
+            *retry_state = RetryState::default();
+        } else if retry_state.retry_at.is_some_and(|retry_at| now < retry_at) {
+            return Ok(false);
+        }
+
         let mut last_error = None;
+        let mut retryable_failure = false;
+        let mut retry_stamp = None;
         for _ in 0..MAX_RELOAD_ATTEMPTS {
             let before = metadata_stamp(&self.path);
-            let loaded = match Config::load_versioned(&self.path) {
+            let loaded = match load(&self.path) {
                 Ok(loaded) => loaded,
                 Err(error) => {
                     let after = metadata_stamp(&self.path);
-                    *observed_stamp = after;
+                    let retryable = retryable_reload_error(&error);
                     last_error = Some(error);
                     if before == after {
+                        if retryable {
+                            retryable_failure = true;
+                            retry_stamp = Some(after);
+                        } else {
+                            *observed_stamp = after;
+                            *retry_state = RetryState::default();
+                        }
                         break;
+                    }
+                    if retryable {
+                        retry_stamp = Some(after);
                     }
                     continue;
                 }
@@ -146,21 +185,32 @@ impl ConfigStore {
             // the exact source instead of parsing and validating the same TOML
             // a second time. This still rejects a concurrent in-place edit or
             // atomic rename before publishing the first parsed snapshot.
-            let verified = match Config::source_matches_revision(&self.path, &loaded.revision) {
+            let verified = match verify(&self.path, &loaded.revision) {
                 Ok(verified) => verified,
                 Err(error) => {
                     let after = metadata_stamp(&self.path);
-                    *observed_stamp = after;
+                    let retryable = retryable_reload_error(&error);
                     last_error = Some(error);
                     if before == after {
+                        if retryable {
+                            retryable_failure = true;
+                            retry_stamp = Some(after);
+                        } else {
+                            *observed_stamp = after;
+                            *retry_state = RetryState::default();
+                        }
                         break;
+                    }
+                    if retryable {
+                        retry_stamp = Some(after);
                     }
                     continue;
                 }
             };
             let after = metadata_stamp(&self.path);
-            *observed_stamp = after;
             if before == after && verified {
+                *observed_stamp = after;
+                *retry_state = RetryState::default();
                 self.atomically_replace(loaded.config);
                 *self
                     .reload_error
@@ -176,8 +226,17 @@ impl ConfigStore {
                     "configuration changed while loading",
                 ),
             });
+            if before == after {
+                retryable_failure = true;
+                retry_stamp = Some(after);
+                break;
+            }
         }
 
+        if !retryable_failure && last_error.as_ref().is_some_and(retryable_reload_error) {
+            retryable_failure = true;
+            retry_stamp = Some(metadata_stamp(&self.path));
+        }
         let error = last_error.unwrap_or_else(|| ConfigError::Read {
             path: self.path.display().to_string(),
             source: std::io::Error::new(
@@ -185,12 +244,49 @@ impl ConfigStore {
                 "configuration changed while loading",
             ),
         });
+        if retryable_failure {
+            retry_state.schedule(
+                retry_stamp.unwrap_or_else(|| metadata_stamp(&self.path)),
+                now,
+            );
+        }
         *self
             .reload_error
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(error.safe_summary());
         Err(error)
     }
+}
+
+#[derive(Default)]
+/// Backoff for transient I/O failures on one unchanged filesystem revision.
+/// A new metadata stamp bypasses the delay and gets an immediate attempt.
+struct RetryState {
+    stamp: Option<FileStamp>,
+    failures: u32,
+    retry_at: Option<Instant>,
+}
+
+impl RetryState {
+    fn schedule(&mut self, stamp: Option<FileStamp>, now: Instant) {
+        if self.stamp == stamp {
+            self.failures = self.failures.saturating_add(1);
+        } else {
+            self.stamp = stamp;
+            self.failures = 1;
+        }
+        let shift = self.failures.saturating_sub(1).min(7);
+        let multiplier = 1u32 << shift;
+        let delay = RETRY_INITIAL_DELAY
+            .checked_mul(multiplier)
+            .unwrap_or(RETRY_MAX_DELAY)
+            .min(RETRY_MAX_DELAY);
+        self.retry_at = Some(now + delay);
+    }
+}
+
+fn retryable_reload_error(error: &ConfigError) -> bool {
+    matches!(error, ConfigError::Read { .. } | ConfigError::Busy { .. })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,6 +380,94 @@ mod tests {
             !store.reload_if_changed().unwrap(),
             "unchanged invalid content must not be reparsed"
         );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn transient_read_failure_retries_after_backoff_without_metadata_change() {
+        let path = path();
+        write_private(
+            &path,
+            "[[expansion]]\ntrigger = ':x'\nreplacement = 'old'\n",
+        );
+        let store = ConfigStore::load(&path).unwrap();
+        write_private(
+            &path,
+            "[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':x'\nreplacement = 'new'\n",
+        );
+        let unchanged_stamp = metadata_stamp(&path);
+        let attempts = std::cell::Cell::new(0);
+        let load = |path: &Path| {
+            let attempt = attempts.get() + 1;
+            attempts.set(attempt);
+            if attempt == 1 {
+                Err(ConfigError::Read {
+                    path: path.display().to_string(),
+                    source: std::io::Error::from(std::io::ErrorKind::Interrupted),
+                })
+            } else {
+                Config::load_versioned(path)
+            }
+        };
+        let verify = |path: &Path, revision: &ConfigRevision| {
+            Config::source_matches_revision(path, revision)
+        };
+        let now = Instant::now();
+
+        assert!(store.reload_if_changed_with(now, load, verify).is_err());
+        assert_eq!(attempts.get(), 1);
+        assert_eq!(metadata_stamp(&path), unchanged_stamp);
+        assert!(!store
+            .reload_if_changed_with(now + Duration::from_millis(100), load, verify)
+            .unwrap());
+        assert_eq!(attempts.get(), 1);
+
+        assert!(store
+            .reload_if_changed_with(now + RETRY_INITIAL_DELAY, load, verify)
+            .unwrap());
+        assert_eq!(attempts.get(), 2);
+        assert_eq!(store.snapshot().generation, 1);
+        assert_eq!(store.snapshot().config.expansion[0].replacement, "new");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn transient_source_verification_failure_retries_without_metadata_change() {
+        let path = path();
+        write_private(
+            &path,
+            "[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':x'\nreplacement = 'old'\n",
+        );
+        let store = ConfigStore::load(&path).unwrap();
+        write_private(
+            &path,
+            "[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':x'\nreplacement = 'new'\n",
+        );
+        let unchanged_stamp = metadata_stamp(&path);
+        let attempts = std::cell::Cell::new(0);
+        let load = |path: &Path| Config::load_versioned(path);
+        let verify = |path: &Path, revision: &ConfigRevision| {
+            let attempt = attempts.get() + 1;
+            attempts.set(attempt);
+            if attempt == 1 {
+                Err(ConfigError::Read {
+                    path: path.display().to_string(),
+                    source: std::io::Error::from(std::io::ErrorKind::Interrupted),
+                })
+            } else {
+                Config::source_matches_revision(path, revision)
+            }
+        };
+        let now = Instant::now();
+
+        assert!(store.reload_if_changed_with(now, load, verify).is_err());
+        assert_eq!(attempts.get(), 1);
+        assert_eq!(metadata_stamp(&path), unchanged_stamp);
+        assert!(store
+            .reload_if_changed_with(now + RETRY_INITIAL_DELAY, load, verify)
+            .unwrap());
+        assert_eq!(attempts.get(), 2);
+        assert_eq!(store.snapshot().config.expansion[0].replacement, "new");
         let _ = fs::remove_file(path);
     }
 
