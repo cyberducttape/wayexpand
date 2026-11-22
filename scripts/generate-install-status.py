@@ -16,6 +16,8 @@ def validate_status():
     release = STATUS.get("latest_github_release", {})
     if not release.get("version") or not isinstance(release.get("published"), bool):
         raise SystemExit("release-status manifest has invalid GitHub release metadata")
+    if release.get("channel") not in {"experimental-preview", "stable"}:
+        raise SystemExit("release-status manifest must identify the GitHub release channel")
     if not isinstance(release.get("binary_assets_published"), bool):
         raise SystemExit("release-status manifest must state binary asset availability")
     ppa = STATUS.get("ppa", {})
@@ -86,7 +88,7 @@ def render_readme():
         release_text = f"GitHub release {release['version']} is not published yet."
     elif release["binary_assets_published"]:
         release_text = (
-            f"GitHub release {release['version']} has prebuilt binaries with "
+            f"GitHub {release['channel']} release {release['version']} has prebuilt binaries with "
             "checksums (`.tar.gz`, `.deb`, `.rpm`)."
         )
     else:
@@ -114,7 +116,7 @@ def render_packaging():
     ppa = STATUS["ppa"]
     lines = [
         f"**Publication status from the shared manifest (audited {STATUS['audited_on']}):** "
-        f"GitHub {release['version']} binary assets published: {release['binary_assets_published']}. "
+        f"GitHub {release['channel']} release {release['version']} binary assets published: {release['binary_assets_published']}. "
         f"Launchpad PPA: {ppa['status']} for {ppa['architectures']}.",
         "",
         "| Distribution | PPA package status |",

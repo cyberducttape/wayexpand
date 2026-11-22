@@ -534,6 +534,8 @@ pack_signature_identity = "Verifizierter Signierer: {signer} · Vertrauensquelle
 pack_signature_reason = "Details zur Signaturprüfung: {reason}"
 pack_install_result = "Installationsergebnis: {output}"
 picker_copied = "{trigger} kopiert · zur App wechseln und mit Strg+V einfügen · zum Schließen hierher zurückkehren"
+picker_action_copy = "Ziel: Wählen Sie ein Textfeld. Die Auswahl kopiert das Snippet; wechseln Sie zum Feld und fügen Sie es mit Strg+V ein. Lassen Sie den Picker bis nach dem Einfügen geöffnet."
+picker_action_insert = "Ziel: das ursprüngliche, verifizierte Fenster. Nach der Auswahl wartet WayExpand, bis dieses Fenster wieder fokussiert ist, und tippt dann den Text."
 picker_inserting = "{trigger} wird eingefügt …"
 picker_app_scope = "Automatisches Einfügen nur in einer dieser Apps: {scope}"
 
@@ -781,6 +783,11 @@ no_selection = "Kein Snippet ausgewählt"
 
 [toolbar]
 header_status_details_hint = "Klicken für die Diagnose"
+verification_badge_machine = "Test: {application} · beobachtet"
+verification_badge_user = "Test: {application} · von Ihnen bestätigt"
+verification_badge_stale_machine = "Vorheriger Test: {application} · beobachtet"
+verification_badge_stale_user = "Vorheriger Test: {application} · von Ihnen bestätigt"
+verification_scope = "Dieses Ergebnis gilt nur für diese Anwendung und Sitzung; andere Anwendungen wurden nicht geprüft."
 title = "Snippet-Bibliothek"
 unsaved_changes = "● Ungespeicherte Änderungen"
 settings = "Einstellungen"

@@ -2,6 +2,7 @@
   "audited_on": "2026-11-18",
   "latest_github_release": {
     "version": "1.3.6",
+    "channel": "experimental-preview",
     "published": true,
     "binary_assets_published": true
   },
@@ -38,25 +39,25 @@
     "Fedora 45"
   ],
   "physical_desktop_certification": false,
-  "upgrade_from_previous_package_tested": false,
+  "upgrade_from_previous_package_tested": true,
   "upgrade_test_matrix": [
     {
       "scenario": "previous-release-to-current",
-      "status": "ci-pending",
+      "status": "passed",
       "scope": "package-manager",
       "evidence": "scripts/test-package-smoke.sh",
       "expected": "Candidate package installs over previous release; user configuration and snippets remain valid."
     },
     {
       "scenario": "user-customization-preserved",
-      "status": "ci-pending",
+      "status": "passed",
       "scope": "package-manager",
       "evidence": "scripts/test-package-smoke.sh",
       "expected": "User-owned snippets and custom fields survive schema migration; after migration, configuration bytes remain unchanged across rollback, re-upgrade, reinstall, and uninstall/reinstall."
     },
     {
       "scenario": "uninstall-reinstall",
-      "status": "ci-pending",
+      "status": "passed",
       "scope": "package-manager",
       "evidence": "scripts/test-package-smoke.sh",
       "expected": "Package-owned executables are removed and reinstall restores package components without replacing user configuration."

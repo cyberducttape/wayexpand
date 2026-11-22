@@ -130,6 +130,32 @@ def main() -> int:
     elif f"**Version:** {version}" not in architecture:
         errors.append("Action Broker architecture version is out of sync with Cargo.toml")
 
+    compatibility = (ROOT / "docs/COMPATIBILITY.md").read_text(encoding="utf-8")
+    secret_management = (ROOT / "docs/SECRET_MANAGEMENT.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
+    packaging = (ROOT / "docs/PACKAGING.md").read_text(encoding="utf-8")
+    upgrading = (ROOT / "docs/UPGRADING.md").read_text(encoding="utf-8")
+    release_promotion = (ROOT / "docs/RELEASE_PROMOTION.md").read_text(encoding="utf-8")
+    cli_help = (ROOT / "crates/cli/src/help.rs").read_text(encoding="utf-8")
+    if "<VERSION>-dev+<short-sha>" not in compatibility or re.search(
+        r"wayexpand 1\.\d+\.\d+-dev", compatibility
+    ):
+        errors.append("compatibility build-identity examples must use version-neutral placeholders")
+    if re.search(r"^## Current State \(v\d", secret_management, re.MULTILINE):
+        errors.append("secret-management current-state heading must not be pinned to an old release")
+    if re.search(r"current 1\.\d+\.\d+-line record", roadmap):
+        errors.append("roadmap must refer to the current release-line certification record generically")
+    if "--package-identity 'WayExpand <VERSION> release archive sha256:<CHECKSUM>'" not in certification_doc:
+        errors.append("physical-session report example must use version and checksum placeholders")
+    if "current release version (e.g., 1.3.3)" in packaging or "source_version=1.3.3-2" in packaging:
+        errors.append("packaging examples must not hard-code superseded release versions")
+    if 'rev = version;' not in release_promotion or 'rev = "v${version}"' in release_promotion:
+        errors.append("NixOS example must use the repository's bare-version release tags")
+    if version and not re.search(rf"^\| {re.escape(version)} \|", upgrading, re.MULTILINE):
+        errors.append("upgrade version history must include the current Cargo.toml version")
+    if "debug --test [TRIGGER] [--controlled-client]" not in cli_help:
+        errors.append("debug --test help must list the implemented --controlled-client option")
+
     name_method = re.search(
         r"pub fn name\(&self\).*?\n    }\n\n    pub fn description",
         gui_source,

@@ -14,7 +14,7 @@ packagers and source-build users need a compatible toolchain.
 ## Quick Reference
 
 <!-- generated-install-status:start -->
-**Publication status from the shared manifest (audited 2026-11-18):** GitHub 1.3.6 binary assets published: True. Launchpad PPA: experimental daily builds for ['amd64'].
+**Publication status from the shared manifest (audited 2026-11-18):** GitHub experimental-preview release 1.3.6 binary assets published: True. Launchpad PPA: experimental daily builds for ['amd64'].
 
 | Distribution | PPA package status |
 |---|---|
@@ -23,13 +23,13 @@ packagers and source-build users need a compatible toolchain.
 | Ubuntu 24.04 (Noble) | 0.2.0 — stale |
 | Ubuntu 22.04 (Jammy) | 0.2.0 — stale |
 
-Fedora Copr published: False; Arch AUR submitted: False. Package CI targets: Ubuntu 24.04, Ubuntu 26.04, Fedora 45. Physical desktop certification: False. Previous-package upgrade CI passed: False.
+Fedora Copr published: False; Arch AUR submitted: False. Package CI targets: Ubuntu 24.04, Ubuntu 26.04, Fedora 45. Physical desktop certification: False. Previous-package upgrade CI passed: True.
 
 | Upgrade scenario | Scope | Status | Expected behavior |
 |---|---|---|---|
-| previous-release-to-current | package-manager | ci-pending | Candidate package installs over previous release; user configuration and snippets remain valid. |
-| user-customization-preserved | package-manager | ci-pending | User-owned snippets and custom fields survive schema migration; after migration, configuration bytes remain unchanged across rollback, re-upgrade, reinstall, and uninstall/reinstall. |
-| uninstall-reinstall | package-manager | ci-pending | Package-owned executables are removed and reinstall restores package components without replacing user configuration. |
+| previous-release-to-current | package-manager | passed | Candidate package installs over previous release; user configuration and snippets remain valid. |
+| user-customization-preserved | package-manager | passed | User-owned snippets and custom fields survive schema migration; after migration, configuration bytes remain unchanged across rollback, re-upgrade, reinstall, and uninstall/reinstall. |
+| uninstall-reinstall | package-manager | passed | Package-owned executables are removed and reinstall restores package components without replacing user configuration. |
 | running-daemon-activated | live-user-session | not-tested | Affected process is restarted and reports the candidate build; no stale daemon remains. |
 | gnome-ibus-upgrade | physical-gnome-session | not-tested | IBus registration and GNOME source remain usable or setup presents a precise recovery step. |
 | interrupted-package-upgrade | package-manager | not-tested | Previous working package remains usable or package repair restores a coherent installation. |
@@ -43,8 +43,12 @@ The exact current scenario status is shown in the generated matrix below. This
 container test accepts the supported stable-ID migration when validating the
 older fixture, checks that its built-in and user-owned snippets survive, then
 requires byte-for-byte preservation through later package operations. It
-cannot establish behavior with a running desktop daemon or an active GNOME
-IBus source; those remain separate desktop-session checks. GitHub
+checks CLI, daemon, GUI, and UI binary versions after upgrade. After rollback
+it checks that the installed binaries link and that the CLI and daemon report
+1.3.2; the 1.3.2 GUI and UI have no `--version` option.
+It does not simulate a package-manager interruption, confirm that a running
+user daemon was replaced, or exercise an active GNOME IBus source; those
+scenarios remain untested in the matrix. GitHub
 release artifacts receive build-provenance attestations and checksums;
 repositories must use their distribution signing infrastructure before they
 are advertised as official channels. CI does not yet compare independently
@@ -61,8 +65,8 @@ and desktop certification are separate: no currently published package has
 passed the physical-desktop certification gate.
 
 The earlier Rust 1.93 build failure was resolved by synchronizing the
-vendored source branch. The current `1.3.3` daily package built successfully
-for amd64 on Resolute and Stonking on 2026-11-07 ([Resolute build
+vendored source branch. On 2026-11-07, a `1.3.3` daily package built
+successfully for amd64 on Resolute and Stonking ([Resolute build
 33926583](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33926583),
 [Stonking build
 33926582](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33926582)).
@@ -131,7 +135,7 @@ makepkg -si
 ```bash
 # Debian packaging expects the vendored release archive for offline builds.
 # Do not build the clean Git checkout: Launchpad builders cannot fetch crates.io.
-# Replace ${VERSION} with the current release version (e.g., 1.3.3)
+# Replace ${VERSION} with the release version you are building.
 tar -xzf wayexpand-${VERSION}-vendored.tar.gz
 cd wayexpand-${VERSION}
 
@@ -149,9 +153,10 @@ This documents a local packaging path. Experimental daily packages are
 currently published for Ubuntu 26.04 (Resolute) and Ubuntu 26.10 (Stonking),
 amd64; check the shared publication status above and the PPA for the latest
 package and build state before installing. These daily packages are not
-certified releases. The GitHub release workflow only publishes release
-artifacts after its certification gates pass. CI also verifies package
-installation on Ubuntu 24.04 LTS and 26.04 LTS.
+certified releases. GitHub releases are published with binaries once CI
+passes and are marked latest; without a successful physical-session
+certification their notes label them an experimental preview. CI also verifies
+package installation on Ubuntu 24.04 LTS and 26.04 LTS.
 
 **To maintain:**
 1. Update version in `debian/changelog`
@@ -161,8 +166,8 @@ installation on Ubuntu 24.04 LTS and 26.04 LTS.
 
 ### Fedora/RHEL
 
-**Status:** The release workflow is configured to attach a local-install RPM
-for x86_64 after certification gates pass; no RPM is currently published. The
+**Status:** The release workflow attaches a local-install RPM
+for x86_64 to every GitHub release; no RPM is currently published. The
 RPM spec is maintained and built in CI, with package installation checked on
 Fedora 45. No official Copr repository is published, so DNF repository-based
 updates are not available.
@@ -300,7 +305,7 @@ directory, then sign and upload the changes file with the Launchpad-upload GPG
 key:
 
 ```bash
-source_version=1.3.3-2 # use the version shown in the .dsc filename
+source_version="<SOURCE_VERSION_FROM_DSC>" # copy the exact version shown in the .dsc filename
 debsign "wayexpand_${source_version}_source.changes"
 dput ppa:cyberducttape/ppa "wayexpand_${source_version}_source.changes"
 ```
