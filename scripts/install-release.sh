@@ -119,6 +119,21 @@ fi
 application_dir="$data_home/applications"
 metainfo_dir="$data_home/metainfo"
 man_dir="$data_home/man/man1"
+reject_directory_target() {
+    destination=$1
+    if [ -d "$destination" ] && [ ! -L "$destination" ]; then
+        printf 'error: installation target is a directory: %s\n' "$destination" >&2
+        return 1
+    fi
+}
+for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
+    reject_directory_target "$bin_dir/$binary"
+done
+for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
+    reject_directory_target "$unit_dir/$unit"
+    reject_directory_target "$unit_dir/$unit.d/10-xdg-paths.conf"
+done
+reject_directory_target "$application_dir/wayexpand.desktop"
 config_path="$config_dir/expansions.toml"
 if [ "$enable_service" -eq 1 ]; then
     validation_path=
@@ -205,12 +220,77 @@ if [ "$enable_service" -eq 1 ] && systemctl --user is-enabled "$service_name" >/
     service_was_enabled=1
 fi
 previous_version=$(readlink "$library_dir/current" 2>/dev/null || true)
-if [ -n "$previous_version" ]; then
-    install -d -m 0700 "$state_dir"
-    rollback_tmp="$state_dir/previous-install-$$"
-    (umask 077; printf '%s\n' "$previous_version" > "$rollback_tmp")
-    mv -f "$rollback_tmp" "$state_dir/previous-install"
-fi
+rollback_dir="$state_dir/.install-rollback-$$"
+install -d -m 0700 "$rollback_dir/items" "$rollback_dir/present"
+snapshot_target() {
+    snapshot_key=$1
+    snapshot_path=$2
+    if [ -e "$snapshot_path" ] || [ -L "$snapshot_path" ]; then
+        cp -a -- "$snapshot_path" "$rollback_dir/items/$snapshot_key"
+        : >"$rollback_dir/present/$snapshot_key"
+    fi
+}
+restore_target() {
+    restore_key=$1
+    restore_path=$2
+    if [ -f "$rollback_dir/present/$restore_key" ]; then
+        rm -rf -- "$restore_path" || return 1
+        mkdir -p -- "${restore_path%/*}" || return 1
+        cp -a -- "$rollback_dir/items/$restore_key" "$restore_path" || return 1
+    else
+        rm -rf -- "$restore_path" || return 1
+    fi
+}
+snapshot_external_files() {
+    for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
+        snapshot_target "bin-$binary" "$bin_dir/$binary"
+    done
+    for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
+        snapshot_target "unit-$unit" "$unit_dir/$unit"
+        snapshot_target "dropin-$unit" "$unit_dir/$unit.d/10-xdg-paths.conf"
+    done
+    snapshot_target desktop "$application_dir/wayexpand.desktop"
+    snapshot_target metainfo "$metainfo_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
+    snapshot_target man "$man_dir/wayexpand.1"
+    for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+        snapshot_target "icon-$size" "$data_home/icons/hicolor/$size/apps/wayexpand.png"
+    done
+    snapshot_target config "$config_path"
+    snapshot_target broker-config "$config_dir/broker.toml"
+    snapshot_target legacy-dropin "$unit_dir/wayexpand-action-broker.service.d/10-state-directory.conf"
+    snapshot_target previous-install "$state_dir/previous-install"
+    snapshot_target stale-ibus "$data_home/ibus/component/wayexpand.xml"
+}
+restore_external_files() {
+    restore_errors=0
+    for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
+        restore_target "bin-$binary" "$bin_dir/$binary" || restore_errors=1
+    done
+    for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
+        restore_target "unit-$unit" "$unit_dir/$unit" || restore_errors=1
+        restore_target "dropin-$unit" "$unit_dir/$unit.d/10-xdg-paths.conf" || restore_errors=1
+    done
+    restore_target desktop "$application_dir/wayexpand.desktop" || restore_errors=1
+    restore_target metainfo "$metainfo_dir/io.github.cyberducttape.WayExpand.metainfo.xml" || restore_errors=1
+    restore_target man "$man_dir/wayexpand.1" || restore_errors=1
+    for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+        restore_target "icon-$size" "$data_home/icons/hicolor/$size/apps/wayexpand.png" || restore_errors=1
+    done
+    restore_target config "$config_path" || restore_errors=1
+    restore_target broker-config "$config_dir/broker.toml" || restore_errors=1
+    restore_target legacy-dropin "$unit_dir/wayexpand-action-broker.service.d/10-state-directory.conf" || restore_errors=1
+    restore_target previous-install "$state_dir/previous-install" || restore_errors=1
+    restore_target stale-ibus "$data_home/ibus/component/wayexpand.xml" || restore_errors=1
+    return "$restore_errors"
+}
+installer_checkpoint() {
+    if [ "${WAYEXPAND_INSTALL_TEST_FAIL_AFTER:-}" = "$1" ]; then
+        printf 'error: injected installer failure after %s\n' "$1" >&2
+        return 1
+    fi
+}
+snapshot_external_files
+transaction_started=1
 next_link="$library_dir/.current-$$"
 version_switch_started=0
 restore_previous_version() {
@@ -229,28 +309,55 @@ restore_previous_version() {
 rollback_on_install_failure() {
     install_status=$?
     if [ "$install_status" -ne 0 ]; then
+        rollback_errors=0
         if [ "$version_switch_started" -eq 1 ]; then
             printf '%s\n' 'error: installation failed during or after switching to the staged version; restoring the previous version' >&2
-            restore_previous_version || true
+            restore_previous_version || rollback_errors=1
+        fi
+        if [ "$transaction_started" -eq 1 ]; then
+            restore_external_files || rollback_errors=1
         fi
         rm -f "$next_link"
+        rm -f "$state_dir/previous-install-$$"
+        if [ "$version_switch_started" -eq 1 ] && [ "$enable_service" -eq 1 ]; then
+            systemctl --user daemon-reload || true
+            if [ "$service_was_enabled" -eq 1 ]; then
+                systemctl --user restart "$service_name" || true
+            else
+                systemctl --user disable --now "$service_name" >/dev/null 2>&1 || true
+            fi
+        fi
+        if [ "$rollback_errors" -eq 0 ]; then
+            rm -rf -- "$rollback_dir"
+        else
+            printf 'error: rollback was incomplete; recovery snapshots remain at %s\n' "$rollback_dir" >&2
+        fi
+    else
+        rm -rf -- "$rollback_dir"
     fi
     return "$install_status"
 }
 trap rollback_on_install_failure EXIT
+if [ -n "$previous_version" ]; then
+    install -d -m 0700 "$state_dir"
+    rollback_tmp="$state_dir/previous-install-$$"
+    (umask 077; printf '%s\n' "$previous_version" > "$rollback_tmp")
+    mv -f "$rollback_tmp" "$state_dir/previous-install"
+fi
 ln -s "$version" "$next_link"
 # Mark the transaction before mv: if a signal or an I/O error interrupts the
 # atomic rename, rollback is safe whether the old or new link is visible.
 version_switch_started=1
 mv -Tf "$next_link" "$library_dir/current"
-install -d -m 0755 "$bin_dir"
+install -d -m 0755 "$bin_dir" "$unit_dir" "$application_dir"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
-    ln -sfn "$library_dir/current/bin/$binary" "$bin_dir/$binary"
+    ln -sfnT "$library_dir/current/bin/$binary" "$bin_dir/$binary"
 done
-install -d -m 0755 "$unit_dir" "$application_dir"
+installer_checkpoint binaries
 for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
-    ln -sfn "$library_dir/current/systemd/$unit" "$unit_dir/$unit"
+    ln -sfnT "$library_dir/current/systemd/$unit" "$unit_dir/$unit"
 done
+installer_checkpoint services
 # ibus-daemon never reads per-user component directories, so a manifest
 # there cannot register the engine. Remove the link older installers made;
 # `wayexpand setup --backend ibus` installs the component where IBus reads it.
@@ -262,11 +369,14 @@ if [ -L "$stale_ibus_component" ]; then
 fi
 "$release_dir/scripts/install-xdg-systemd-dropins.sh" \
     "$unit_dir" "$config_home" "$config_dir" "$state_home" "$state_dir" "$library_dir/current/bin"
-ln -sfn "$library_dir/current/desktop/wayexpand.desktop" "$application_dir/wayexpand.desktop"
+installer_checkpoint dropins
+ln -sfnT "$library_dir/current/desktop/wayexpand.desktop" "$application_dir/wayexpand.desktop"
+installer_checkpoint desktop
 if [ -f "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml" ]; then
     install -Dm644 "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
         "$metainfo_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
 fi
+installer_checkpoint metadata
 if [ -f "$release_dir/docs/wayexpand.1" ]; then
     install -Dm644 "$release_dir/docs/wayexpand.1" "$man_dir/wayexpand.1"
 fi
@@ -278,6 +388,7 @@ for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
         install -Dm644 "$icon_src" "$icon_base/$size/apps/wayexpand.png"
     fi
 done
+installer_checkpoint icons
 
 if [ -e "$config_path" ] || [ -L "$config_path" ]; then
     printf '%s\n' "Keeping existing configuration: $config_path"
@@ -285,6 +396,7 @@ elif [ -f "$release_dir/expansions.toml" ]; then
     install -Dm600 "$release_dir/expansions.toml" "$config_path"
     printf '%s\n' "Installed example configuration: $config_path"
 fi
+installer_checkpoint configuration
 broker_config="$config_dir/broker.toml"
 if [ -e "$broker_config" ] || [ -L "$broker_config" ]; then
     printf '%s\n' "Keeping existing broker policy: $broker_config"
@@ -292,6 +404,7 @@ elif [ -f "$release_dir/broker.toml.example" ]; then
     install -Dm600 "$release_dir/broker.toml.example" "$broker_config"
     printf '%s\n' "Installed broker policy template: $broker_config"
 fi
+installer_checkpoint broker_configuration
 
 printf '%s\n' "Installed binaries in $bin_dir"
 printf '%s\n' "Installed user units in $unit_dir"
@@ -372,13 +485,6 @@ if [ "$enable_service" -eq 1 ]; then
     fi
     if [ "$activation_ok" -ne 1 ]; then
         printf '%s\n' "error: unable to activate $service_name; restoring the previous version when available" >&2
-        restore_previous_version || true
-        systemctl --user daemon-reload || true
-        if [ "$service_was_enabled" -eq 1 ]; then
-            systemctl --user restart "$service_name" || true
-        else
-            systemctl --user disable --now "$service_name" >/dev/null 2>&1 || true
-        fi
         exit 1
     fi
     printf '%s\n' "Enabled $service_name"

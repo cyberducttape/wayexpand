@@ -96,6 +96,29 @@ if HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
 fi
 [ ! -e "$test_root/home/.local" ]
 
+# Existing directories at file destinations must be rejected before the active
+# version is switched. Cover executable, service, and desktop destinations.
+for collision in bin service dropin desktop; do
+    collision_home="$test_root/collision-$collision"
+    collision_config="$test_root/collision-config-$collision"
+    collision_data="$test_root/collision-data-$collision"
+    case "$collision" in
+        bin) collision_target="$collision_home/.local/bin/wayexpand" ;;
+        service) collision_target="$collision_config/systemd/user/wayexpand-input-method.service" ;;
+        dropin) collision_target="$collision_config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ;;
+        desktop) collision_target="$collision_data/applications/wayexpand.desktop" ;;
+    esac
+    mkdir -p "$(dirname "$collision_target")"
+    mkdir "$collision_target"
+    if HOME="$collision_home" XDG_CONFIG_HOME="$collision_config" XDG_DATA_HOME="$collision_data" \
+        "$release_dir/scripts/install-release.sh" >"$test_root/collision-$collision.log" 2>&1; then
+        printf '%s\n' "release installer accepted a directory at its $collision destination" >&2
+        exit 1
+    fi
+    grep -F "installation target is a directory: $collision_target" "$test_root/collision-$collision.log" >/dev/null
+    [ ! -e "$collision_home/.local/lib/wayexpand/current" ]
+done
+
 # Stub out systemctl so this test never touches the invoking user's real
 # systemd session, no matter what HOME/XDG_CONFIG_HOME are set to (systemctl
 # talks to the session bus, which is independent of those variables).
@@ -115,6 +138,80 @@ EOF
 chmod 0755 "$stub_bin/systemctl"
 systemctl_log="$test_root/systemctl.log"
 : >"$systemctl_log"
+
+# Inject a failure after each group of non-versioned installation writes.
+# Fresh installs must leave no active pointer or partially installed files.
+for failure_stage in binaries services dropins desktop metadata icons configuration broker_configuration; do
+    failure_home="$test_root/failure-$failure_stage-home"
+    failure_config="$test_root/failure-$failure_stage-config"
+    failure_data="$test_root/failure-$failure_stage-data"
+    failure_state="$test_root/failure-$failure_stage-state"
+    if PATH="$stub_bin:$PATH" WAYEXPAND_INSTALL_TEST_FAIL_AFTER="$failure_stage" \
+        HOME="$failure_home" XDG_CONFIG_HOME="$failure_config" XDG_DATA_HOME="$failure_data" \
+        XDG_STATE_HOME="$failure_state" \
+        "$release_dir/scripts/install-release.sh" >"$test_root/failure-$failure_stage.out" 2>&1; then
+        printf '%s\n' "installer ignored injected failure after $failure_stage" >&2
+        exit 1
+    fi
+    [ ! -e "$failure_home/.local/lib/wayexpand/current" ]
+    [ ! -e "$failure_home/.local/bin/wayexpand" ]
+    [ ! -e "$failure_config/systemd/user/wayexpand-input-method.service" ]
+    [ ! -e "$failure_config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]
+    [ ! -e "$failure_data/applications/wayexpand.desktop" ]
+    [ ! -e "$failure_data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
+    [ ! -e "$failure_data/man/man1/wayexpand.1" ]
+    [ ! -e "$failure_data/icons/hicolor/16x16/apps/wayexpand.png" ]
+    [ ! -e "$failure_config/wayexpand/expansions.toml" ]
+    [ ! -e "$failure_config/wayexpand/broker.toml" ]
+    [ ! -e "$failure_data/ibus/component/wayexpand.xml" ]
+    [ ! -e "$failure_state/wayexpand/previous-install" ]
+    if [ -d "$failure_state/wayexpand" ] &&
+        find "$failure_state/wayexpand" -maxdepth 1 -name '.install-rollback-*' -print | grep . >/dev/null; then
+        printf '%s\n' "installer left rollback snapshots after recovery from $failure_stage" >&2
+        exit 1
+    fi
+done
+
+# An interrupted upgrade restores pre-existing contents, symlinks, and
+# configuration while returning the active pointer to its previous payload.
+rollback_home="$test_root/rollback-home"
+rollback_config="$test_root/rollback-config"
+rollback_data="$test_root/rollback-data"
+rollback_state="$test_root/rollback-state"
+PATH="$stub_bin:$PATH" HOME="$rollback_home" XDG_CONFIG_HOME="$rollback_config" \
+    XDG_DATA_HOME="$rollback_data" XDG_STATE_HOME="$rollback_state" \
+    "$release_dir/scripts/install-release.sh" >/dev/null 2>&1
+rollback_version=$(readlink "$rollback_home/.local/lib/wayexpand/current")
+printf '%s\n' 'preserved metadata' >"$rollback_data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml"
+printf '%s\n' 'preserved manual' >"$rollback_data/man/man1/wayexpand.1"
+printf '%s\n' 'preserved icon' >"$rollback_data/icons/hicolor/16x16/apps/wayexpand.png"
+printf '%s\n' 'preserved drop-in' >"$rollback_config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf"
+printf '%s\n' 'preserved configuration' >"$rollback_config/wayexpand/expansions.toml"
+printf '%s\n' 'preserved broker policy' >"$rollback_config/wayexpand/broker.toml"
+desktop_link=$(readlink "$rollback_data/applications/wayexpand.desktop")
+service_link=$(readlink "$rollback_config/systemd/user/wayexpand-input-method.service")
+upgrade_release="$test_root/wayexpand-0.0.9-linux-x86_64"
+cp -R "$release_dir" "$upgrade_release"
+printf '%s\n' 'attempted upgrade metadata' >"$upgrade_release/io.github.cyberducttape.WayExpand.metainfo.xml"
+printf '%s\n' 'attempted upgrade manual' >"$upgrade_release/docs/wayexpand.1"
+printf '%s\n' 'attempted upgrade icon' >"$upgrade_release/icons/hicolor/16x16/apps/wayexpand.png"
+if PATH="$stub_bin:$PATH" WAYEXPAND_INSTALL_TEST_FAIL_AFTER=broker_configuration \
+    HOME="$rollback_home" XDG_CONFIG_HOME="$rollback_config" XDG_DATA_HOME="$rollback_data" \
+    XDG_STATE_HOME="$rollback_state" "$upgrade_release/scripts/install-release.sh" \
+    >"$test_root/rollback-upgrade.out" 2>&1; then
+    printf '%s\n' 'installer ignored injected upgrade failure' >&2
+    exit 1
+fi
+[ "$(readlink "$rollback_home/.local/lib/wayexpand/current")" = "$rollback_version" ]
+[ "$(readlink "$rollback_data/applications/wayexpand.desktop")" = "$desktop_link" ]
+[ "$(readlink "$rollback_config/systemd/user/wayexpand-input-method.service")" = "$service_link" ]
+grep -Fx 'preserved metadata' "$rollback_data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" >/dev/null
+grep -Fx 'preserved manual' "$rollback_data/man/man1/wayexpand.1" >/dev/null
+grep -Fx 'preserved icon' "$rollback_data/icons/hicolor/16x16/apps/wayexpand.png" >/dev/null
+grep -Fx 'preserved drop-in' "$rollback_config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" >/dev/null
+grep -Fx 'preserved configuration' "$rollback_config/wayexpand/expansions.toml" >/dev/null
+grep -Fx 'preserved broker policy' "$rollback_config/wayexpand/broker.toml" >/dev/null
+[ ! -e "$rollback_state/wayexpand/previous-install" ]
 
 # Keep the normal uninstall assertion hermetic too.  The uninstaller checks
 # the host process table when the user systemd bus is unavailable; without a
