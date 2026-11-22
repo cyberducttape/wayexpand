@@ -18,6 +18,17 @@ Wayland daemon and returns protocol-neutral actions:
 - shortcuts, navigation keys, backspace, and disabled focus are forwarded to
   the client and clear matcher state.
 
+The adapter records replacement transaction stages as `Prepared`, `Emitted`,
+`PartialUnknown`, or `Refused`. `Prepared` means the client-reported text
+matched immediately before the cursor; it does not reserve focus or lock the
+application document. `Emitted` means all planned signals were accepted by
+the service transport, not that the application applied them. An output error
+after emission begins becomes `PartialUnknown`; the engine is retired and the
+replacement is never replayed automatically. IBus has no client-document
+receipt, so this backend cannot reach `AppliedVerified`. Diagnostics expose
+the route assurance as verified-surrounding-text with unverified application
+result; they must not describe this route as guaranteed replacement.
+
 The `wayexpand-ibus` binary now supplies that service wrapper. It claims a
 private IBus engine name, exposes the standard factory/engine objects, and
 translates actions into `CommitText`/`DeleteSurroundingText` signals. The

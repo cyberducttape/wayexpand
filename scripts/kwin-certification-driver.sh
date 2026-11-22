@@ -66,7 +66,7 @@ case "$scenario" in
     portal-revocation)
         unverified 'the private session reaches EIS through a relay, not the RemoteDesktop portal'
         ;;
-    picker-same-app-title-focus-isolation)
+    picker-same-app-title-focus-isolation | picker-focus-return-and-clipboard-lifetime)
         unverified 'the snippet picker is not driven by the private session'
         ;;
     electron-client)
