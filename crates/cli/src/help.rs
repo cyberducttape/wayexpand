@@ -222,10 +222,10 @@ pub(crate) const COMMANDS: &[Command] = &[
     command("debug", Troubleshoot, "Explain live readiness, or guide a harmless insertion test", &[
         "debug [--json] [--trigger TEXT] [--live [--seconds 1..300]]",
         "debug --focused-app-id [--json]",
-        "debug --test [TRIGGER] [--application-class CLASS --focus-confirmed [--observe-only]]",
+        "debug --test [TRIGGER] [--controlled-client] [--application-class CLASS --focus-confirmed [--observe-only]]",
         "debug --gnome --interactive",
     ])
-    .details("--live watches the service for up to 300 seconds and reports counts only, never typed text. --focused-app-id prints the app ID snippet filters see for the focused window. --test without a trigger uses only a known harmless tutorial snippet; otherwise preview a snippet and pass its trigger explicitly.")
+    .details("--live watches the service for up to 300 seconds and reports counts only, never typed text. --focused-app-id prints the app ID snippet filters see for the focused window. --test without a trigger uses only a known harmless tutorial snippet; otherwise preview a snippet and pass its trigger explicitly. --controlled-client opens an isolated GTK 3 field that checks the exact test result without logging its contents; it verifies that field only.")
     .examples(&[
         ("wayexpand debug --focused-app-id", "Which app ID does this window have?"),
         ("wayexpand debug --live --seconds 30", "Watch the service while you type"),

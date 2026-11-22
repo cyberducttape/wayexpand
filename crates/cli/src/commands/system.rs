@@ -467,9 +467,9 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             && !evdev_apps_requested
             && !assume_yes
         {
-            println!("\nOptional evdev fallback observes raw keyboard input globally, including password fields, but can be restricted to application IDs for matching. The app list must be configured first; use this for browser applications only when you accept the privacy and non-atomic replacement limits.");
+            println!("\nOptional evdev route observes raw keyboard input globally, including password fields. An application-ID allowlist limits matching only; it does not limit keyboard capture. The app list must be configured first; use this for browser applications only when you accept the privacy and non-atomic replacement limits.");
             crate::prompt_yes_no(
-                "Configure the explicitly app-scoped evdev fallback beside IBus? [y/N] ",
+                "Configure the global-observation evdev route with app-scoped matching beside IBus? [y/N] ",
                 false,
             )?
         } else {
