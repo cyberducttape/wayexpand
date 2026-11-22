@@ -159,8 +159,41 @@ PY
     smoke_config_hash=$(sha256sum "$smoke_config" | cut -d ' ' -f 1)
 }
 
+check_rolled_back() {
+    # The previous release is older than this smoke test: it lacks newer
+    # install-check components, and before 1.3.3 its GUI and TUI read
+    # `--version` as a config path and start the app. Check only what every
+    # release provides: installed binaries link, and the CLI and daemon report
+    # the release that was rolled back to.
+    rollback_version=$1
+    stage='checking rolled-back executables and shared libraries'
+    printf '%s\n' 'Checking rolled-back executables and shared libraries'
+    for binary in $binaries; do
+        path=/usr/bin/$binary
+        [ -x "$path" ] || continue
+        if ldd "$path" | grep -F 'not found'; then
+            printf 'error: %s has unresolved shared libraries after rollback\n' "$path" >&2
+            return 1
+        fi
+    done
+    stage='checking rolled-back binary versions'
+    printf '%s\n' 'Checking rolled-back binary versions'
+    for binary in wayexpand wayexpand-daemon; do
+        version=$("/usr/bin/$binary" --version)
+        printf '%s\n' "$version"
+        case "$version" in
+            *" $rollback_version"*) ;;
+            *)
+                printf 'error: %s does not report version %s after rollback\n' \
+                    "$binary" "$rollback_version" >&2
+                return 1
+                ;;
+        esac
+    done
+}
+
 check_installed() {
-    check_version=${1:-$expected_version}
+    check_version=$expected_version
     stage='checking installed executables and shared libraries'
     printf '%s\n' 'Checking installed executables and shared libraries'
     for binary in $binaries; do
@@ -313,9 +346,13 @@ if [ -n "$previous_package" ]; then
         printf '%s\n' 'error: rollback removed the WayExpand CLI' >&2
         exit 1
     }
-    previous_release_version=${previous_version##* }
-    stage='checking every installed binary after rollback'
-    check_installed "$previous_release_version"
+    # `--version` prints "wayexpand X.Y.Z[-dev+COMMIT|+COMMIT] [(commit ...)]"
+    # while older daemons print only "X.Y.Z", so compare the release number.
+    previous_release_version=${previous_version#* }
+    previous_release_version=${previous_release_version%% *}
+    previous_release_version=${previous_release_version%%-*}
+    previous_release_version=${previous_release_version%%+*}
+    check_rolled_back "$previous_release_version"
     stage='re-upgrading after rollback'
     printf '%s\n' 'Re-upgrading to the candidate package'
     install_package

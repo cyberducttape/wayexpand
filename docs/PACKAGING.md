@@ -43,7 +43,9 @@ The exact current scenario status is shown in the generated matrix below. This
 container test accepts the supported stable-ID migration when validating the
 older fixture, checks that its built-in and user-owned snippets survive, then
 requires byte-for-byte preservation through later package operations. It
-checks CLI, daemon, GUI, and UI binary versions after upgrade and rollback.
+checks CLI, daemon, GUI, and UI binary versions after upgrade. After rollback
+it checks that the installed binaries link and that the CLI and daemon report
+1.3.2; the 1.3.2 GUI and UI have no `--version` option.
 It does not simulate a package-manager interruption, confirm that a running
 user daemon was replaced, or exercise an active GNOME IBus source; those
 scenarios remain untested in the matrix. GitHub
