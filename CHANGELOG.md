@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand sync` keeps the snippet library's Git history private. Under
+  the usual 022 umask, Git stored every committed snippet (including deleted
+  ones) as world-readable objects, so another local user who could traverse
+  the home directory could read them despite `expansions.toml` being 0600.
+  `sync init` and every `sync` now make the library directory 0700, remove
+  group and other access from everything in `.git`, and set
+  `core.sharedRepository=0600` so later objects are created private.
+  Existing repositories are repaired on their next sync. The installers also
+  create the configuration directory as 0700.
 - A nightly Launchpad Builds workflow reads the PPA's public build records and
   fails, with the build log's failure lines, when the newest daily build of a
   supported Ubuntu series failed (`scripts/check-launchpad-builds.py`).
