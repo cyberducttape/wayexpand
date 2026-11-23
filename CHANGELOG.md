@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Commands that only inspect a configuration no longer rewrite it.
+  Loading a file with legacy (ID-less) snippets migrated it in place,
+  replacing its comments and formatting with canonical TOML and leaving a
+  `.<name>.wayexpand.lock` beside it, so `config validate FILE`,
+  `config show`, `config diff OLD NEW`, `check --all`, `restore BACKUP
+  --check`, profile listing and switching, and sync's review of pulled
+  snippets could all modify files the user had only asked to read. They now
+  use a read-only load (`Config::load_read_only`) that assigns legacy IDs in
+  memory only. The active library is still migrated when it is adopted.
 - A nightly Launchpad Builds workflow reads the PPA's public build records and
   fails, with the build log's failure lines, when the newest daily build of a
   supported Ubuntu series failed (`scripts/check-launchpad-builds.py`).

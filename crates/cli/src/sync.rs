@@ -634,8 +634,9 @@ fn validate_library_executable_policy(config_path: &Path, allow_executable: bool
     if allow_executable {
         return Ok(());
     }
-    let primary = Config::load(config_path)
-        .map_err(|error| anyhow::anyhow!("could not inspect synced library: {error}"))?;
+    let primary = Config::load_read_only(config_path)
+        .map_err(|error| anyhow::anyhow!("could not inspect synced library: {error}"))?
+        .config;
     reject_executable_content(config_path, &primary)?;
     let directory = config_path
         .parent()
@@ -643,8 +644,9 @@ fn validate_library_executable_policy(config_path: &Path, allow_executable: bool
     for file in Config::layer_files(directory)
         .map_err(|error| anyhow::anyhow!("could not inspect synced layers: {error}"))?
     {
-        let layer = Config::load(&file)
-            .map_err(|error| anyhow::anyhow!("could not inspect synced layer: {error}"))?;
+        let layer = Config::load_read_only(&file)
+            .map_err(|error| anyhow::anyhow!("could not inspect synced layer: {error}"))?
+            .config;
         reject_executable_content(&file, &layer)?;
     }
     Ok(())
@@ -1109,8 +1111,9 @@ pub(crate) fn sync_with_policy(
 }
 
 fn has_executable_content(config_path: &Path) -> Result<bool> {
-    let primary = Config::load(config_path)
-        .map_err(|error| anyhow::anyhow!("could not inspect synced library: {error}"))?;
+    let primary = Config::load_read_only(config_path)
+        .map_err(|error| anyhow::anyhow!("could not inspect synced library: {error}"))?
+        .config;
     if primary
         .expansion
         .iter()
@@ -1125,8 +1128,9 @@ fn has_executable_content(config_path: &Path) -> Result<bool> {
     for file in Config::layer_files(directory)
         .map_err(|error| anyhow::anyhow!("could not inspect synced layers: {error}"))?
     {
-        let layer = Config::load(&file)
-            .map_err(|error| anyhow::anyhow!("could not inspect synced layer: {error}"))?;
+        let layer = Config::load_read_only(&file)
+            .map_err(|error| anyhow::anyhow!("could not inspect synced layer: {error}"))?
+            .config;
         if layer
             .expansion
             .iter()

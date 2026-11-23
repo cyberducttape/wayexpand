@@ -589,6 +589,8 @@ jobs:
         run: bash scripts/test-doctor.sh
       - name: Redacted support bundle test
         run: bash scripts/test-support-bundle.sh
+      - name: Test read-only configuration commands
+        run: sh scripts/test-config-read-only.sh target/debug/wayexpand
       - name: Library Git sync test
         run: bash scripts/test-sync.sh
       - name: Signed pack test
