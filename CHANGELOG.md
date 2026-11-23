@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `scripts/kde-live-certification.sh` runs a guided live certification of
+  the IBus route in a real Plasma Wayland session. After checking that the
+  running CLI and IBus engine are the exact checkout being certified, it adds
+  three marked test snippets (restored on exit), opens real GTK 3, Qt 6 and
+  password-field readback windows, tells the person at the physical keyboard
+  what to type, and decides each cell from the text the toolkit received.
+  The result is a compatibility-scope evidence file; IBus on KDE stays
+  ineligible for production certification.
 - A nightly Launchpad Builds workflow reads the PPA's public build records and
   fails, with the build log's failure lines, when the newest daily build of a
   supported Ubuntu series failed (`scripts/check-launchpad-builds.py`).

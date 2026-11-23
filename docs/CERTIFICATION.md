@@ -469,6 +469,49 @@ focus and daemon-lifecycle part of the matrix, and leaves the rest explicitly
 open. `scripts/test-kwin-certification-driver.sh` checks the driver's
 contract without a compositor.
 
+### Live KDE IBus session driver
+
+`scripts/kde-live-certification.sh` covers what the headless driver cannot:
+the IBus route with physical keyboard input in a real Plasma Wayland
+session. Run it from a clean checkout of the commit being certified, with
+that build installed and IBus restarted (`wayexpand ibus restart`):
+
+```sh
+scripts/kde-live-certification.sh --reviewed-by "NAME" --physical-keyboard "MODEL"
+```
+
+It refuses to start unless the session is Plasma on Wayland, the checkout is
+clean, the installed CLI reports the checkout's commit, and the running IBus
+engine is that installation's `wayexpand-ibus`. It backs up the library,
+appends three marked test snippets (`;wxa`, `;wxu`, `;wxl`), and waits for
+the engine to reload. When the session ends, including on Ctrl-C, it restores
+the exact original file, or removes only the marked block if the file was
+edited meanwhile.
+
+`scripts/kde-live-certification-driver.sh` then runs through the standard
+runner. For each cell a person can perform, it opens a GTK 3 `TextView`, a
+Qt 6 `QPlainTextEdit` or a GTK 3 password-purpose `Entry` (the clients in the
+table above), prints what to type on the physical keyboard, and decides the
+outcome from the text the toolkit received once it has been stable for three
+seconds. A late duplicate insertion therefore still fails the cell. The live
+cells are `printable-press-release`, `backspace`, `fast-typing`,
+`unicode-combining`, `second-trigger-during-nonatomic-replacement` and
+`modifier-during-nonatomic-replacement` in the GTK and Qt clients, plus
+sensitive-field refusal (`printable-press-release` must not expand) in the
+password field: about a dozen prompts. Every other cell is `UNVERIFIED` with
+its reason: other layouts (switch the desktop layout and rerun), clients
+without a readback client here, hardware and lifecycle events, and focus
+changes or closes inside an expansion, which IBus commits in a single call
+that no person can time.
+
+The output is a compatibility-scope evidence file from
+`scripts/certify-compositor.sh` under `target/live-certification-*`. Review
+it before copying it into `docs/evidence/`. IBus on KDE remains ineligible
+for production certification (no atomic replacement, exact window identity
+or composition awareness), and this run does not change that.
+`scripts/test-kde-live-certification.sh` checks the driver's outcome rules
+and the configuration restore with scripted stand-in clients.
+
 Each driver invocation is capped at 120 seconds and the complete matrix has a
 60-minute deadline. A timed-out cell and every cell remaining after the overall
 deadline are recorded as `UNVERIFIED`; the collector therefore cannot turn a
