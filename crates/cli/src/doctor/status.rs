@@ -516,6 +516,13 @@ pub(crate) fn session_capabilities_from_status(
             "The signal is available, but this status alone does not prove every target client exposes password fields correctly.",
             vec!["Treat this as an available signal, not a verified safety guarantee; check route-specific certification and never test with real credentials."],
         )
+    } else if sensitive == Some(false) && boolean("terminal_apps_only") == Some(true) {
+        capability(
+            "unavailable",
+            "The active input source cannot identify password fields, but this daemon acts only while a terminal listed in settings.terminal_apps is focused.",
+            "Password prompts inside those terminals (for example sudo or ssh) are not detected. Other applications are left to the IBus route, which reports password fields.",
+            vec!["Keep settings.terminal_apps limited to terminal emulators; pause WayExpand before typing a secret at a terminal prompt that could contain a trigger."],
+        )
     } else if sensitive == Some(false) {
         capability(
             "unavailable",
@@ -759,8 +766,12 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
             "Input note: {discarded} captured evdev event(s) were discarded after output to prevent stale triggers; retry a missed trigger once output settles."
         );
     }
+    let terminal_apps_only = snapshot["terminal_apps_only"].as_bool() == Some(true);
     match route["sensitive_field_detection"].as_bool() {
         Some(true) => println!("Sensitive-field detection: available on the active capture route"),
+        Some(false) if terminal_apps_only => println!(
+            "Sensitive-field warning: the active capture route cannot identify password fields; it acts only in the terminals listed in settings.terminal_apps"
+        ),
         Some(false) => println!(
             "Sensitive-field warning: the active capture route cannot identify password fields"
         ),

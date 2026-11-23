@@ -567,6 +567,40 @@ fn doctor_reports_current_session_capabilities_separately_with_recovery_steps() 
 }
 
 #[test]
+fn doctor_explains_that_terminal_scoped_evdev_leaves_other_apps_to_ibus() {
+    let snapshot = |terminal_apps_only: bool| {
+        serde_json::json!({
+            "state": "connected",
+            "source": "evdev",
+            "backend": "libei",
+            "capture_sensitive_focus": false,
+            "terminal_apps_only": terminal_apps_only,
+        })
+    };
+    let services = crate::services::ServiceInventory::default();
+    let scoped =
+        crate::doctor::status::session_capabilities_from_status(&snapshot(true), &services);
+    let global =
+        crate::doctor::status::session_capabilities_from_status(&snapshot(false), &services);
+    // The JSON status stays "unavailable": the route still cannot see
+    // password fields, including password prompts inside a terminal.
+    assert_eq!(scoped["password_field_protection"]["status"], "unavailable");
+    assert_eq!(global["password_field_protection"]["status"], "unavailable");
+    let summary = scoped["password_field_protection"]["summary"]
+        .as_str()
+        .unwrap();
+    assert!(summary.contains("settings.terminal_apps"), "{summary}");
+    let details = scoped["password_field_protection"]["details"]
+        .as_str()
+        .unwrap();
+    assert!(details.contains("sudo"), "{details}");
+    assert!(!global["password_field_protection"]["summary"]
+        .as_str()
+        .unwrap()
+        .contains("terminal_apps"));
+}
+
+#[test]
 fn doctor_does_not_claim_capabilities_without_a_live_route() {
     let report = crate::doctor::status::session_capabilities_from_status(
         &serde_json::Value::Null,

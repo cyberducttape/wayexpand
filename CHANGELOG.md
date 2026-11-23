@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `doctor` describes a running two-route setup accurately. With a daemon
+  connected, "Capture readiness" now reports the live route (for example
+  `ACTIVE ... evdev capture → libei injection connected`) instead of the
+  setup-time guess "AUTHORIZATION REQUIRED (libei was detected
+  heuristically)". When the evdev daemon is limited to terminals
+  (`setup --backend ibus --terminals`), the password-field check says so:
+  the route still cannot see password prompts inside those terminals, but
+  other applications are left to IBus. The JSON status value is unchanged.
 - Commands that only inspect a configuration no longer rewrite it.
   Loading a file with legacy (ID-less) snippets migrated it in place,
   replacing its comments and formatting with canonical TOML and leaving a

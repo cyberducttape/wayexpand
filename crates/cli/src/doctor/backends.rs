@@ -262,7 +262,25 @@ pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool)
         }
         return false;
     }
-    if ibus_available && available_combinations.is_empty() && trial_combinations.is_empty() {
+    // The probes above describe routes this machine could use. A connected
+    // daemon has already completed its route's authorization (for libei, the
+    // portal consent), so report that instead of the heuristic guess.
+    let live_route = crate::doctor::status::read_daemon_status()
+        .ok()
+        .and_then(|response| crate::doctor::status::status_as_json(&response).ok())
+        .filter(|status| matches!(status["state"].as_str(), Some("connected" | "running")))
+        .and_then(|status| {
+            Some(format!(
+                "{} capture → {} injection",
+                status["source"].as_str()?,
+                status["backend"].as_str()?
+            ))
+        });
+    if let Some(route) = &live_route {
+        println!(
+            "Capture readiness: ACTIVE (the running daemon reports {route} connected; end-to-end typing is not verified)"
+        );
+    } else if ibus_available && available_combinations.is_empty() && trial_combinations.is_empty() {
         println!(
             "Capture readiness: AVAILABLE TO TRY (IBus is installed; live client typing is not verified)"
         );
@@ -285,7 +303,12 @@ pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool)
         );
     }
     println!(
-        "Automatic selection: stdin + libei (raw evdev capture is disabled unless `--source=evdev` is explicitly selected)"
+        "Automatic selection: stdin + libei (raw evdev capture is disabled unless `--source=evdev` is explicitly selected){}",
+        if live_route.is_some() {
+            "; the running daemon's explicit route takes precedence"
+        } else {
+            ""
+        }
     );
     if evdev_readable {
         println!(
