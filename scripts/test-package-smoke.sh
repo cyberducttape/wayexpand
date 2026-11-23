@@ -152,10 +152,11 @@ for trigger, fields in expected.items():
         if actual.get(name) != value:
             raise SystemExit(f"snippet {trigger!r} lost {name}: {actual.get(name)!r}")
 PY
-    # The first validation may migrate the 1.3.2 fixture by adding stable
-    # snippet IDs and normalizing TOML. The semantic checks above permit that
-    # deliberate rewrite; later package operations preserve the migrated file
-    # byte-for-byte.
+    # Validation and the readiness checks are read-only, but a WayExpand
+    # program that adopts the library (the GUI, daemon or IBus engine) may
+    # migrate the 1.3.2 fixture by adding stable snippet IDs and normalizing
+    # TOML. The semantic checks above permit that deliberate rewrite; later
+    # package operations preserve the file byte-for-byte.
     smoke_config_hash=$(sha256sum "$smoke_config" | cut -d ' ' -f 1)
 }
 

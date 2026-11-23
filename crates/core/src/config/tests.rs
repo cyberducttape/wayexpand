@@ -1368,3 +1368,60 @@ fn relative_output_paths_are_literal_normalized_and_contained() {
         );
     }
 }
+
+#[test]
+fn read_only_loads_and_validation_never_rewrite_legacy_files() {
+    let directory =
+        std::env::temp_dir().join(format!("wayexpand-config-read-only-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&directory);
+    fs::create_dir_all(directory.join("snippets.d")).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(
+        directory.join("snippets.d"),
+        fs::Permissions::from_mode(0o700),
+    )
+    .unwrap();
+    // Legacy (ID-less) snippets with a comment and hand formatting, which a
+    // migration would replace with canonical TOML.
+    let primary_text =
+        "# my snippets\n[[expansion]]\ntrigger   = \":x\"\nreplacement = \"old\" # keep\n";
+    let layer_text = "# a layer\n[[expansion]]\ntrigger = \":y\"\nreplacement = \"layer\"\n";
+    let primary = directory.join("expansions.toml");
+    let layer = directory.join("snippets.d/extra.toml");
+    for (path, text) in [(&primary, primary_text), (&layer, layer_text)] {
+        fs::write(path, text).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let listing = || {
+        let mut names: Vec<_> = fs::read_dir(&directory)
+            .unwrap()
+            .chain(fs::read_dir(directory.join("snippets.d")).unwrap())
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    let before = listing();
+
+    let loaded = Config::load_read_only(&primary).unwrap();
+    assert_eq!(loaded.config.expansion.len(), 1);
+    assert!(
+        !loaded.config.expansion[0].id.is_empty(),
+        "legacy snippets still get an in-memory ID"
+    );
+    Config::validate_library_files(&primary).unwrap();
+    Config::validate_layer_files(&primary).unwrap();
+
+    assert_eq!(fs::read_to_string(&primary).unwrap(), primary_text);
+    assert_eq!(fs::read_to_string(&layer).unwrap(), layer_text);
+    assert_eq!(
+        listing(),
+        before,
+        "no lock or temporary file is left behind"
+    );
+
+    // The adopting loader still migrates the active library.
+    Config::load_versioned(&primary).unwrap();
+    assert_ne!(fs::read_to_string(&primary).unwrap(), primary_text);
+    let _ = fs::remove_dir_all(&directory);
+}

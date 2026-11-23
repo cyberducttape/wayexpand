@@ -69,7 +69,7 @@ pub(crate) fn print_config_diagnostics(path: &Path) -> bool {
                 println!("Config warning: file is writable by group or other users");
             }
             print_config_parent_diagnostics(path);
-            match Config::load(path) {
+            match Config::load_read_only(path) {
                 Ok(_) => {
                     println!("Config validation: OK");
                     true

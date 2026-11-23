@@ -4,6 +4,19 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Commands that only inspect a configuration no longer rewrite it.
+  Loading a file with legacy (ID-less) snippets migrated it in place,
+  replacing its comments and formatting with canonical TOML and leaving a
+  `.<name>.wayexpand.lock` beside it, so `config validate FILE`,
+  `config show`, `config diff OLD NEW`, `check --all`, `restore BACKUP
+  --check`, profile listing and switching, and sync's review of pulled
+  snippets could all modify files the user had only asked to read. The
+  diagnostics did the same to the active library: `doctor` (including
+  `--json` and `--security`), `install-check`, `health` and
+  `upgrade --check`. They now use a read-only load
+  (`Config::load_read_only`) that assigns legacy IDs in memory only. The
+  active library is still migrated when the GUI, daemon or IBus engine
+  adopts it.
 - `scripts/kde-live-certification.sh` runs a guided live certification of
   the IBus route in a real Plasma Wayland session. After checking that the
   running CLI and IBus engine are the exact checkout being certified, it adds

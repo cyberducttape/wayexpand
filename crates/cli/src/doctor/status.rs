@@ -186,7 +186,12 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
     }
     object.insert(
         "action_broker".into(),
-        broker_diagnostics(Config::load(default_config_path()).ok().as_ref()),
+        broker_diagnostics(
+            Config::load_read_only(default_config_path())
+                .map(|loaded| loaded.config)
+                .ok()
+                .as_ref(),
+        ),
     );
     Ok(serde_json::Value::Object(object))
 }

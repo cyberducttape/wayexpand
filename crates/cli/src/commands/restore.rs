@@ -58,7 +58,8 @@ pub(crate) fn restore_command(mut args: Args) -> Result<()> {
     let config_path = config_path.unwrap_or_else(default_config_path);
     let current = Config::load_versioned(&config_path)
         .map_err(|error| config_load_error(&config_path, error))?;
-    let backup = Config::load_versioned(&backup_path)
+    // Reviewing or restoring must not rewrite the backup itself.
+    let backup = Config::load_read_only(&backup_path)
         .map_err(|error| config_load_error(&backup_path, error))?;
     let current_fingerprint = current.revision.fingerprint();
     let backup_fingerprint = backup.revision.fingerprint();

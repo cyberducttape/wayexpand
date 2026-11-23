@@ -449,6 +449,7 @@ impl FleetConfig {
     /// rules as the daemon's fleet loader.
     pub fn validate_library(base: Config, directory: impl AsRef<Path>) -> Result<(), FleetError> {
         let mut merger = ConfigMerger::new();
+        merger.read_only = true;
         merger.add_config(
             base,
             Provenance {
@@ -696,6 +697,8 @@ struct ConfigMerger {
     hotkeys: BTreeMap<String, (crate::HotkeyConfig, Provenance)>,
     settings: Vec<SettingCandidate>,
     stats: MergeStats,
+    /// Validation only: load layers without persisting legacy-ID migration.
+    read_only: bool,
 }
 
 impl ConfigMerger {
@@ -706,6 +709,7 @@ impl ConfigMerger {
             hotkeys: BTreeMap::new(),
             settings: Vec::new(),
             stats: MergeStats::default(),
+            read_only: false,
         }
     }
 
@@ -824,7 +828,12 @@ impl ConfigMerger {
                 layer: layer_name.clone(),
             };
 
-            let loaded = Config::load_versioned(&path).map_err(FleetError::Config)?;
+            let loaded = if self.read_only {
+                Config::load_read_only(&path)
+            } else {
+                Config::load_versioned(&path)
+            }
+            .map_err(FleetError::Config)?;
             let setting_fields = setting_fields_from_source(loaded.source());
             let config = loaded.config;
             reject_embedded_policy(&config, &path)?;

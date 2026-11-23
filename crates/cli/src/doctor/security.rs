@@ -42,7 +42,7 @@ impl ProtectionProfile {
 
 pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) -> Result<()> {
     let cli_install = cli_install_identity();
-    let config = Config::load(config_path);
+    let config = Config::load_read_only(config_path).map(|loaded| loaded.config);
     let config_permissions = config_permission_report(config_path, config.is_ok());
     let organization_policy = crate::doctor::policy::load_policy();
     // Match the policy handoff used by the daemon. A valid embedded policy is

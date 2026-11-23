@@ -56,7 +56,7 @@ pub(crate) fn check_command(args: Args) -> Result<()> {
     let mut errors = Vec::<serde_json::Value>::new();
     let mut warnings = Vec::<serde_json::Value>::new();
     let mut checks = Vec::<serde_json::Value>::new();
-    let loaded = Config::load_versioned(&config_path);
+    let loaded = Config::load_read_only(&config_path);
     let config = match loaded {
         Ok(loaded) => {
             checks.push(serde_json::json!({

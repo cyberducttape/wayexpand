@@ -869,7 +869,9 @@ impl Config {
     /// synchronized or reported valid unnoticed.
     pub fn validate_library_files(path: impl AsRef<Path>) -> Result<(), crate::FleetError> {
         let path = path.as_ref();
-        let base = Self::load(path).map_err(crate::FleetError::Config)?;
+        let base = Self::load_read_only(path)
+            .map_err(crate::FleetError::Config)?
+            .config;
         let directory = path.parent().unwrap_or_else(|| Path::new("."));
         crate::FleetConfig::validate_library(base, directory)
     }
@@ -882,7 +884,7 @@ impl Config {
             return Ok(());
         };
         for file in Self::layer_files(directory)? {
-            Self::load(file)?;
+            Self::load_read_only(file)?;
         }
         Ok(())
     }
@@ -1059,6 +1061,18 @@ impl Config {
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         Self::load_versioned(path).map(|loaded| loaded.config)
+    }
+
+    /// Load and validate a configuration with the same secure read as
+    /// [`Self::load_versioned`], but never write to it. Legacy snippet IDs
+    /// are assigned in memory only, so the file keeps its exact bytes,
+    /// comments and formatting, and no write lock is created beside it.
+    ///
+    /// Use this for files that are inspected rather than adopted as the
+    /// active library: backups, profiles, diff inputs, synced content under
+    /// review, and every validation-only command.
+    pub fn load_read_only(path: impl AsRef<Path>) -> Result<LoadedConfig, ConfigError> {
+        Self::load_versioned_once(path)
     }
 
     /// Load, validate, and retain the exact source document from one secure

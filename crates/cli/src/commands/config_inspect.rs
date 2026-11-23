@@ -62,7 +62,9 @@ pub(crate) fn config_command(mut args: Args) -> Result<()> {
                 }
             }
             let path = path_or_default(path)?;
-            let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
+            let config = Config::load_read_only(&path)
+                .map_err(|error| config_load_error(&path, error))?
+                .config;
             let value = serde_json::json!({
                 "schema_version":1,
                 "config":config,
@@ -87,8 +89,9 @@ pub(crate) fn config_command(mut args: Args) -> Result<()> {
                 }
             }
             let path = path_or_default(path)?;
-            let mut config =
-                Config::load(&path).map_err(|error| config_load_error(&path, error))?;
+            let mut config = Config::load_read_only(&path)
+                .map_err(|error| config_load_error(&path, error))?
+                .config;
             Config::validate_library_files(&path)
                 .map_err(|error| config_error(error.safe_summary()))?;
             let policy = crate::doctor::policy::load_policy()?;
@@ -124,10 +127,12 @@ pub(crate) fn config_command(mut args: Args) -> Result<()> {
             if paths.len() != 2 {
                 usage_bail!("usage: wayexpand config diff [--json] OLD NEW");
             }
-            let old =
-                Config::load(&paths[0]).map_err(|error| config_load_error(&paths[0], error))?;
-            let new =
-                Config::load(&paths[1]).map_err(|error| config_load_error(&paths[1], error))?;
+            let old = Config::load_read_only(&paths[0])
+                .map_err(|error| config_load_error(&paths[0], error))?
+                .config;
+            let new = Config::load_read_only(&paths[1])
+                .map_err(|error| config_load_error(&paths[1], error))?
+                .config;
             let old = serde_json::to_value(old)?;
             let new = serde_json::to_value(new)?;
             let mut changed = Vec::new();

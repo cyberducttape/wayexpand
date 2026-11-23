@@ -76,9 +76,9 @@ pub(crate) fn profile_command(mut args: Args) -> Result<()> {
                     let Some(profile) = path.file_stem().and_then(|value| value.to_str()) else {
                         continue;
                     };
-                    let state = match Config::load(&path) {
-                        Ok(config) => match wayexpand_core::FleetConfig::validate_library(
-                            config,
+                    let state = match Config::load_read_only(&path) {
+                        Ok(loaded) => match wayexpand_core::FleetConfig::validate_library(
+                            loaded.config,
                             config_path.parent().unwrap_or_else(|| Path::new(".")),
                         ) {
                             Ok(()) => "valid",
@@ -129,7 +129,7 @@ pub(crate) fn profile_command(mut args: Args) -> Result<()> {
             let name = name.as_deref().unwrap();
             validate_profile_name(name)?;
             let target = root.join(format!("{name}.toml"));
-            let selected = Config::load_versioned(&target)
+            let selected = Config::load_read_only(&target)
                 .map_err(|error| config_load_error(&target, error))?;
             wayexpand_core::FleetConfig::validate_library(
                 selected.config.clone(),
@@ -223,7 +223,7 @@ fn update_app_profile_assignment(
     if let Some(name) = profile {
         validate_profile_name(name)?;
         let profile_path = root.join(format!("{name}.toml"));
-        let config = Config::load_versioned(&profile_path)
+        let config = Config::load_read_only(&profile_path)
             .map_err(|error| config_load_error(&profile_path, error))?;
         wayexpand_core::FleetConfig::validate_library(
             config.config,

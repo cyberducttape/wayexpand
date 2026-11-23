@@ -562,7 +562,7 @@ pub(crate) fn health_command(args: Args) -> Result<()> {
     }
 
     let config_path = default_config_path();
-    let config_valid = Config::load(&config_path).is_ok();
+    let config_valid = Config::load_read_only(&config_path).is_ok();
     let daemon_snapshot = crate::doctor::status::read_daemon_status()
         .and_then(|body| crate::doctor::status::status_as_json(&body));
 

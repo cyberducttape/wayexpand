@@ -122,7 +122,7 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         )
     }
     let config = default_config_path();
-    let config_valid = Config::load(&config).is_ok();
+    let config_valid = Config::load_read_only(&config).is_ok();
     let status_snapshot = crate::doctor::status::read_daemon_status()
         .and_then(|response| crate::doctor::status::status_as_json(&response))
         .ok();
