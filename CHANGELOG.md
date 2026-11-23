@@ -13,6 +13,16 @@ All notable changes to WayExpand are documented here.
   `core.sharedRepository=0600` so later objects are created private.
   Existing repositories are repaired on their next sync. The installers also
   create the configuration directory as 0700.
+- Restoring a backup from the GUI recovery screen is crash-safe. It used to
+  remove the broken configuration before renaming the backup into place, so
+  a crash or kill in between left no configuration at all. The broken file is
+  now kept under a `.broken-*` hard link and the backup is renamed over it in
+  one atomic step, then the folder is synced. The backup's bytes are read
+  once and validated at the moment of restoring, so a backup damaged after
+  the screen opened is refused rather than installed. Each restore stages
+  in its own uniquely named file under the library lock that
+  `wayexpand sync` uses, so two recovery windows (or a sync) cannot delete
+  or overwrite each other's work. Listing backups no longer rewrites them.
 - A nightly Launchpad Builds workflow reads the PPA's public build records and
   fails, with the build log's failure lines, when the newest daily build of a
   supported Ubuntu series failed (`scripts/check-launchpad-builds.py`).
