@@ -1780,6 +1780,7 @@ replacement = "signature"
         let harness = Harness::start(BROKER_CONFIG);
         harness.focus_text_field();
         harness.type_trigger();
+        broker.wait_for_request();
         harness.call("Destroy", &());
         assert!(harness.instances.lock().unwrap().is_empty());
         broker.answered();
@@ -1872,6 +1873,7 @@ replacement = "signature"
         let harness = Harness::start(BROKER_CONFIG);
         harness.focus_text_field();
         harness.type_trigger();
+        broker.wait_for_request();
         harness.call("FocusOut", &());
         harness.call("FocusIn", &());
         broker.answered();
@@ -1885,6 +1887,7 @@ replacement = "signature"
         let harness = Harness::start(BROKER_CONFIG);
         harness.focus_text_field();
         harness.type_trigger();
+        broker.wait_for_request();
         assert!(harness.key('x', ":ok"));
         broker.answered();
         assert_eq!(harness.commits(Duration::from_millis(500)), ["o", "k", "x"]);
