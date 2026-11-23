@@ -10,9 +10,13 @@ All notable changes to WayExpand are documented here.
   `.<name>.wayexpand.lock` beside it, so `config validate FILE`,
   `config show`, `config diff OLD NEW`, `check --all`, `restore BACKUP
   --check`, profile listing and switching, and sync's review of pulled
-  snippets could all modify files the user had only asked to read. They now
-  use a read-only load (`Config::load_read_only`) that assigns legacy IDs in
-  memory only. The active library is still migrated when it is adopted.
+  snippets could all modify files the user had only asked to read. The
+  diagnostics did the same to the active library: `doctor` (including
+  `--json` and `--security`), `install-check`, `health` and
+  `upgrade --check`. They now use a read-only load
+  (`Config::load_read_only`) that assigns legacy IDs in memory only. The
+  active library is still migrated when the GUI, daemon or IBus engine
+  adopts it.
 - `wayexpand sync` keeps the snippet library's Git history private. Under
   the usual 022 umask, Git stored every committed snippet (including deleted
   ones) as world-readable objects, so another local user who could traverse

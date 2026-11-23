@@ -84,4 +84,30 @@ run 'check --all' check --all --json "$config"
 run 'restore --check' restore "$backup" --check --json "$target"
 run 'profile list' profile list "$config"
 
+# Diagnostics read the active library but only report on it, so even the
+# active file must survive them untouched. Their exit status reflects this
+# machine's readiness, which is not under test here.
+xdg_config="$test_dir/xdg-config"
+xdg_data="$test_dir/xdg-data"
+mkdir -m 0700 "$xdg_config" "$xdg_config/wayexpand" "$xdg_data"
+active="$xdg_config/wayexpand/expansions.toml"
+write_legacy "$active" diagnostics
+diagnostics_snapshot() {
+    find "$xdg_config/wayexpand" -print | LC_ALL=C sort
+    sha256sum "$active"
+}
+diagnostics_before=$(diagnostics_snapshot)
+for command in 'install-check --json' 'doctor' 'doctor --json' 'doctor --security --json' \
+    'health --json' 'upgrade --check --json'; do
+    # Word splitting of the fixed command list is intended.
+    # shellcheck disable=SC2086
+    XDG_CONFIG_HOME="$xdg_config" XDG_DATA_HOME="$xdg_data" \
+        WAYEXPAND_SOCKET="$test_dir/no-daemon.sock" \
+        timeout 60 "$binary" $command >/dev/null 2>&1 </dev/null || true
+    if [ "$(diagnostics_snapshot)" != "$diagnostics_before" ]; then
+        printf "error: 'wayexpand %s' modified the active configuration\n" "$command" >&2
+        exit 1
+    fi
+done
+
 printf '%s\n' 'read-only configuration commands test passed'

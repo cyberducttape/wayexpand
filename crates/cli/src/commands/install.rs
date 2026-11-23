@@ -813,7 +813,8 @@ fn checks_for_config(config_path: &Path) -> Vec<Check> {
             },
         });
     }
-    let valid = config_path.is_file() && wayexpand_core::Config::load(config_path).is_ok();
+    let valid =
+        config_path.is_file() && wayexpand_core::Config::load_read_only(config_path).is_ok();
     out.push(Check {
         component: "active_configuration",
         status: if valid { "pass" } else { "fail" },
@@ -1186,7 +1187,8 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     let ibus_report = wayexpand_backend_ibus::chain::diagnose();
     let ibus_readiness = ibus_report.readiness();
     let first_run_test_trigger =
-        wayexpand_core::Config::load(wayexpand_core::default_config_path())
+        wayexpand_core::Config::load_read_only(wayexpand_core::default_config_path())
+            .map(|loaded| loaded.config)
             .ok()
             .and_then(|config| crate::commands::system::setup_test_trigger(&config));
     let first_run_test_available = first_run_test_trigger.is_some();
@@ -1530,17 +1532,18 @@ fn terminal_match_self_test(
     }
     let config_path = wayexpand_core::default_config_path();
     let configuration_source = "cli_default_path";
-    let config = match wayexpand_core::Config::load(&config_path) {
-        Ok(config) => config,
-        Err(error) => {
-            return serde_json::json!({
-                "status":"fail",
-                "detail":format!("configuration could not be loaded: {}", error.safe_summary()),
-                "configuration_path":config_path,
-                "configuration_source":configuration_source,
-            })
-        }
-    };
+    let config =
+        match wayexpand_core::Config::load_read_only(&config_path).map(|loaded| loaded.config) {
+            Ok(config) => config,
+            Err(error) => {
+                return serde_json::json!({
+                    "status":"fail",
+                    "detail":format!("configuration could not be loaded: {}", error.safe_summary()),
+                    "configuration_path":config_path,
+                    "configuration_source":configuration_source,
+                })
+            }
+        };
     let mut report = terminal_match_self_test_for(&config);
     report["configuration_path"] = serde_json::json!(config_path);
     report["configuration_source"] = serde_json::json!(configuration_source);

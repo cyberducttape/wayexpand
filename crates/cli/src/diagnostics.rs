@@ -135,7 +135,8 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
     use crate::commands::install;
     let checks = install::checks();
     let config_path = wayexpand_core::default_config_path();
-    let config_result = wayexpand_core::Config::load(&config_path);
+    let config_result =
+        wayexpand_core::Config::load_read_only(&config_path).map(|loaded| loaded.config);
     let (config_valid, expansion_count, enabled_count, config_reason) = match config_result {
         Ok(config) => {
             let count = config.expansion.len();
@@ -167,7 +168,9 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
         if typed.is_empty() || typed.chars().any(char::is_control) {
             return None;
         }
-        let config = wayexpand_core::Config::load(&config_path).ok()?;
+        let config = wayexpand_core::Config::load_read_only(&config_path)
+            .map(|loaded| loaded.config)
+            .ok()?;
         let policy = policy.as_ref()?;
         let mut engine = wayexpand_core::ExpansionEngine::new(config).ok()?;
         engine.apply_administrator_policy(policy).ok()?;

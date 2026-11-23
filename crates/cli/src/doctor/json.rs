@@ -21,7 +21,7 @@ pub(crate) const GNOME_APP_FILTER_SUPPORT_DETAIL: &str = "Focused-window trackin
 /// fleet health checks. Probes are bounded and non-interactive; portal
 /// authorization and other state-changing checks are deliberately excluded.
 pub(crate) fn print_json_diagnostics(path: &Path) -> Result<(bool, Option<String>)> {
-    let config_result = Config::load(path);
+    let config_result = Config::load_read_only(path).map(|loaded| loaded.config);
     let config_ok = config_result.is_ok();
     let broker = broker_diagnostics(config_result.as_ref().ok());
     let socket_path = std::env::var_os("WAYEXPAND_SOCKET")

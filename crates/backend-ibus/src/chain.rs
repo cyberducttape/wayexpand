@@ -678,7 +678,7 @@ pub fn kwin_input_method_available() -> Option<bool> {
 fn replacement_consent_check() -> IbusCheck {
     const TITLE: &str = "Replacements are allowed";
     let path = wayexpand_core::default_config_path();
-    match wayexpand_core::Config::load(&path) {
+    match wayexpand_core::Config::load_read_only(&path).map(|loaded| loaded.config) {
         Ok(config) if config.settings.compatibility_mode == wayexpand_core::CompatibilityMode::Off => check(
             "consent",
             TITLE,
