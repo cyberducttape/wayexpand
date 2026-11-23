@@ -801,6 +801,7 @@ pub(crate) fn init(config_path: &Path, remote_url: Option<&str>) -> Result<PathB
     if !directory.join(".git").exists() {
         git_ok(&directory, &["init", "--quiet"])?;
     }
+    secure_library_repository(&directory)?;
     let gitignore = directory.join(".gitignore");
     if !gitignore.exists() {
         std::fs::write(&gitignore, GITIGNORE).context("could not write .gitignore")?;
@@ -818,6 +819,88 @@ pub(crate) fn init(config_path: &Path, remote_url: Option<&str>) -> Result<PathB
         "Track WayExpand snippet library",
     )?;
     Ok(directory)
+}
+
+/// Keep the library and its Git history readable only by the user.
+///
+/// Under the usual 022 umask Git stores every committed snippet, including
+/// deleted ones, as world-readable objects in world-traversable directories,
+/// which would undo the configuration file's 0600 mode. Make the library
+/// directory 0700, strip group and other access from everything already in
+/// `.git`, and set `core.sharedRepository=0600` so Git creates later files
+/// privately regardless of the umask. Runs on every sync so repositories
+/// created before this check are repaired too.
+fn secure_library_repository(directory: &Path) -> Result<()> {
+    // A library kept directly in the home directory still gets a private
+    // `.git`, but changing the home directory's own mode is not ours to do.
+    if !is_home_directory(directory) {
+        restrict_to_owner(directory)?;
+    }
+    let git_dir = directory.join(".git");
+    match std::fs::symlink_metadata(&git_dir) {
+        Ok(metadata) if metadata.is_dir() => {
+            git_ok(directory, &["config", "core.sharedRepository", "0600"])?;
+            restrict_tree_to_owner(&git_dir)
+        }
+        // A `.git` file (linked worktree) or symlink points elsewhere; the
+        // repository it names is not created or owned by sync.
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("could not inspect {}", git_dir.display()))
+        }
+    }
+}
+
+fn is_home_directory(directory: &Path) -> bool {
+    let Some(home) = std::env::var_os("HOME") else {
+        return false;
+    };
+    match (
+        std::fs::canonicalize(directory),
+        std::fs::canonicalize(PathBuf::from(home)),
+    ) {
+        (Ok(directory), Ok(home)) => directory == home,
+        _ => false,
+    }
+}
+
+/// Remove group and other permissions from one path without following a
+/// symlink.
+fn restrict_to_owner(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let metadata = std::fs::symlink_metadata(path)
+        .with_context(|| format!("could not inspect {}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    let mode = metadata.permissions().mode();
+    if mode & 0o077 != 0 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode & 0o7700))
+            .with_context(|| format!("could not make {} private", path.display()))?;
+    }
+    Ok(())
+}
+
+fn restrict_tree_to_owner(root: &Path) -> Result<()> {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        restrict_to_owner(&path)?;
+        let metadata = std::fs::symlink_metadata(&path)
+            .with_context(|| format!("could not inspect {}", path.display()))?;
+        if metadata.is_dir() {
+            for entry in std::fs::read_dir(&path)
+                .with_context(|| format!("could not read {}", path.display()))?
+            {
+                pending.push(
+                    entry
+                        .with_context(|| format!("could not read {}", path.display()))?
+                        .path(),
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 fn library_primary_name(config_path: &Path) -> Result<&str> {
@@ -1031,6 +1114,7 @@ pub(crate) fn sync_with_policy(
     let _lock = SyncLock::acquire(&directory)?;
     validate_library(config_path)?;
     validate_library_executable_policy(config_path, allow_executable)?;
+    secure_library_repository(&directory)?;
     let primary = library_primary_name(config_path)?;
     let committed = commit_library(&directory, primary, "Sync WayExpand library")?;
     let remote = remote(&directory)?;
@@ -1248,6 +1332,78 @@ mod tests {
         )
         .expect("configure test Git user email");
         (directory, config_path)
+    }
+
+    #[test]
+    fn sync_keeps_the_library_and_its_history_private_under_a_permissive_umask() {
+        use std::os::unix::fs::PermissionsExt;
+        fn assert_private_tree(root: &Path) {
+            let mut pending = vec![root.to_path_buf()];
+            while let Some(path) = pending.pop() {
+                let metadata = std::fs::symlink_metadata(&path).unwrap();
+                assert_eq!(
+                    metadata.permissions().mode() & 0o077,
+                    0,
+                    "{} is accessible to other users",
+                    path.display()
+                );
+                if metadata.is_dir() {
+                    pending.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+                }
+            }
+        }
+        // SAFETY: umask only affects the mode of files created afterwards.
+        let previous_umask = unsafe { libc::umask(0o022) };
+        let (directory, config_path) = prepare_repository();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A repository committed before this hardening has world-readable
+        // objects; the first sync must repair it.
+        git_ok(&directory, &["add", "-f", "expansions.toml"]).unwrap();
+        git_ok(&directory, &["commit", "--quiet", "-m", "pre-existing"]).unwrap();
+        let readable_object = |root: &Path| {
+            let mut pending = vec![root.join(".git/objects")];
+            while let Some(path) = pending.pop() {
+                let metadata = std::fs::symlink_metadata(&path).unwrap();
+                if metadata.is_dir() {
+                    pending.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+                } else if metadata.permissions().mode() & 0o044 != 0 {
+                    return true;
+                }
+            }
+            false
+        };
+        assert!(
+            readable_object(&directory),
+            "the fixture must start with world-readable Git objects"
+        );
+
+        std::fs::write(
+            &config_path,
+            "[[expansion]]\ntrigger = \";test\"\nreplacement = \"changed\"\n",
+        )
+        .unwrap();
+        init(&config_path, None).expect("sync init");
+        unsafe { libc::umask(previous_umask) };
+
+        let directory_mode = std::fs::metadata(&directory).unwrap().permissions().mode();
+        assert_eq!(directory_mode & 0o777, 0o700);
+        assert_eq!(
+            git_ok(&directory, &["config", "core.sharedRepository"])
+                .unwrap()
+                .trim(),
+            "0600"
+        );
+        // Objects written both before and by the new commit are private.
+        assert_private_tree(&directory.join(".git/objects"));
+        assert_eq!(
+            std::fs::metadata(directory.join(".git"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o077,
+            0
+        );
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

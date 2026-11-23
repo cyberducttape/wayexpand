@@ -13,6 +13,15 @@ All notable changes to WayExpand are documented here.
   snippets could all modify files the user had only asked to read. They now
   use a read-only load (`Config::load_read_only`) that assigns legacy IDs in
   memory only. The active library is still migrated when it is adopted.
+- `wayexpand sync` keeps the snippet library's Git history private. Under
+  the usual 022 umask, Git stored every committed snippet (including deleted
+  ones) as world-readable objects, so another local user who could traverse
+  the home directory could read them despite `expansions.toml` being 0600.
+  `sync init` and every `sync` now make the library directory 0700, remove
+  group and other access from everything in `.git`, and set
+  `core.sharedRepository=0600` so later objects are created private.
+  Existing repositories are repaired on their next sync. The installers also
+  create the configuration directory as 0700.
 - Restoring a backup from the GUI recovery screen is crash-safe. It used to
   remove the broken configuration before renaming the backup into place, so
   a crash or kill in between left no configuration at all. The broken file is
