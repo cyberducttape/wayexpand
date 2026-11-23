@@ -390,6 +390,12 @@ for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
 done
 installer_checkpoint icons
 
+# Snippets are private: keep their directory (and any `wayexpand sync`
+# history inside it) out of reach of other users, whatever the umask.
+mkdir -p "$config_dir"
+if [ ! -L "$config_dir" ]; then
+    chmod 0700 "$config_dir"
+fi
 if [ -e "$config_path" ] || [ -L "$config_path" ]; then
     printf '%s\n' "Keeping existing configuration: $config_path"
 elif [ -f "$release_dir/expansions.toml" ]; then

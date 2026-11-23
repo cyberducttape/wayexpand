@@ -189,6 +189,7 @@ esac
 [ -f "$test_root/home/.local/lib/wayexpand/current/share/wayexpand/installer-components.toml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/expansions.toml" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
+[ "$(stat -c '%a' "$test_root/config/wayexpand")" = 700 ]
 install_report=$(HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
     PATH="$test_root/home/.local/bin:$PATH" \
     "$test_root/home/.local/bin/wayexpand" install-check --json 2>/dev/null || true)

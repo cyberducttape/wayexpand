@@ -274,6 +274,7 @@ esac
 [ -f "$test_root/home/.local/lib/wayexpand/current/share/wayexpand/installer-components.toml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/expansions.toml" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
+[ "$(stat -c '%a' "$test_root/config/wayexpand")" = 700 ]
 [ -L "$test_root/custom-data/applications/wayexpand.desktop" ]
 [ -f "$test_root/custom-data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ -f "$test_root/custom-data/man/man1/wayexpand.1" ]
