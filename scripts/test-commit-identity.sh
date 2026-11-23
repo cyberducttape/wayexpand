@@ -116,6 +116,10 @@ check_from_repo --allow-web-merges HEAD^!
 merge_with_identity '' "$owner_noreply_email"
 expect_rejected 'an unsigned web-UI merge' --allow-web-merges HEAD^!
 
+# The web UI can record the owner's primary address on a merge instead.
+merge_with_identity "$web_flow_fingerprint" 'stephan.loesevitz@gmail.com'
+check_from_repo --allow-web-merges HEAD^!
+expect_rejected 'an owner-address web-UI merge without opt-in' --allow-dependabot HEAD^!
 merge_with_identity "$web_flow_fingerprint" 'someone@example.invalid'
 expect_rejected 'a web-UI merge by another author' --allow-web-merges HEAD^!
 
