@@ -425,6 +425,23 @@ printf '%s\n' '{"uuid": "wayexpand-window-tracker@cyberducttape.github.io"}' \
 printf '%s\n' '// WayExpand GNOME tracker' >"$gnome_extension_dir/extension.js"
 printf '%s\n' '// WayExpand notification queue' >"$gnome_extension_dir/notification-queue.js"
 printf '%s\n' '// WayExpand keyboard compatibility' >"$gnome_extension_dir/keyboard-compat.js"
+# Damaged installation links can dangle. Remove only dangling links that
+# still point into the WayExpand payload; leave same-named external links.
+library_dir="$test_root/home/.local/lib/wayexpand"
+rm -f -- "$test_root/config/systemd/user/wayexpand-input-method.service"
+ln -s "$library_dir/missing/systemd/wayexpand-input-method.service" \
+    "$test_root/config/systemd/user/wayexpand-input-method.service"
+rm -f -- "$test_root/config/systemd/user/wayexpand-evdev.service"
+ln -s "$test_root/unrelated-missing.service" \
+    "$test_root/config/systemd/user/wayexpand-evdev.service"
+rm -f -- "$test_root/custom-data/applications/wayexpand.desktop"
+ln -s "$library_dir/missing/desktop/wayexpand.desktop" \
+    "$test_root/custom-data/applications/wayexpand.desktop"
+rm -f -- "$test_root/home/.local/bin/wayexpand-ibus"
+ln -s "$library_dir/missing/bin/wayexpand-ibus" \
+    "$test_root/home/.local/bin/wayexpand-ibus"
+# The first installers copied a regular legacy unit; uninstall still removes it.
+printf '%s\n' '[Unit]' >"$test_root/config/systemd/user/wayexpand.service"
 PATH="$stub_bin:$PATH" \
 HOME="$test_root/home" \
 XDG_CONFIG_HOME="$test_root/config" \
@@ -445,17 +462,20 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$test_root/home/.local/bin/wayexpand-ui" ]
 [ ! -e "$test_root/home/.local/bin/wayexpand-gui" ]
 [ ! -e "$test_root/home/.local/bin/wayexpand-ibus" ]
+[ ! -L "$test_root/home/.local/bin/wayexpand-ibus" ]
 [ ! -e "$test_root/custom-data/ibus/component/wayexpand.xml" ]
 [ ! -e "$gnome_extension_dir/metadata.json" ]
 [ ! -e "$gnome_extension_dir/extension.js" ]
 [ ! -e "$gnome_extension_dir/notification-queue.js" ]
 [ ! -e "$gnome_extension_dir/keyboard-compat.js" ]
-[ ! -e "$test_root/custom-data/applications/wayexpand.desktop" ]
+[ ! -L "$test_root/custom-data/applications/wayexpand.desktop" ]
 [ ! -e "$test_root/custom-data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ ! -e "$test_root/custom-data/man/man1/wayexpand.1" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service" ]
-[ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service" ]
+[ -L "$test_root/config/systemd/user/wayexpand-evdev.service" ]
+[ "$(readlink "$test_root/config/systemd/user/wayexpand-evdev.service")" = "$test_root/unrelated-missing.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-control.service" ]
+[ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf" ]

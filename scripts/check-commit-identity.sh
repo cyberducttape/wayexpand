@@ -91,11 +91,12 @@ violations=$(git log "$ref" --format="$format" \
                 && web_flow_signed()
         }
         # Only true merges: squash merges and web edits carry content that
-        # must still be authored under the owner identity.
+        # must still be authored under the owner identity. The web UI lets
+        # the owner pick either the noreply or the primary address.
         function approved_web_merge() {
             return allow_web_merges == "true" \
                 && $2 == name \
-                && $3 == owner_noreply \
+                && ($3 == owner_noreply || $3 == email) \
                 && $4 == "GitHub" \
                 && $5 == "noreply@github.com" \
                 && split($6, parents, " ") >= 2 \
