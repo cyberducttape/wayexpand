@@ -477,7 +477,11 @@ mod tests {
             "[[expansion]]\ntrigger = ':x'\nreplacement = 'old'\n",
         );
         let store = ConfigStore::load(&path).unwrap();
-        write_private(
+        // Replace the file rather than rewriting it in place: the contents
+        // have the same length, so on filesystems with coarse timestamps an
+        // in-place write can leave every metadata field unchanged and the
+        // store would rightly see nothing to reload.
+        atomic_write_private(
             &path,
             "[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':x'\nreplacement = 'new'\n",
         );
@@ -525,7 +529,11 @@ mod tests {
             "[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':x'\nreplacement = 'old'\n",
         );
         let store = ConfigStore::load(&path).unwrap();
-        write_private(
+        // Replace the file rather than rewriting it in place: the contents
+        // have the same length, so on filesystems with coarse timestamps an
+        // in-place write can leave every metadata field unchanged and the
+        // store would rightly see nothing to reload.
+        atomic_write_private(
             &path,
             "[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':x'\nreplacement = 'new'\n",
         );
