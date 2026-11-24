@@ -12,6 +12,13 @@ All notable changes to WayExpand are documented here.
   (`setup --backend ibus --terminals`), the password-field check says so:
   the route still cannot see password prompts inside those terminals, but
   other applications are left to IBus. The JSON status value is unchanged.
+- Launchpad PPA builds pass again. Two configuration-store retry tests
+  rewrote their file in place with contents of the same length, so on
+  builders with coarse file timestamps the rewrite left every metadata field
+  unchanged and the store correctly saw nothing to reload; the tests expected
+  a reload and failed the Ubuntu 26.04 and 26.10 daily builds. The tests now
+  replace the file, which always changes its inode. No program behavior
+  changed.
 - Commands that only inspect a configuration no longer rewrite it.
   Loading a file with legacy (ID-less) snippets migrated it in place,
   replacing its comments and formatting with canonical TOML and leaving a
