@@ -16,7 +16,11 @@ All notable changes to WayExpand are documented here.
   WayExpand is turned on, the guide's headline reads "Automatic expansion is
   not turned on yet" instead of a warning that it "needs attention", step 1
   offers only *Turn on WayExpand*, and the setup dialog's *Continue setup* is
-  the highlighted button. `scripts/gui-screenshot.sh` gains
+  the highlighted button. That dialog no longer asks for a separate
+  "allow administrator approval" checkbox before registering the IBus
+  component: the desktop's own password prompt confirms that step, so only
+  the replacement-risk consent remains. The CLI's `--yes` still needs
+  `--install-system-integration`. `scripts/gui-screenshot.sh` gains
   `WAYEXPAND_GUI_SCREENSHOT_INSTALLED=1` to render that fresh-install state.
   `wayexpand setup` shows full detail only for the route it asks you to
   accept (`explain-backend` lists the rest) and explains the compatibility

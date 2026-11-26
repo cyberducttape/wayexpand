@@ -148,8 +148,9 @@ the recorded session and says so. The steps are:
    IBus diagnostic reports `WX-IBUS-MULTIUSER-001` if an older shared
    manifest still resolves its executable into one user's home; repair that
    registration with `wayexpand setup --backend ibus --install-system-integration`.
-   The GUI has a separate checkbox for that
-   authorization. In scripts, `--yes` alone deliberately skips the privileged
+   In the GUI, the setup dialog says when this step is needed and the
+   desktop's administrator password prompt is its confirmation; cancelling
+   that prompt stops setup without changes. In scripts, `--yes` alone deliberately skips the privileged
    step; pass `--install-system-integration` only when that change is intended.
    If authorization is unavailable, install the distribution package, restore
    the desktop `pkexec` authorization path, or select another supported input
