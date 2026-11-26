@@ -161,23 +161,52 @@ impl GuiApp {
         if !self.onboarding_visible
             || self.onboarding_test_snippet_created_for.as_deref() == Some(config_identity.as_str())
             || onboarding_test_snippet(&self.config).is_some()
+            || self
+                .pending_save
+                .as_ref()
+                .is_some_and(|pending| onboarding_test_snippet(&pending.candidate).is_some())
+            || self
+                .queued_save
+                .as_ref()
+                .is_some_and(|pending| onboarding_test_snippet(&pending.candidate).is_some())
+            || self
+                .conflicted_save
+                .as_ref()
+                .is_some_and(|pending| onboarding_test_snippet(&pending.candidate).is_some())
+            || self
+                .failed_save
+                .as_ref()
+                .is_some_and(|pending| onboarding_test_snippet(&pending.candidate).is_some())
         {
             return;
         }
         if !self.create_test_snippet() || self.failed_save.is_some() {
             return;
         }
+    }
+
+    /// Record the tutorial only after its config save has committed. The
+    /// preference prevents a deliberately removed example from returning, so
+    /// writing it before an asynchronous config save succeeds could strand a
+    /// first-run library with no example at all.
+    pub(crate) fn record_onboarding_test_snippet_saved(&mut self) -> Result<(), String> {
+        let config_identity = self.path.to_string_lossy().into_owned();
+        if !self.onboarding_visible
+            || self.onboarding_test_snippet_created_for.as_deref() == Some(config_identity.as_str())
+            || onboarding_test_snippet(&self.config).is_none()
+        {
+            return Ok(());
+        }
         self.onboarding_test_snippet_created_for = Some(config_identity);
-        if let Err(error) = save_gui_prefs(
+        save_gui_prefs(
             self.language,
             self.colorpack,
             self.settings_font_scale,
             self.dark_mode,
             self.onboarding_completed,
             self.onboarding_test_snippet_created_for.clone(),
-        ) {
-            self.status = Status::warning(self.strings.onboarding_test_state_save_failed(&error));
-        }
+        )
+        .map_err(|error| error.to_string())
     }
 
     /// Persist the pending-test state so a previously completed guide reopens
