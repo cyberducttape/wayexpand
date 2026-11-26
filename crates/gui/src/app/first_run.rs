@@ -261,10 +261,38 @@ impl GuiApp {
         self.persist_onboarding(self.strings.onboarding_skipped_note());
     }
 
+    /// Finish first run by choosing the safe copy-and-paste workflow. This
+    /// closes the guide without claiming that automatic insertion works.
+    pub(crate) fn finish_onboarding_with_copy_only(&mut self) {
+        let already_verified = self
+            .setup_record
+            .as_ref()
+            .is_some_and(|record| record.outcome == crate::setup_record::SetupOutcome::Verified);
+        if !already_verified {
+            let mut record = crate::setup_record::SetupRecord::copy_only();
+            record.inherit_application_checks(self.setup_record.as_ref());
+            if crate::setup_record::save(&record).is_err() {
+                self.setup_record_saved = false;
+                self.status = Status::warning(self.strings.onboarding_copy_only_not_saved());
+                return;
+            }
+            self.setup_record = Some(record);
+        }
+        self.setup_record_saved = true;
+        self.persist_onboarding(self.strings.onboarding_copy_only_note());
+    }
+
+    fn use_quick_picker_for_first_run(&mut self) {
+        self.open_copy_only_picker();
+        if !self.status.is_error() {
+            self.finish_onboarding_with_copy_only();
+        }
+    }
+
     pub(crate) fn defer_onboarding(&mut self) {
-        // Let users continue working while preserving the incomplete state.
-        // The guide returns on the next launch and cannot be recorded as
-        // completed without a real-application verification.
+        // Let users continue working for this session while preserving the
+        // incomplete state. They can still finish with the copy-only workflow
+        // without claiming a real-application verification.
         self.onboarding_visible = false;
         self.status = Status::warning(self.strings.status_setup_deferred());
     }
@@ -768,9 +796,11 @@ impl GuiApp {
                             self.set_picker_shortcut();
                         }
                         if !self.config.expansion.is_empty()
-                            && ui.button(self.strings.open_quick_picker_copy()).clicked()
+                            && ui
+                                .button(self.strings.first_run_use_quick_picker())
+                                .clicked()
                         {
-                            self.open_copy_only_picker();
+                            self.use_quick_picker_for_first_run();
                         }
                         if ui.small_button(self.strings.onboarding_defer()).clicked() {
                             self.defer_onboarding();

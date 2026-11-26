@@ -249,10 +249,11 @@ desktop's shortcut settings.
 
 ### First run and one-click setup
 
-Until it is finished or skipped, the editor shows a guide with three steps and
-an optional fourth: *Connect your desktop*, *Create a snippet*, *Test it*, and
-*Open snippets from any app* (a Quick Picker shortcut). Route, permission and
-certification notes sit in a collapsed *Troubleshooting details* section.
+Until it is finished, skipped, or completed with the copy-only workflow, the
+editor shows three steps: *Prepare your desktop*, *Create a snippet*, and
+*Test it*. The first-run header gives immediate access to Quick Picker and its
+optional shortcut. Route, permission and certification notes sit in a
+collapsed *Troubleshooting details* section.
 *Turn on WayExpand* runs `wayexpand setup --yes` in the background, which
 configures only the Recommended mode (the route planner's choice, which may be
 an experimental route such as input-method-v2 and is labelled as such) and
@@ -643,7 +644,7 @@ WAYEXPAND_GUI_SCREENSHOT_DAEMON=1 WAYEXPAND_GUI_SCREENSHOT_PICKER=1 \
 scripts/make-social-preview.sh
 ```
 
-![WayExpand's first-run screen with the steps Connect your desktop, Create a snippet, Test it, and an optional Quick Picker shortcut](images/wayexpand-first-run.png)
+![WayExpand's first-run guide with automatic setup needing attention and Quick Picker ready for copy and paste](images/wayexpand-first-run.png)
 
 ![WayExpand's editor with the Matcher preview expanding a support reply](images/wayexpand-editor-try-it-live.png)
 

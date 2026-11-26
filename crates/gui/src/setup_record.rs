@@ -1,12 +1,11 @@
 //! What first-run setup actually established, kept across restarts.
 //!
-//! `gui-prefs.toml` records only that the guide was finished or skipped, and
-//! the desktop-test confirmation lived only in memory. This separate file
-//! (`gui-setup.toml`, owner-only) records the outcome and evidence source:
-//! whether a controlled client observed exact output, the user confirmed it
-//! visually, or the guide was skipped. A verification keeps the application,
-//! typing route, configuration fingerprint, build, desktop session and date,
-//! so the GUI can trust it after
+//! `gui-prefs.toml` records only that the guide was finished or skipped. This
+//! separate file (`gui-setup.toml`, owner-only) records the outcome and
+//! evidence source: whether a controlled client observed exact output, the
+//! user confirmed it visually, the user chose copy-and-paste, or the guide was
+//! skipped. A verification keeps the application, typing route, configuration
+//! fingerprint, build, desktop session and date, so the GUI can trust it after
 //! a restart while the environment and tested snippet library are unchanged.
 //!
 //! It is a separate file because `gui-prefs.toml` is parsed strictly: a new
@@ -23,6 +22,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) enum SetupOutcome {
     /// Exact insertion was observed or confirmed in a real application.
     Verified,
+    /// The user chose Quick Picker and manual paste instead of automatic
+    /// expansion. No application insertion was verified.
+    CopyOnly,
     /// The user dismissed the guide; nothing was verified.
     Skipped,
 }
@@ -168,6 +170,22 @@ impl SetupRecord {
     pub(crate) fn skipped() -> Self {
         Self {
             outcome: SetupOutcome::Skipped,
+            verification_method: None,
+            application: None,
+            route: None,
+            build: None,
+            desktop: None,
+            session: None,
+            route_instance: None,
+            config_revision: None,
+            verified_at_unix: None,
+            application_checks: Vec::new(),
+        }
+    }
+
+    pub(crate) fn copy_only() -> Self {
+        Self {
+            outcome: SetupOutcome::CopyOnly,
             verification_method: None,
             application: None,
             route: None,
@@ -594,8 +612,13 @@ mod tests {
     }
 
     #[test]
-    fn skipping_never_counts_as_verified() {
+    fn skipped_and_copy_only_never_count_as_verified() {
         assert!(!SetupRecord::skipped().covers(&scope(
+            Some("ibus"),
+            "KDE · wayland",
+            Some("boot:1")
+        )));
+        assert!(!SetupRecord::copy_only().covers(&scope(
             Some("ibus"),
             "KDE · wayland",
             Some("boot:1")
@@ -612,6 +635,8 @@ mod tests {
         );
         let minimal: SetupRecord = toml_edit::de::from_str("outcome = \"skipped\"\n").unwrap();
         assert_eq!(minimal, SetupRecord::skipped());
+        let copy_only: SetupRecord = toml_edit::de::from_str("outcome = \"copy-only\"\n").unwrap();
+        assert_eq!(copy_only, SetupRecord::copy_only());
         let legacy: SetupRecord = toml_edit::de::from_str(
             "outcome = \"verified\"\napplication = \"Kate\"\nroute = \"ibus\"\nbuild = \"1.3.6 (abc)\"\ndesktop = \"KDE · wayland\"\nsession = \"boot:1\"\nroute_instance = \"ibus:42:100\"\nconfig_revision = \"sha256:test-config\"\nverified_at_unix = 1\n",
         )

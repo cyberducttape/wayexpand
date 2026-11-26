@@ -22,7 +22,8 @@ pub(crate) struct GuiPrefs {
     /// `None` means no preference has been saved; the caller should use the
     /// desktop theme on first launch.
     pub(crate) dark_mode: Option<bool>,
-    /// Whether the user completed or skipped the first-run guide.
+    /// Whether the user verified automatic expansion, chose copy-only use,
+    /// or skipped the guide.
     pub(crate) onboarding_completed: bool,
     /// Config path where the guide already offered or generated its harmless
     /// test snippet. Different config files each get their own onboarding.

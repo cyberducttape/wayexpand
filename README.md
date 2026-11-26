@@ -177,8 +177,10 @@ out and back in before resuming.
 ### After installing
 
 Open **WayExpand** from your application menu. Its guide connects your
-desktop, makes a test snippet, and asks you to confirm one real expansion
-before it calls setup done. It never turns on raw keyboard access by itself.
+desktop and adds a harmless test snippet. You can verify automatic expansion
+in a real application or finish setup with Quick Picker's copy-and-paste
+workflow. The copy-only choice does not claim automatic typing is verified.
+The guide never turns on raw keyboard access by itself.
 
 Installed for your user and `wayexpand` is not found in a terminal? Add
 `~/.local/bin` to PATH (put the same line in `~/.bashrc` or `~/.zshrc` to keep
@@ -190,7 +192,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Your first minute
 
-![WayExpand's first-run screen in the Terminal Blue color pack with the steps Connect your desktop, Create a snippet, Test it, and an optional Quick Picker shortcut](docs/images/wayexpand-first-run.png)
+![WayExpand's first-run guide with an installation repair action and a copy-only Quick Picker finish option](docs/images/wayexpand-first-run.png)
 
 Quick Picker opens across supported sessions, but it inserts directly only
 when the route can verify the destination and supports atomic insertion.
@@ -206,6 +208,9 @@ Otherwise it copies the snippet for you to paste.
    seconds. WayExpand asks whether the text appeared correctly and records
    setup as working only when you confirm it. Until then, *Open Quick Picker*
    copies snippets for you to paste.
+   If automatic expansion is unavailable or you prefer copy and paste, choose
+   *Use Quick Picker to finish*. The guide closes and records the copy-only
+   choice without marking automatic expansion as verified.
 4. **Open snippets from any app** (optional) — the guide gives the Quick
    Picker a shortcut, <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> unless
    that is taken. From a terminal: `wayexpand shortcut set [KEYS]`. On desktops
