@@ -4,6 +4,21 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- First-time setup is simpler. The first-run guide highlights one action at a
+  time: *Use Quick Picker (copy & paste)* is the primary button only when the
+  desktop has no automatic route to set up, so it no longer competes with
+  *Turn on WayExpand*. A starter library uses its `;;hello` greeting for the
+  checks instead of gaining a second, nearly identical `;hello`, and an
+  example the guide adds by itself is no longer offered as "Undo (1)". The
+  optional picker shortcut button moved into its collapsed section, the
+  workspace switcher waits until the guide is closed, and step 1 no longer
+  says "Checking integration support" after the check has finished.
+  `wayexpand setup` shows full detail only for the route it asks you to
+  accept (`explain-backend` lists the rest) and explains the compatibility
+  modes only if you decline it. On KDE, `doctor`, `setup --check` and `why`
+  now point to `wayexpand setup --apply --backend ibus`, which selects IBus
+  Wayland for you without logging out, before the manual System Settings
+  steps.
 - `doctor` describes a running two-route setup accurately. With a daemon
   connected, "Capture readiness" now reports the live route (for example
   `ACTIVE ... evdev capture → libei injection connected`) instead of the

@@ -1278,7 +1278,7 @@ fn kwin_input_method_failure(detail: impl Into<String>) -> IbusCheck {
         "KWin sends input to IBus",
         IbusCheckState::Fail,
         detail,
-        Some("In System Settings → Keyboard → Virtual Keyboard, select IBus Wayland. Then log out of Plasma and back in, and run `wayexpand ibus status --json`. If KWin's IBus helper keeps crashing, update or repair the system IBus package and inspect `coredumpctl info ibus-ui-gtk3`.".into()),
+        Some("Run `wayexpand setup --apply --backend ibus`: it selects IBus Wayland as KWin's Virtual Keyboard and waits for KWin to start it, without logging out. To do it by hand, select IBus Wayland in System Settings → Keyboard → Virtual Keyboard; if KWin still does not start it, log out of Plasma and back in. If KWin's IBus helper keeps crashing, update or repair the system IBus package and inspect `coredumpctl info ibus-ui-gtk3`.".into()),
     );
     result.problem_id = Some("WX-KWIN-IBUS-001");
     result
@@ -2697,6 +2697,12 @@ mod tests {
                 .unwrap()
                 .contains("select IBus Wayland"));
             assert!(check.fix.as_deref().unwrap().contains("log out of Plasma"));
+            // The automatic route comes first: setup makes the change itself.
+            assert!(check
+                .fix
+                .as_deref()
+                .unwrap()
+                .starts_with("Run `wayexpand setup --apply --backend ibus`"));
         }
 
         let other = kwin_unconfigured_input_method(Some("Fcitx 5"));

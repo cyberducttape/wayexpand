@@ -513,7 +513,7 @@ fn kwin_bridge_finding(
     let (summary, fallback) = match id {
         "WX-KWIN-IBUS-001" => (
             "KWin's IBus Wayland bridge is unavailable",
-            "Select IBus Wayland in Plasma's Virtual Keyboard settings, log out and back in, then run `wayexpand ibus status --json`.",
+            "Run `wayexpand setup --apply --backend ibus`, which selects IBus Wayland in Plasma's Virtual Keyboard settings without logging out, then run `wayexpand ibus status --json`.",
         ),
         "WX-KWIN-IBUS-002" => (
             "KWin's IBus Wayland helper recently crashed",

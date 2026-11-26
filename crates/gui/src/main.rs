@@ -768,7 +768,11 @@ enum SaveIntent {
         index: usize,
     },
     Undo,
-    Created,
+    /// The harmless test snippet. `record_undo` is false when the guide
+    /// added it by itself: a new user has done nothing to undo yet.
+    Created {
+        record_undo: bool,
+    },
     Duplicated,
     Deleted {
         index: usize,

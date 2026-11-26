@@ -253,8 +253,11 @@ Until it is finished, skipped, or completed with the copy-only workflow, the
 editor shows three steps: *Prepare your desktop*, an example-snippet step, and
 *Test it*. Step two says *Your example snippet is ready* when the harmless
 example is available, and offers *Add an example snippet* if it was removed.
-The first-run header gives immediate access to Quick Picker and its
-optional shortcut. Route, permission and certification notes sit in a
+The first-run header gives immediate access to Quick Picker; it is the
+highlighted action only when the desktop has no automatic route to set up, so
+it never competes with *Turn on WayExpand*. Its optional shortcut sits in a
+collapsed section below the three steps. On a starter library the guide uses
+the `;;hello` greeting for its checks instead of adding a second example. Route, permission and certification notes sit in a
 collapsed *Troubleshooting details* section.
 *Turn on WayExpand* runs `wayexpand setup --yes` in the background, which
 configures only the Recommended mode (the route planner's choice, which may be

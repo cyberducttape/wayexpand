@@ -211,6 +211,10 @@ pub(crate) fn prompt_mode_choice(
     capabilities: &wayexpand_backend_selection::Capabilities,
     policy: &OrganizationPolicy,
 ) -> Result<String> {
+    println!("Compatibility modes");
+    println!("  recommended   safest detected path; run doctor/certify for verification");
+    println!("  maximum       explicit evdev fallback; wider application coverage with global-input and privacy tradeoffs");
+    println!("  experimental  protocol paths whose key pass-through is not certified");
     print!("Choose a mode [recommended/maximum/experimental/q]: ");
     io::stdout().flush()?;
     let mut choice = String::new();

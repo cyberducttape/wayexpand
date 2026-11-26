@@ -8,6 +8,16 @@ Welcome! Start with the graphical setup guide. It checks the installed
 integration, explains any choices that need your consent, and distinguishes
 configuration from a verified real-application test.
 
+## The short version
+
+1. Install WayExpand and open it from your applications menu.
+2. Select **Turn on WayExpand** and accept the permissions your desktop asks for.
+3. Type the example trigger the guide shows into any text field.
+
+If step 2 is not offered or the trigger does not expand, select **Use Quick
+Picker (copy & paste)**: it copies a snippet for you to paste and needs no input
+setup. The sections below explain each step.
+
 ## Graphical first run
 
 ### 1. Install and open WayExpand
@@ -25,14 +35,16 @@ If the application is already installed but has no launcher, run
 
 ### 2. Start with the example snippet
 
-WayExpand adds a harmless `;hello` example to a new library. The guide shows its
-trigger and expected text, so you can try the Quick Picker immediately or use
-the example for the automatic expansion check. Existing libraries are kept;
-the guide adds the example only when one is needed for the check.
+Every new library has one harmless example: the starter library's `;;hello`
+greeting, or a `;hello` example the guide adds when the library has none. The
+guide shows its trigger and expected text, so you can try the Quick Picker
+immediately or use the example for the automatic expansion check. Existing
+libraries are kept; the guide adds its example only when no harmless one is
+present.
 
-To make your own, select **+ New**, enter a trigger such as `;;hello` and a
-replacement such as `Hello, world!`, then save. You can edit or remove the
-example at any time.
+To make your own, select **+ New**, enter a trigger such as `;;thanks` and a
+replacement such as `Thanks for your help!`, then save. You can edit or remove
+the example at any time.
 
 ### 3. Choose how to use it
 

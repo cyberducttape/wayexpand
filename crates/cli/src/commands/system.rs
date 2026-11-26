@@ -243,11 +243,6 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         println!("IBus is ready to configure, but its component is not registered in the running session yet. Setup will register it and refresh IBus; no IBus shell commands are needed.");
     }
     println!();
-    println!("Compatibility modes");
-    println!("  Recommended         safest detected path; run doctor/certify for verification");
-    println!("  Maximum compatibility explicit evdev fallback; wider application coverage with global-input and privacy tradeoffs");
-    println!("  Experimental         protocol paths whose key pass-through is not certified");
-    println!();
     println!("Automatic recommendation: {}", automatic.label);
     println!("  {}", automatic.detail);
     if let Some(existing) = existing_backend {
@@ -264,6 +259,12 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             planned.standing.as_str(),
             planned.reason
         );
+        // A first-time user is asked about one route. Show its full
+        // assessment and keep the alternatives to one line each; every
+        // route's detail stays available from `explain-backend`.
+        if planned.contract.label != automatic.label {
+            continue;
+        }
         let assessment = &planned.assessment;
         println!(
             "    Installed: {} · Supported: {} · Authorized: {} · Connected: {} · Policy allowed: {} · Certified: {}",
@@ -293,6 +294,10 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
         }
     }
+    println!(
+        "  {}",
+        runnable_cli_text("Details for every route: `wayexpand explain-backend`")
+    );
     let backend = if let Some(backend) = requested_backend {
         backend
     } else if let Some(mode) = requested_mode {

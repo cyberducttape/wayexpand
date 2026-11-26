@@ -98,6 +98,12 @@ impl GuiApp {
                     });
                 }
             });
+        // The workspace levels only change how much of the editor is shown.
+        // During the first-run guide they are one more choice before the
+        // first working snippet, so they appear once the guide is closed.
+        if self.onboarding_visible {
+            return;
+        }
         egui::Panel::top("experience_switcher")
             .frame(
                 egui::Frame::new()
