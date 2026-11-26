@@ -210,7 +210,7 @@ Otherwise it copies the snippet for you to paste.
    correctly and records setup as working only when you confirm it. Until then,
    Quick Picker copies snippets for you to paste.
    If automatic expansion is unavailable or you prefer copy and paste, choose
-   *Use Quick Picker to finish*. The guide closes and records the copy-only
+   *Use Quick Picker (copy & paste)*. The guide closes and records the copy-only
    choice without marking automatic expansion as verified.
 4. **Open snippets from any app** (optional) — the guide gives the Quick
    Picker a shortcut, <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> unless

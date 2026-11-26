@@ -2643,7 +2643,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     assert!(!guide_semantics.contains("Working in tested application"));
     assert!(!guide_semantics.contains("Verified working: yes"));
     // The copy-and-paste fallback is always offered until a real test passes.
-    assert!(guide_semantics.contains("Use Quick Picker to finish (copy and paste)"));
+    assert!(guide_semantics.contains("Use Quick Picker (copy & paste)"));
     assert!(guide_semantics.contains("Use Ctrl+Alt+Space"));
     assert!(
         !guide_semantics.contains("Skip the guide — I already use WayExpand"),
