@@ -87,8 +87,147 @@ impl GlobPattern {
     }
 }
 
+/// Whether two app-ID glob patterns can match the same non-reserved app ID.
+/// Uses the same `*`/`?` scalar semantics as `GlobPattern::matches` and a
+/// bounded product traversal of both wildcard automata.
+pub(crate) fn app_id_globs_overlap(left: &str, right: &str) -> bool {
+    use std::collections::{HashSet, VecDeque};
+
+    const RESERVED: [&str; 2] = [
+        crate::PROCESS_EXECUTABLE_APP_ID_PREFIX,
+        crate::PROCESS_NAME_APP_ID_PREFIX,
+    ];
+    #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+    struct State {
+        left: usize,
+        right: usize,
+        prefix: u16,
+        nonempty: bool,
+    }
+
+    fn prefix_after(prefix: u16, character: char) -> u16 {
+        if prefix <= 1 {
+            return prefix;
+        }
+        let state = prefix - 2;
+        let length = usize::from(state / 4);
+        let mask = (state % 4) as u8;
+        let mut next_mask = 0_u8;
+        let mut completed = false;
+        for (index, candidate) in RESERVED.iter().enumerate() {
+            if mask & (1 << index) != 0 && candidate.chars().nth(length) == Some(character) {
+                if candidate.chars().count() == length + 1 {
+                    completed = true;
+                } else {
+                    next_mask |= 1 << index;
+                }
+            }
+        }
+        if completed {
+            1
+        } else if next_mask == 0 {
+            0
+        } else {
+            2 + ((length + 1) as u16) * 4 + u16::from(next_mask)
+        }
+    }
+
+    fn token_accepts_any(token: GlobToken) -> bool {
+        matches!(token, GlobToken::Any | GlobToken::Star)
+    }
+
+    let left = GlobPattern::compile(left);
+    let right = GlobPattern::compile(right);
+    let mut queue = VecDeque::from([State {
+        left: 0,
+        right: 0,
+        prefix: 2 + 3,
+        nonempty: false,
+    }]);
+    let mut seen = HashSet::new();
+    while let Some(state) = queue.pop_front() {
+        if !seen.insert(state) {
+            continue;
+        }
+        if state.left == left.tokens.len()
+            && state.right == right.tokens.len()
+            && state.nonempty
+            && state.prefix != 1
+        {
+            return true;
+        }
+        if matches!(left.tokens.get(state.left), Some(GlobToken::Star)) {
+            queue.push_back(State {
+                left: state.left + 1,
+                ..state
+            });
+        }
+        if matches!(right.tokens.get(state.right), Some(GlobToken::Star)) {
+            queue.push_back(State {
+                right: state.right + 1,
+                ..state
+            });
+        }
+
+        let (Some(left_token), Some(right_token)) = (
+            left.tokens.get(state.left).copied(),
+            right.tokens.get(state.right).copied(),
+        ) else {
+            continue;
+        };
+        let left_any = token_accepts_any(left_token);
+        let right_any = token_accepts_any(right_token);
+        let choices: Vec<char> = match (left_token, right_token) {
+            (GlobToken::Literal(a), GlobToken::Literal(b)) if a == b => vec![a],
+            (GlobToken::Literal(_), GlobToken::Literal(_)) => continue,
+            (GlobToken::Literal(character), _) if right_any => vec![character],
+            (_, GlobToken::Literal(character)) if left_any => vec![character],
+            _ if left_any && right_any => {
+                let mut choices = vec!['\u{1}'];
+                if state.prefix > 1 {
+                    let encoded = state.prefix - 2;
+                    let length = usize::from(encoded / 4);
+                    let mask = (encoded % 4) as u8;
+                    for (index, candidate) in RESERVED.iter().enumerate() {
+                        if mask & (1 << index) != 0 {
+                            if let Some(next) = candidate.chars().nth(length) {
+                                choices.push(next);
+                            }
+                        }
+                    }
+                }
+                choices.sort_unstable();
+                choices.dedup();
+                choices
+            }
+            _ => continue,
+        };
+        for character in choices {
+            queue.push_back(State {
+                left: if matches!(left_token, GlobToken::Star) {
+                    state.left
+                } else {
+                    state.left + 1
+                },
+                right: if matches!(right_token, GlobToken::Star) {
+                    state.right
+                } else {
+                    state.right + 1
+                },
+                prefix: prefix_after(state.prefix, character),
+                nonempty: true,
+            });
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 fn glob_matches(pattern: &str, value: &str) -> bool {
+    GlobPattern::compile(pattern).matches(value)
+}
+
+pub(crate) fn app_id_glob_matches(pattern: &str, value: &str) -> bool {
     GlobPattern::compile(pattern).matches(value)
 }
 
@@ -424,7 +563,7 @@ impl ExpansionEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::glob_matches;
+    use super::{app_id_globs_overlap, glob_matches};
 
     #[test]
     fn question_mark_matches_one_unicode_scalar() {
@@ -432,6 +571,16 @@ mod tests {
             assert!(glob_matches("?", character));
             assert!(glob_matches("x?x", &format!("x{character}x")));
         }
+    }
+
+    #[test]
+    fn app_id_glob_overlap_uses_matcher_wildcard_and_reserved_scope_semantics() {
+        assert!(app_id_globs_overlap("org.example.*", "org.example.?ditor"));
+        assert!(!app_id_globs_overlap("org.example.*", "org.other.*"));
+        assert!(!app_id_globs_overlap(
+            "process-executable:*",
+            "process-executable:/usr/bin/*"
+        ));
     }
 
     #[test]

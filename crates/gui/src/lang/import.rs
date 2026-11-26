@@ -382,11 +382,9 @@ impl Strings {
 
     pub fn picker_insert_failed(&self) -> &'static str {
         match self.lang {
-            Language::English => "Could not safely return to the original window.",
-            Language::Indonesian => "Tidak dapat kembali ke jendela asal dengan aman.",
-            Language::German => {
-                "Das ursprüngliche Fenster konnte nicht sicher wieder fokussiert werden."
-            }
+            Language::English => "Not inserted",
+            Language::Indonesian => "Tidak disisipkan",
+            Language::German => "Nicht eingefügt",
         }
     }
 

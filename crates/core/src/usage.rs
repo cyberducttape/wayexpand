@@ -19,8 +19,9 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use unicode_normalization::UnicodeNormalization;
 
-use crate::{Config, MatchMode};
+use crate::{AppFilter, Config, MatchMode};
 
 const USAGE_FILE: &str = "usage-stats.json";
 use crate::limits::MAX_USAGE_FILE_BYTES;
@@ -599,14 +600,30 @@ pub fn trigger_risks(config: &Config) -> Vec<TriggerRisk> {
         .iter()
         .filter(|expansion| expansion.is_keyboard_matchable())
         .collect();
-    let mut all_triggers: Vec<String> = enabled
+    let mut all_triggers: Vec<(String, usize)> = enabled
         .iter()
-        .flat_map(|expansion| {
-            std::iter::once(expansion.trigger.clone()).chain(expansion.aliases.clone())
+        .enumerate()
+        .flat_map(|(index, expansion)| {
+            expansion
+                .effective_triggers()
+                .into_iter()
+                .map(move |trigger| (trigger.nfc().collect(), index))
         })
         .collect();
     all_triggers.sort_unstable();
+    all_triggers.dedup();
+    let app_scopes: Vec<Vec<AppFilter>> = enabled
+        .iter()
+        .map(|expansion| {
+            expansion
+                .app_filter
+                .iter()
+                .filter_map(|raw| AppFilter::parse(raw))
+                .collect()
+        })
+        .collect();
     let mut risks = Vec::new();
+    let mut emitted_prefix_risks = std::collections::HashSet::new();
     for expansion in &enabled {
         for trigger in std::iter::once(&expansion.trigger).chain(&expansion.aliases) {
             let plain_word = trigger.chars().all(char::is_alphabetic);
@@ -623,32 +640,99 @@ pub fn trigger_risks(config: &Config) -> Vec<TriggerRisk> {
                     reason: "very short: likely to collide with ordinary typing".into(),
                 });
             }
-            if expansion.match_mode == MatchMode::Immediate {
-                // Prefixes form a contiguous range in sorted lexicographic
-                // order. The first entry after `trigger` is enough to detect
-                // whether that range contains a longer trigger, reducing
-                // this check from O(T²) to O(T log T).
-                let next_index = all_triggers
-                    .partition_point(|candidate| candidate.as_str() <= trigger.as_str());
-                if let Some(longer) = all_triggers.get(next_index).filter(|candidate| {
-                    candidate.len() > trigger.len() && candidate.starts_with(trigger.as_str())
-                }) {
-                    risks.push(TriggerRisk {
-                        trigger: trigger.clone(),
-                        reason: format!(
-                            "is the start of {longer}, so it waits for the next key before expanding"
-                        ),
-                    });
-                }
+        }
+    }
+    for (short, short_index) in &all_triggers {
+        let expansion = enabled[*short_index];
+        if expansion.match_mode != MatchMode::Immediate {
+            continue;
+        }
+        let next_index = all_triggers.partition_point(|(candidate, _)| candidate <= short);
+        for (longer, longer_index) in &all_triggers[next_index..] {
+            if !longer.starts_with(short) {
+                break;
             }
+            if !app_scopes_may_overlap(&app_scopes[*short_index], &app_scopes[*longer_index]) {
+                continue;
+            }
+            let reason =
+                format!("is the start of {longer}, so it waits for the next key before expanding");
+            if emitted_prefix_risks.insert((short.clone(), reason.clone())) {
+                risks.push(TriggerRisk {
+                    trigger: short.clone(),
+                    reason,
+                });
+            }
+            break;
         }
     }
     risks
 }
 
+fn app_scopes_may_overlap(left: &[AppFilter], right: &[AppFilter]) -> bool {
+    if left.is_empty() || right.is_empty() {
+        return true;
+    }
+    left.iter().any(|left| {
+        right
+            .iter()
+            .any(|right| app_filters_may_overlap(left, right))
+    })
+}
+
+fn app_filters_may_overlap(left: &AppFilter, right: &AppFilter) -> bool {
+    use AppFilter::*;
+    match (left, right) {
+        (TitleContains(_), _) | (_, TitleContains(_)) => true,
+        (AppIdExact(left), AppIdExact(right)) => left == right,
+        (AppIdExact(app_id), AppIdGlob(pattern)) | (AppIdGlob(pattern), AppIdExact(app_id)) => {
+            !crate::is_reserved_process_app_id(app_id)
+                && crate::engine::matching::app_id_glob_matches(pattern, app_id)
+        }
+        (AppIdGlob(left), AppIdGlob(right)) => {
+            crate::engine::matching::app_id_globs_overlap(left, right)
+        }
+        (ProcessExecutableExact(left), ProcessExecutableExact(right)) => left == right,
+        (ProcessNameExact(left), ProcessNameExact(right)) => left == right,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trigger_prefix_risks_ignore_disjoint_exact_app_scopes() {
+        let disjoint = Config::parse(
+            "[[expansion]]\ntrigger = ':mail'\nreplacement = 'short'\napp_filter = ['app_id_exact:org.example.mail']\n\n\
+             [[expansion]]\ntrigger = ':mail-signature'\nreplacement = 'long'\napp_filter = ['app_id_exact:org.example.editor']\n",
+        )
+        .unwrap();
+        assert!(trigger_risks(&disjoint).is_empty());
+
+        let overlapping = Config::parse(
+            "[[expansion]]\ntrigger = ':mail'\nreplacement = 'short'\napp_filter = ['app_id_glob:org.example.*']\n\n\
+             [[expansion]]\ntrigger = ':mail-signature'\nreplacement = 'long'\napp_filter = ['app_id_exact:org.example.editor']\n",
+        )
+        .unwrap();
+        assert!(trigger_risks(&overlapping)
+            .iter()
+            .any(|risk| risk.trigger == ":mail" && risk.reason.contains(":mail-signature")));
+    }
+
+    #[test]
+    fn trigger_prefix_risks_use_canonical_effective_triggers() {
+        let config = Config::parse(&format!(
+            "[[expansion]]\ntrigger = ':e{}'\nreplacement = 'short'\n\n\
+             [[expansion]]\ntrigger = ':éx'\nreplacement = 'long'\n",
+            '\u{301}'
+        ))
+        .unwrap();
+        assert!(trigger_risks(&config)
+            .iter()
+            .any(|risk| risk.trigger == ":é" && risk.reason.contains(":éx")));
+    }
 
     #[test]
     fn merging_usage_deltas_preserves_counters_and_last_use() {
