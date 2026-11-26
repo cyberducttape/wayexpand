@@ -262,12 +262,18 @@ impl UsageStats {
     /// Write atomically with mode 0600.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let _lock = UsageLock::acquire(path)?;
-        self.save_locked(path)
+        self.save_locked(path).map(|_| ())
     }
 
     /// Merge pending daemon counters with the current file under one lock, so
     /// concurrent `stats --clear` cannot race a load/merge/save cycle.
     pub fn merge_and_save(path: &Path, delta: &UsageStats) -> std::io::Result<()> {
+        Self::merge_and_save_measured(path, delta).map(|_| ())
+    }
+
+    /// Merge and save, returning the number of bytes serialized for this
+    /// atomic replacement so hosts can measure persistence write volume.
+    pub fn merge_and_save_measured(path: &Path, delta: &UsageStats) -> std::io::Result<u64> {
         let _lock = UsageLock::acquire(path)?;
         let mut current = Self::load(path)?;
         current.merge(delta);
@@ -284,7 +290,7 @@ impl UsageStats {
         }
     }
 
-    fn save_locked(&self, path: &Path) -> std::io::Result<()> {
+    fn save_locked(&self, path: &Path) -> std::io::Result<u64> {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -292,6 +298,7 @@ impl UsageStats {
             .as_nanos();
         let temporary = parent.join(format!(".{USAGE_FILE}.{}.{nonce}.tmp", std::process::id()));
         let bytes = serde_json::to_vec(self).map_err(std::io::Error::other)?;
+        let serialized_bytes = bytes.len() as u64;
         {
             let mut file = fs::OpenOptions::new()
                 .write(true)
@@ -313,7 +320,7 @@ impl UsageStats {
             let _ = fs::remove_file(&temporary);
             return Err(error);
         }
-        Ok(())
+        Ok(serialized_bytes)
     }
 
     /// Summarize statistics against the current library.

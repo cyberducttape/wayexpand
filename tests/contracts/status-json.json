@@ -100,6 +100,8 @@
     "matcher_latency_p95_us": "integer",
     "matcher_latency_p99_us": "integer",
     "usage_flush_max_duration_us": "integer",
+    "usage_flushes_total": "integer",
+    "usage_serialized_bytes_total": "integer",
     "usage_flush_failures_total": "integer",
     "usage_queue_rejected_total": "integer",
     "usage_worker_failures_total": "integer",

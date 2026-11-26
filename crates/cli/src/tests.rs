@@ -1385,6 +1385,8 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "matcher_latency_p99_us",
             "window_process_identity_state",
             "usage_flush_max_duration_us",
+            "usage_flushes_total",
+            "usage_serialized_bytes_total",
             "usage_flush_failures_total",
             "usage_queue_rejected_total",
             "usage_worker_failures_total",
