@@ -28,6 +28,32 @@ character at a time through an initialized `ExpansionEngine` containing 100,
 1,000, or 10,000 snippets. Configuration parsing and engine construction are
 excluded from the timed section.
 
+### Proposed reference-desktop targets
+
+These are investigation targets from the performance review, not measured
+results, current guarantees, or CI release gates. Establish them on named
+reference hardware and sessions before using them to accept or reject a
+change:
+
+| Metric | Proposed target | Measurement boundary |
+| --- | ---: | --- |
+| Idle daemon CPU | < 0.1% average | Sample daemon process CPU over a defined idle interval; report interval and desktop session. |
+| Idle daemon memory | < 40 MiB | Report RSS and, where available, PSS separately after startup settles. |
+| Ordinary core matching | < 50 µs p99 | Existing core benchmark; keep matcher construction and backend delivery out of this number. |
+| Quick Picker search | < 50 ms p95 | Changed-query ranking, by library size and query shape. |
+| GUI opening | < 500 ms | User-visible invocation to first interactive frame, on reference hardware. |
+| Reload with 10,000 snippets | < 300 ms | Parse, validate, and construct the live engine; separately report desktop scheduling impact. |
+| Idle memory growth | No sustained growth | Long soak with sample duration, RSS/PSS, file descriptors, and worker counts. |
+| Unexpected text corruption | Zero | Separate integrity gate, exercised with real clients and concurrent physical input; do not trade this for speed. |
+
+Measure route and compositor combinations independently. A backend that
+submits a transaction atomically and a route that types paced key events do
+not share a meaningful delivery-latency population. Record physical-key
+capture-to-matcher time, matcher time, queue wait, backend transaction time,
+and target-observed completion as separate spans when the harness can observe
+them. Current daemon timing starts after input event delivery and must not be
+presented as physical-key-to-visible-text latency.
+
 Run it with:
 
 ```sh
