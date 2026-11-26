@@ -1044,12 +1044,16 @@ impl GuiApp {
                     });
                     ui.add_space(12.0);
 
-                    // 2. Create a snippet.
+                    // 2. Use the harmless example, or add it if needed.
                     onboarding_step(
                         ui,
                         palette,
                         2,
-                        self.strings.step_create_title(),
+                        if test_snippet.is_some() {
+                            self.strings.step_example_ready_title()
+                        } else {
+                            self.strings.step_create_title()
+                        },
                         test_snippet.is_some(),
                     );
                     ui.indent("first_run_snippet", |ui| {

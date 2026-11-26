@@ -250,8 +250,10 @@ desktop's shortcut settings.
 ### First run and one-click setup
 
 Until it is finished, skipped, or completed with the copy-only workflow, the
-editor shows three steps: *Prepare your desktop*, *Create a snippet*, and
-*Test it*. The first-run header gives immediate access to Quick Picker and its
+editor shows three steps: *Prepare your desktop*, an example-snippet step, and
+*Test it*. Step two says *Your example snippet is ready* when the harmless
+example is available, and offers *Add an example snippet* if it was removed.
+The first-run header gives immediate access to Quick Picker and its
 optional shortcut. Route, permission and certification notes sit in a
 collapsed *Troubleshooting details* section.
 *Turn on WayExpand* runs `wayexpand setup --yes` in the background, which

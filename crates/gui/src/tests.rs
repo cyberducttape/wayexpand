@@ -2603,7 +2603,11 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
             .nodes
     );
     // Three steps, each with a plain-language title.
-    for step in ["Prepare your desktop", "Create a snippet", "Test it"] {
+    for step in [
+        "Prepare your desktop",
+        "Your example snippet is ready",
+        "Test it",
+    ] {
         assert!(guide_semantics.contains(step), "{step}: {guide_semantics}");
     }
     assert!(
@@ -4393,7 +4397,7 @@ fn first_run_keeps_picker_shortcut_optional_and_collapsed() {
         "{unset}"
     );
     assert!(unset.contains("Prepare your desktop"), "{unset}");
-    assert!(unset.contains("Create a snippet"), "{unset}");
+    assert!(unset.contains("Add an example snippet"), "{unset}");
     assert!(unset.contains("Test it"), "{unset}");
     assert!(
         !unset.contains("Use Ctrl+Alt+Space")
