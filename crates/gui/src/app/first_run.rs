@@ -531,6 +531,13 @@ impl GuiApp {
         );
         let picker_copy_allowed = picker_policy.clipboard_allowed;
         let picker_readiness = self.picker_readiness();
+        let picker_policy_notice = (!self.config.expansion.is_empty() && !picker_copy_allowed)
+            .then(|| match picker_readiness {
+                crate::picker::PickerReadiness::TypesDirectly => {
+                    self.strings.first_run_picker_direct_shortcut().to_owned()
+                }
+                readiness => self.strings.picker_readiness_detail(readiness),
+            });
         let sample_trigger = test_snippet
             .as_ref()
             .map(|(trigger, _)| trigger.clone())
@@ -781,26 +788,6 @@ impl GuiApp {
                             if quick_picker_button.clicked() {
                                 self.use_quick_picker_for_first_run();
                             }
-                        } else if !self.config.expansion.is_empty()
-                            && picker_readiness == crate::picker::PickerReadiness::TypesDirectly
-                        {
-                            ui.label(
-                                RichText::new(self.strings.first_run_picker_direct_shortcut())
-                                    .color(palette.muted),
-                            );
-                        } else if !self.config.expansion.is_empty()
-                            && !picker_copy_allowed
-                            && matches!(
-                                picker_readiness,
-                                crate::picker::PickerReadiness::Unavailable(_)
-                            )
-                        {
-                            ui.label(
-                                RichText::new(
-                                    self.strings.picker_readiness_detail(picker_readiness),
-                                )
-                                .color(palette.warning),
-                            );
                         }
                         if ui.small_button(self.strings.onboarding_defer()).clicked() {
                             self.defer_onboarding();
@@ -813,6 +800,9 @@ impl GuiApp {
                             self.skip_onboarding();
                         }
                     });
+                    if let Some(notice) = picker_policy_notice {
+                        ui.label(RichText::new(notice).color(palette.warning));
+                    }
                     ui.add_space(10.0);
 
                     // 1. Connect your desktop.

@@ -109,7 +109,15 @@ impl GuiApp {
                                 self.status = if self.onboarding_visible
                                     && previous_status.is_success()
                                 {
-                                    Status::success(self.strings.onboarding_saved_for_picker())
+                                    let picker_policy = crate::picker::PickerPolicy::merge(
+                                        &self.config.organization,
+                                        self.administrator_policy.as_ref(),
+                                    );
+                                    Status::success(if picker_policy.clipboard_allowed {
+                                        self.strings.onboarding_saved_for_picker()
+                                    } else {
+                                        self.strings.onboarding_saved_insert_only()
+                                    })
                                 } else {
                                     previous_status.with_caveat(
                                         self.strings.status_daemon_not_reloaded(error.to_string()),
