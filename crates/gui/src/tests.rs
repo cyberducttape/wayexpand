@@ -2650,10 +2650,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     // The copy-and-paste fallback is always offered until a real test passes.
     assert!(guide_semantics.contains("Use Quick Picker (copy & paste)"));
     assert!(guide_semantics.contains("Use Ctrl+Alt+Space"));
-    assert!(
-        !guide_semantics.contains("Skip the guide — I already use WayExpand"),
-        "the tutorial snippet must not make a new user look like an existing user"
-    );
+    assert!(guide_semantics.contains("Skip setup guide"));
     // Technical detail sits behind one collapsed section.
     assert!(guide_semantics.contains("Troubleshooting details"));
     assert!(!guide_semantics.contains("Backend probes show"));

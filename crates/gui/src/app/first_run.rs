@@ -137,13 +137,6 @@ fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
         .find(|expansion| is_onboarding_snippet(expansion))
 }
 
-fn has_user_library_snippets(config: &Config) -> bool {
-    config
-        .expansion
-        .iter()
-        .any(|expansion| !is_onboarding_snippet(expansion))
-}
-
 /// Only the dedicated harmless tutorial is used for the automatic first-run
 /// check. User snippets may contain private or unexpectedly large text, so
 /// they are not repurposed as onboarding test output.
@@ -812,12 +805,11 @@ impl GuiApp {
                         if ui.small_button(self.strings.onboarding_defer()).clicked() {
                             self.defer_onboarding();
                         }
-                        // Someone who already uses WayExpand (an imported
-                        // library, another machine) can dismiss the guide
-                        // for good; this never marks anything verified.
-                        if has_user_library_snippets(&self.config)
-                            && ui.small_button(self.strings.onboarding_skip()).clicked()
-                        {
+                        // Skipping is always available, including when the
+                        // only snippet is the tutorial. It records no
+                        // verification and can be reversed from Getting
+                        // started in the menu.
+                        if ui.small_button(self.strings.onboarding_skip()).clicked() {
                             self.skip_onboarding();
                         }
                     });
