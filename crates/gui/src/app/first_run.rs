@@ -795,12 +795,22 @@ impl GuiApp {
                         {
                             self.set_picker_shortcut();
                         }
-                        if !self.config.expansion.is_empty()
-                            && ui
-                                .button(self.strings.first_run_use_quick_picker())
-                                .clicked()
-                        {
-                            self.use_quick_picker_for_first_run();
+                        if !self.config.expansion.is_empty() {
+                            // When automatic expansion is unavailable, make
+                            // the working copy-and-paste path the clear next
+                            // action. Keep it secondary once a route is ready.
+                            let quick_picker_button = if route_ready {
+                                ui.button(self.strings.first_run_use_quick_picker())
+                            } else {
+                                theme::primary_button(
+                                    ui,
+                                    palette,
+                                    self.strings.first_run_use_quick_picker(),
+                                )
+                            };
+                            if quick_picker_button.clicked() {
+                                self.use_quick_picker_for_first_run();
+                            }
                         }
                         if ui.small_button(self.strings.onboarding_defer()).clicked() {
                             self.defer_onboarding();
