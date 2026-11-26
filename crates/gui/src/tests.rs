@@ -2522,6 +2522,67 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
 }
 
 #[test]
+fn a_fresh_install_shows_one_calm_next_step() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-fresh-install-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.onboarding_completed = false;
+    app.onboarding_visible = true;
+    // Installed correctly, diagnostics answered, nothing turned on yet.
+    app.installation_audit = runtime::InstallationAudit {
+        ready: Some(true),
+        ..Default::default()
+    };
+    app.daemon_reachable = Some(false);
+    app.ibus_active = false;
+    app.ibus_route = None;
+    app.diagnostics_checked_at = Some(Instant::now());
+    app.ensure_onboarding_test_snippet();
+
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let frame = run_gui_test_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 1400.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_editor(ui, &palette);
+        },
+    );
+    let semantics = format!(
+        "{:?}",
+        frame
+            .platform_output
+            .accesskit_update
+            .expect("accessible")
+            .nodes
+    );
+    assert!(
+        semantics.contains("Automatic expansion is not turned on yet"),
+        "{semantics}"
+    );
+    assert!(semantics.contains("Turn on WayExpand"), "{semantics}");
+    // Nothing has failed yet: no warning headline and no diagnostics detour
+    // beside the one action.
+    assert!(!semantics.contains("needs attention"), "{semantics}");
+    assert!(!semantics.contains("Open diagnostics"), "{semantics}");
+    assert!(!semantics.contains("mismatch"), "{semantics}");
+    // The example is ready to try, and the guide's own addition is not an undo.
+    assert!(semantics.contains("Your example snippet is ready"), "{semantics}");
+    assert!(app.undo.is_empty());
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn the_guide_adds_its_example_without_offering_it_as_an_undo() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-first-run-undo-{}.toml",
