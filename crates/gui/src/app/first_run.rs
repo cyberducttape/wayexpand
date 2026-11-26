@@ -312,19 +312,7 @@ impl GuiApp {
     }
 
     fn use_quick_picker_for_first_run(&mut self) {
-        let policy = crate::picker::PickerPolicy::merge(
-            &self.config.organization,
-            self.administrator_policy.as_ref(),
-        );
-        if policy.clipboard_allowed {
-            self.open_copy_only_picker();
-        } else if self.picker_readiness() == crate::picker::PickerReadiness::TypesDirectly {
-            self.open_picker(false);
-            return;
-        } else {
-            self.status = Status::warning(self.strings.onboarding_picker_copy_blocked());
-            return;
-        }
+        self.open_copy_only_picker();
         if !self.status.is_error() {
             self.finish_onboarding_with_copy_only();
         }
@@ -339,19 +327,9 @@ impl GuiApp {
     }
 
     pub(crate) fn open_copy_only_picker(&mut self) {
-        self.open_picker(true);
-    }
-
-    fn open_picker(&mut self, copy_only: bool) {
-        let ready_message = if copy_only {
-            self.strings.status_picker_copy_only().to_owned()
-        } else {
-            self.strings
-                .picker_readiness_detail(crate::picker::PickerReadiness::TypesDirectly)
-        };
         match crate::picker::focus_existing_picker() {
             Ok(true) => {
-                self.status = Status::info(ready_message);
+                self.status = Status::info(self.strings.status_picker_copy_only());
                 return;
             }
             Ok(false) => {}
@@ -373,7 +351,7 @@ impl GuiApp {
         };
         match std::process::Command::new(executable)
             .arg("--picker")
-            .args(copy_only.then_some("--copy-only"))
+            .arg("--copy-only")
             .arg(&self.path)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -381,7 +359,7 @@ impl GuiApp {
             .spawn()
         {
             Ok(_) => {
-                self.status = Status::info(ready_message);
+                self.status = Status::info(self.strings.status_picker_copy_only());
             }
             Err(error) => {
                 self.status =
@@ -812,17 +790,11 @@ impl GuiApp {
                             }
                         } else if !self.config.expansion.is_empty()
                             && picker_readiness == crate::picker::PickerReadiness::TypesDirectly
-                            && theme::primary_button(
-                                ui,
-                                palette,
-                                self.strings.first_run_open_picker_insert(),
-                            )
-                            .clicked()
                         {
-                            // Copying is forbidden by policy, but the picker
-                            // can still make a verified atomic insertion.
-                            // Opening it does not finish automatic setup.
-                            self.use_quick_picker_for_first_run();
+                            ui.label(
+                                RichText::new(self.strings.first_run_picker_direct_shortcut())
+                                    .color(palette.muted),
+                            );
                         } else if !self.config.expansion.is_empty()
                             && !picker_copy_allowed
                             && matches!(
