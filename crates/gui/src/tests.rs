@@ -2577,7 +2577,10 @@ fn a_fresh_install_shows_one_calm_next_step() {
     assert!(!semantics.contains("Open diagnostics"), "{semantics}");
     assert!(!semantics.contains("mismatch"), "{semantics}");
     // The example is ready to try, and the guide's own addition is not an undo.
-    assert!(semantics.contains("Your example snippet is ready"), "{semantics}");
+    assert!(
+        semantics.contains("Your example snippet is ready"),
+        "{semantics}"
+    );
     assert!(app.undo.is_empty());
     let _ = fs::remove_file(path);
 }
