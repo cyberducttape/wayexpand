@@ -23,20 +23,27 @@ If the application is already installed but has no launcher, run
 `wayexpand-gui`. For release archives and per-user source installs, use
 `"$HOME/.local/bin/wayexpand-gui"` when `~/.local/bin` is not on PATH.
 
-### 2. Follow setup and add a snippet
+### 2. Start with the example snippet
 
-Follow the setup screen's route recommendation. It checks capabilities and
-explains permissions before applying changes; it does not enable raw keyboard
-capture automatically. The GUI status distinguishes **Installed**,
-**Configured**, and **Verified working**.
+WayExpand adds a harmless `;hello` example to a new library. The guide shows its
+trigger and expected text, so you can try the Quick Picker immediately or use
+the example for the automatic expansion check. Existing libraries are kept;
+the guide adds the example only when one is needed for the check.
 
-In the snippet list, select **+ New**, enter a trigger such as `;;hello` and a
-replacement such as `Hello, world!`, then save. You can also choose
-**Create test snippet** for a harmless example. Verification accepts any
-enabled, harmless static snippet; setup does not require a particular sample
-trigger.
+To make your own, select **+ New**, enter a trigger such as `;;hello` and a
+replacement such as `Hello, world!`, then save. You can edit or remove the
+example at any time.
 
-### 3. Verify in a real application
+### 3. Choose how to use it
+
+Quick Picker is ready to copy a snippet for manual paste. The first-run guide
+can also set its optional **Ctrl+Alt+Space** shortcut. For automatic expansion,
+follow the desktop route recommendation; the guide checks capabilities and
+explains permissions before applying changes, and does not enable raw keyboard
+capture automatically. The GUI distinguishes **Installed**, **Configured**,
+and **Verified working**.
+
+### 4. Verify automatic expansion in an application
 
 Choose **Test in a real application** and follow the prompt in a disposable,
 non-sensitive text field. Where the controlled test field is available and
