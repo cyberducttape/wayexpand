@@ -134,6 +134,14 @@ pub struct UsageStats {
     pub daily: BTreeMap<String, u64>,
 }
 
+/// Result of replacing the statistics file. A directory-sync failure occurs
+/// after the rename, so the replacement is visible but its crash durability
+/// is uncertain and must not be blindly retried as a failed write.
+pub struct UsageSaveOutcome {
+    pub serialized_bytes: u64,
+    pub directory_sync_error: Option<std::io::Error>,
+}
+
 /// Where usage statistics for `config_path` are kept.
 pub fn usage_stats_path(config_path: &Path) -> PathBuf {
     config_path
@@ -243,18 +251,32 @@ impl UsageStats {
             self.daily.pop_first();
         }
         if self.snippets.len() > MAX_SNIPPET_ENTRIES {
-            // Drop the least recently used entries first.
-            let mut by_age: Vec<(u64, String)> = self
-                .snippets
-                .iter()
-                .map(|(id, usage)| (usage.last_used, id.clone()))
-                .collect();
-            by_age.sort();
-            for (_, id) in by_age
-                .into_iter()
-                .take(self.snippets.len() - MAX_SNIPPET_ENTRIES)
-            {
-                self.snippets.remove(&id);
+            let excess = self.snippets.len() - MAX_SNIPPET_ENTRIES;
+            if excess == 1 {
+                // The common boundary case needs only one linear scan; avoid
+                // copying and sorting every ID just to evict a single entry.
+                if let Some(id) = self
+                    .snippets
+                    .iter()
+                    .min_by(|(left_id, left), (right_id, right)| {
+                        (left.last_used, *left_id).cmp(&(right.last_used, *right_id))
+                    })
+                    .map(|(id, _)| id.clone())
+                {
+                    self.snippets.remove(&id);
+                }
+            } else {
+                // Drop the least recently used entries first when a merge
+                // brings in a larger batch of excess entries.
+                let mut by_age: Vec<(u64, String)> = self
+                    .snippets
+                    .iter()
+                    .map(|(id, usage)| (usage.last_used, id.clone()))
+                    .collect();
+                by_age.sort();
+                for (_, id) in by_age.into_iter().take(excess) {
+                    self.snippets.remove(&id);
+                }
             }
         }
     }
@@ -262,18 +284,23 @@ impl UsageStats {
     /// Write atomically with mode 0600.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let _lock = UsageLock::acquire(path)?;
-        self.save_locked(path).map(|_| ())
+        let outcome = self.save_locked(path)?;
+        outcome.directory_sync_error.map_or(Ok(()), Err)
     }
 
     /// Merge pending daemon counters with the current file under one lock, so
     /// concurrent `stats --clear` cannot race a load/merge/save cycle.
     pub fn merge_and_save(path: &Path, delta: &UsageStats) -> std::io::Result<()> {
-        Self::merge_and_save_measured(path, delta).map(|_| ())
+        let outcome = Self::merge_and_save_measured(path, delta)?;
+        outcome.directory_sync_error.map_or(Ok(()), Err)
     }
 
     /// Merge and save, returning the number of bytes serialized for this
     /// atomic replacement so hosts can measure persistence write volume.
-    pub fn merge_and_save_measured(path: &Path, delta: &UsageStats) -> std::io::Result<u64> {
+    pub fn merge_and_save_measured(
+        path: &Path,
+        delta: &UsageStats,
+    ) -> std::io::Result<UsageSaveOutcome> {
         let _lock = UsageLock::acquire(path)?;
         let mut current = Self::load(path)?;
         current.merge(delta);
@@ -290,7 +317,7 @@ impl UsageStats {
         }
     }
 
-    fn save_locked(&self, path: &Path) -> std::io::Result<u64> {
+    fn save_locked(&self, path: &Path) -> std::io::Result<UsageSaveOutcome> {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -320,7 +347,13 @@ impl UsageStats {
             let _ = fs::remove_file(&temporary);
             return Err(error);
         }
-        Ok(serialized_bytes)
+        let directory_sync_error = fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .err();
+        Ok(UsageSaveOutcome {
+            serialized_bytes,
+            directory_sync_error,
+        })
     }
 
     /// Summarize statistics against the current library.

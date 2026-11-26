@@ -664,6 +664,7 @@ impl PreparedFileJournal {
             self.written_state_known = true;
             return Err(error.into());
         }
+        fs::File::open(parent)?.sync_all()?;
         self.written = ComponentFileState::read(&self.target)?;
         self.written_state_known = true;
         Ok(())
@@ -716,12 +717,16 @@ impl PreparedFileJournal {
                     let _ = fs::remove_file(&staged);
                     return Err(error.into());
                 }
+                fs::File::open(parent)?.sync_all()?;
                 restore_file_owner(&self.target, original.uid, original.gid)?;
                 if ComponentFileState::read(&self.target)?.as_ref() != Some(original) {
                     bail!("prepared file restoration did not match its original hash and mode");
                 }
             } else {
                 fs::remove_file(&self.target)?;
+                if let Some(parent) = self.target.parent() {
+                    fs::File::open(parent)?.sync_all()?;
+                }
             }
             restored = true;
         }

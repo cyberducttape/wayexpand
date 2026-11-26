@@ -654,6 +654,7 @@ fn restore_previous_install(
     let _ = fs::remove_file(&temp);
     std::os::unix::fs::symlink(target, &temp)?;
     fs::rename(&temp, current)?;
+    fs::File::open(library)?.sync_all()?;
     if let Some(unit) = service {
         let status = crate::setup::run_setup_command("systemctl", &["--user", "restart", unit])?;
         if !status.success() {

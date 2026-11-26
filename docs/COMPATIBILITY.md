@@ -716,6 +716,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "usage_flush_max_duration_us": 0,
   "usage_flushes_total": 0,
   "usage_serialized_bytes_total": 0,
+  "usage_directory_sync_failures_total": 0,
   "usage_flush_failures_total": 0,
   "usage_queue_rejected_total": 0,
   "usage_worker_failures_total": 0,
@@ -834,6 +835,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `usage_flush_max_duration_us` (integer): Maximum usage-statistics write duration since daemon start, in microseconds
 - `usage_flushes_total` (integer): Successful usage-statistics atomic replacements since daemon start
 - `usage_serialized_bytes_total` (integer): Total bytes serialized for successful usage-statistics replacements since daemon start
+- `usage_directory_sync_failures_total` (integer): Replacements visible after rename but not confirmed durable by a parent-directory sync
 - `usage_flush_failures_total` (integer): Usage-statistics flush attempts that failed; queued events are retained for retry while the worker remains active
 - `usage_worker_failures_total` (integer): Usage-statistics writer worker start failures or panics
 - `usage_queue_rejected_total` (integer): Usage events dropped because bounded in-memory queue limits were exceeded or the persistence worker became unavailable

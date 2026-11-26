@@ -147,6 +147,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "usage_flush_max_duration_us",
         "usage_flushes_total",
         "usage_serialized_bytes_total",
+        "usage_directory_sync_failures_total",
         "usage_flush_failures_total",
         "usage_queue_rejected_total",
         "usage_worker_failures_total",

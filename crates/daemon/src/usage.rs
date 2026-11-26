@@ -33,6 +33,7 @@ const CLEAR_REPLY_WAIT: Duration = Duration::from_millis(1500);
 static MAX_FLUSH_DURATION_US: AtomicU64 = AtomicU64::new(0);
 static FLUSHES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static SERIALIZED_BYTES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static DIRECTORY_SYNC_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static FLUSH_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static WORKER_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static QUEUE_REJECTED_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -45,6 +46,7 @@ pub struct UsageMetrics {
     pub max_flush_duration_us: u64,
     pub flushes_total: u64,
     pub serialized_bytes_total: u64,
+    pub directory_sync_failures_total: u64,
     pub flush_failures_total: u64,
     pub worker_failures_total: u64,
     pub queue_rejected_total: u64,
@@ -58,6 +60,7 @@ pub fn metrics_snapshot() -> UsageMetrics {
         max_flush_duration_us: MAX_FLUSH_DURATION_US.load(Ordering::Relaxed),
         flushes_total: FLUSHES_TOTAL.load(Ordering::Relaxed),
         serialized_bytes_total: SERIALIZED_BYTES_TOTAL.load(Ordering::Relaxed),
+        directory_sync_failures_total: DIRECTORY_SYNC_FAILURES_TOTAL.load(Ordering::Relaxed),
         flush_failures_total: FLUSH_FAILURES_TOTAL.load(Ordering::Relaxed),
         worker_failures_total: WORKER_FAILURES_TOTAL.load(Ordering::Relaxed),
         queue_rejected_total: QUEUE_REJECTED_TOTAL.load(Ordering::Relaxed),
@@ -515,12 +518,16 @@ fn flush_pending(
     let started = Instant::now();
     let persisted = event_count(pending);
     match UsageStats::merge_and_save_measured(path, pending) {
-        Ok(serialized_bytes) => {
+        Ok(outcome) => {
             *pending = UsageStats::default();
             FLUSHES_TOTAL.fetch_add(1, Ordering::Relaxed);
-            SERIALIZED_BYTES_TOTAL.fetch_add(serialized_bytes, Ordering::Relaxed);
+            SERIALIZED_BYTES_TOTAL.fetch_add(outcome.serialized_bytes, Ordering::Relaxed);
             EVENTS_PERSISTED_TOTAL.fetch_add(persisted, Ordering::Relaxed);
             decrement_outstanding(outstanding, persisted);
+            if let Some(error) = outcome.directory_sync_error {
+                DIRECTORY_SYNC_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
+                warn!(%error, "usage statistics were replaced, but directory sync failed; durability is uncertain");
+            }
         }
         Err(error) => {
             FLUSH_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
