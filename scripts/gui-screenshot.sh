@@ -17,6 +17,10 @@
 #                                  (wayexpand-gui --picker) instead
 #   WAYEXPAND_GUI_SCREENSHOT_DESKTOP  desktop name the GUI sees (default KDE,
 #                                  as the sandbox is KWin)
+#   WAYEXPAND_GUI_SCREENSHOT_INSTALLED=1  show what a correctly installed
+#                                  user sees: the sandbox has no installed
+#                                  payload or user services, so the GUI's
+#                                  install-check is answered as ready
 #   WAYEXPAND_GUI_SCREENSHOT_DAEMON=1  also run a sandboxed daemon that reads
 #                                  stdin and types nothing, so the header
 #                                  shows a running service
@@ -41,10 +45,28 @@ for tool in kwin_wayland dbus-run-session convert; do
     }
 done
 
-cargo build --quiet --locked -p wayexpand-gui -p wayexpand-daemon \
+cargo build --quiet --locked -p wayexpand -p wayexpand-gui -p wayexpand-daemon \
     --manifest-path "$project_dir/Cargo.toml"
 gui="$project_dir/target/debug/wayexpand-gui"
 daemon="$project_dir/target/debug/wayexpand-daemon"
+if [ "${WAYEXPAND_GUI_SCREENSHOT_INSTALLED:-}" = 1 ]; then
+    # The GUI runs the `wayexpand` beside its own executable (resolved
+    # through symlinks), so give it a hard-linked copy with a wrapper CLI.
+    stub_dir="$project_dir/target/screenshot-installed"
+    rm -rf -- "$stub_dir"
+    mkdir -p "$stub_dir"
+    ln -- "$gui" "$stub_dir/wayexpand-gui"
+    cat >"$stub_dir/wayexpand" <<STUB
+#!/bin/sh
+if [ "\$1" = install-check ]; then
+    printf '%s\n' '{"schema":2,"level":"installed","ready":true,"checks":[]}'
+    exit 0
+fi
+exec '$project_dir/target/debug/wayexpand' "\$@"
+STUB
+    chmod 755 "$stub_dir/wayexpand"
+    gui="$stub_dir/wayexpand-gui"
+fi
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-gui-shot.XXXXXXXX")
 # The compositor's socket path must fit in 108 bytes, so its runtime

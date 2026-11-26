@@ -98,14 +98,24 @@ impl GuiApp {
     }
 
     pub(crate) fn create_test_snippet(&mut self) -> bool {
-        self.create_test_snippet_with_onboarding(true)
+        self.create_test_snippet_with_onboarding(true, true)
+    }
+
+    /// Add the example the first-run guide needs without an explicit user
+    /// action, so it is not offered as something to undo.
+    pub(crate) fn add_onboarding_example(&mut self) -> bool {
+        self.create_test_snippet_with_onboarding(true, false)
     }
 
     pub(crate) fn create_diagnostic_test_snippet(&mut self) -> bool {
-        self.create_test_snippet_with_onboarding(false)
+        self.create_test_snippet_with_onboarding(false, true)
     }
 
-    fn create_test_snippet_with_onboarding(&mut self, show_onboarding: bool) -> bool {
+    fn create_test_snippet_with_onboarding(
+        &mut self,
+        show_onboarding: bool,
+        record_undo: bool,
+    ) -> bool {
         let base_trigger = ";hello";
         let mut trigger = base_trigger.to_owned();
         let mut suffix = 2;
@@ -136,7 +146,7 @@ impl GuiApp {
             output_file: None,
         });
         self.onboarding_visible = show_onboarding;
-        self.queue_save_config(candidate, SaveIntent::Created)
+        self.queue_save_config(candidate, SaveIntent::Created { record_undo })
     }
 
     pub(crate) fn duplicate_selected(&mut self) {

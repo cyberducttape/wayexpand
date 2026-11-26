@@ -3,6 +3,8 @@ use crate::*;
 
 const ONBOARDING_TRIGGER: &str = ";hello";
 const ONBOARDING_REPLACEMENT: &str = "WayExpand is working!";
+const SHIPPED_GREETING_TRIGGER: &str = ";;hello";
+const SHIPPED_GREETING_REPLACEMENT: &str = "Hello from Wayland!";
 /// What `wayexpand shortcut set` assigns without an argument.
 const DEFAULT_PICKER_SHORTCUT: &str = "Ctrl+Alt+Space";
 
@@ -130,11 +132,28 @@ fn is_onboarding_snippet(expansion: &ExpansionConfig) -> bool {
         && expansion.tags.iter().any(|tag| tag == "tutorial")
 }
 
+/// The greeting every new library starts with (`expansions.toml`). It is as
+/// harmless as the tutorial, so a fresh library uses it for the first-run
+/// check instead of gaining a second, nearly identical `;hello` example. The
+/// CLI's argument-free desktop test accepts the same pair.
+fn is_shipped_greeting(expansion: &ExpansionConfig) -> bool {
+    desktop_testable(expansion)
+        && expansion.answers_to(SHIPPED_GREETING_TRIGGER)
+        && expansion.replacement == SHIPPED_GREETING_REPLACEMENT
+        && expansion.match_mode == MatchMode::Immediate
+}
+
 fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     config
         .expansion
         .iter()
         .find(|expansion| is_onboarding_snippet(expansion))
+        .or_else(|| {
+            config
+                .expansion
+                .iter()
+                .find(|expansion| is_shipped_greeting(expansion))
+        })
 }
 
 /// Only the dedicated harmless tutorial is used for the automatic first-run
@@ -174,7 +193,7 @@ impl GuiApp {
             return;
         }
         // Failure is reported by create_test_snippet itself; nothing follows.
-        let _ = self.create_test_snippet();
+        let _ = self.add_onboarding_example();
     }
 
     /// Record the tutorial only after its config save has committed. The
@@ -675,6 +694,14 @@ impl GuiApp {
             .filter(|major| !major.is_empty() && major.chars().all(|ch| ch.is_ascii_digit()))
             .map(str::to_owned);
 
+        // Nothing has failed before a new user turns WayExpand on, so that
+        // state reads as a neutral next step rather than a problem.
+        let not_turned_on = !checking
+            && !daemon_running
+            && !ibus_only
+            && self
+                .current_next_step()
+                .is_none_or(|(problem, _)| problem != super::Problem::InstallationIncomplete);
         let compact_first_run = ui.available_width() < 400.0;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -749,47 +776,34 @@ impl GuiApp {
                         ui.label(
                             RichText::new(if setup_check_pending {
                                 self.strings.first_run_checking()
+                            } else if not_turned_on && outcome == FirstRunOutcome::SetupIncomplete {
+                                self.strings.outcome_not_turned_on()
                             } else {
                                 first_run_outcome_label(&self.strings, outcome)
                             })
                             .strong()
-                            .color(if setup_check_pending {
-                                palette.muted
-                            } else {
-                                match outcome {
-                                    FirstRunOutcome::WorkingInTestedApplication => palette.success,
-                                    _ => palette.warning,
-                                }
-                            }),
+                            .color(
+                                if setup_check_pending || not_turned_on {
+                                    palette.muted
+                                } else {
+                                    match outcome {
+                                        FirstRunOutcome::WorkingInTestedApplication => {
+                                            palette.success
+                                        }
+                                        _ => palette.warning,
+                                    }
+                                },
+                            ),
                         );
-                        // Shortcut status arrives with the first asynchronous
-                        // diagnostics snapshot. Do not invite a user to set a
-                        // shortcut until the desktop explicitly reports that
-                        // setting one is supported and none is configured.
-                        // The Quick Picker copy path already works without it.
-                        if self.diagnostics_checked_at.is_some()
-                            && (picker_copy_allowed
-                                || picker_readiness
-                                    == crate::picker::PickerReadiness::TypesDirectly)
-                            && self.picker_shortcut.as_ref().is_some_and(|shortcut| {
-                                shortcut.supported && shortcut.keys.is_none()
-                            })
-                            && ui
-                                .add_enabled(
-                                    self.setup_task.is_none(),
-                                    egui::Button::new(
-                                        self.strings.shortcut_use_keys(DEFAULT_PICKER_SHORTCUT),
-                                    ),
-                                )
-                                .clicked()
-                        {
-                            self.set_picker_shortcut();
-                        }
                         if !self.config.expansion.is_empty() && picker_copy_allowed {
-                            // When automatic expansion is unavailable, make
-                            // the working copy-and-paste path the clear next
-                            // action. Keep it secondary once a route is ready.
-                            let quick_picker_button = if route_ready {
+                            // Copy and paste is the clear next action only
+                            // when this desktop has no automatic route to set
+                            // up. Otherwise step 1 carries the one primary
+                            // action (Turn on, a repair, or a recheck), and
+                            // two highlighted buttons would compete.
+                            let no_automatic_route =
+                                !route_ready && !setup_check_pending && recommendation.is_none();
+                            let quick_picker_button = if !no_automatic_route {
                                 ui.button(self.strings.first_run_use_quick_picker())
                             } else {
                                 theme::primary_button(
@@ -964,6 +978,7 @@ impl GuiApp {
                             }
                         }
                         if !route_ready
+                            && !not_turned_on
                             && theme::secondary_button(
                                 ui,
                                 palette,
@@ -1196,6 +1211,13 @@ impl GuiApp {
                         .picker_shortcut
                         .as_ref()
                         .and_then(|shortcut| shortcut.keys.clone());
+                    let shortcut_offer = self.diagnostics_checked_at.is_some()
+                        && (picker_copy_allowed
+                            || picker_readiness == crate::picker::PickerReadiness::TypesDirectly)
+                        && self
+                            .picker_shortcut
+                            .as_ref()
+                            .is_some_and(|shortcut| shortcut.supported && shortcut.keys.is_none());
                     egui::CollapsingHeader::new(
                         RichText::new(self.strings.step_shortcut_title()).color(palette.muted),
                     )
@@ -1225,6 +1247,23 @@ impl GuiApp {
                                     RichText::new(self.strings.shortcut_help())
                                         .color(palette.muted),
                                 );
+                                // Shortcut status arrives with the first
+                                // asynchronous diagnostics snapshot. Offer to
+                                // set one only once the desktop reports that
+                                // it can and none is configured.
+                                if shortcut_offer
+                                    && ui
+                                        .add_enabled(
+                                            self.setup_task.is_none(),
+                                            egui::Button::new(
+                                                self.strings
+                                                    .shortcut_use_keys(DEFAULT_PICKER_SHORTCUT),
+                                            ),
+                                        )
+                                        .clicked()
+                                {
+                                    self.set_picker_shortcut();
+                                }
                                 if let Some(error) = &self.picker_shortcut_error {
                                     ui.colored_label(palette.warning, error);
                                 }
@@ -1654,5 +1693,28 @@ mod tests {
         )
         .unwrap();
         assert!(onboarding_test_snippet(&config).is_none());
+    }
+
+    #[test]
+    fn a_fresh_library_reuses_its_shipped_greeting_instead_of_adding_a_second_example() {
+        let template = Config::parse(include_str!("../../../../expansions.toml")).unwrap();
+        let snippet =
+            onboarding_test_snippet(&template).expect("the template greeting is testable");
+        assert_eq!(snippet.trigger, ";;hello");
+        assert_eq!(snippet.replacement, "Hello from Wayland!");
+
+        // An edited greeting is the user's own text and is not reused.
+        let edited = Config::parse(
+            "[[expansion]]\ntrigger = ';;hello'\nreplacement = 'Hello from my laptop'\n",
+        )
+        .unwrap();
+        assert!(onboarding_test_snippet(&edited).is_none());
+
+        // The dedicated tutorial wins when both exist.
+        let both = Config::parse(
+            "[[expansion]]\ntrigger = ';;hello'\nreplacement = 'Hello from Wayland!'\n\n[[expansion]]\ntrigger = ';hello'\nreplacement = 'WayExpand is working!'\ntags = ['tutorial']\n",
+        )
+        .unwrap();
+        assert_eq!(onboarding_test_snippet(&both).unwrap().trigger, ";hello");
     }
 }

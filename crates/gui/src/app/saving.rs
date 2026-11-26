@@ -263,7 +263,7 @@ impl GuiApp {
                     SaveIntent::Import(_) => strings.status_import_save_failed(&error),
                     SaveIntent::Snippet { .. } => strings.status_save_failed(&error),
                     SaveIntent::Undo => strings.status_undo_save_failed(&error),
-                    SaveIntent::Created => strings.status_create_failed(&error),
+                    SaveIntent::Created { .. } => strings.status_create_failed(&error),
                     SaveIntent::Duplicated => strings.status_duplicate_failed(&error),
                     SaveIntent::Deleted { .. } => strings.status_delete_failed(&error),
                     SaveIntent::Toggled { .. } => strings.status_toggle_failed(&error),
@@ -355,10 +355,12 @@ impl GuiApp {
                 self.clear_command_preview();
                 self.set_saved_status(Status::success(self.strings.status_undone()));
             }
-            SaveIntent::Created => {
+            SaveIntent::Created { record_undo } => {
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.rebuild_search_index();
-                self.remember_undo(previous);
+                if record_undo {
+                    self.remember_undo(previous);
+                }
                 // The test snippet is appended, so it is the last item.
                 self.select(self.config.expansion.len() - 1);
                 let onboarding_pref_error = self.record_onboarding_test_snippet_saved().err();

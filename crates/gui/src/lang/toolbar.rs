@@ -473,10 +473,12 @@ impl Strings {
                 Language::Indonesian => "Integrasi tersedia untuk disiapkan",
             };
         }
+        // The route is implemented here, but the session has not confirmed
+        // it yet. Nothing is being checked at this point, so do not say so.
         match self.lang {
-            Language::English => "Checking integration support",
-            Language::German => "Integrationsunterstützung wird geprüft",
-            Language::Indonesian => "Memeriksa dukungan integrasi",
+            Language::English => "Integration found; it is confirmed once turned on",
+            Language::German => "Integration gefunden; sie wird nach dem Einschalten bestätigt",
+            Language::Indonesian => "Integrasi ditemukan; dikonfirmasi setelah diaktifkan",
         }
     }
 

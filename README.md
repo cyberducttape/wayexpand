@@ -192,15 +192,15 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Your first minute
 
-![WayExpand's first-run guide showing the ready example snippet, automatic setup status, and copy-only Quick Picker option](docs/images/wayexpand-first-run.png)
+![WayExpand's first-run guide on a fresh install: one Turn on WayExpand button, the ready example snippet, and the copy-only Quick Picker option](docs/images/wayexpand-first-run.png)
 
 Quick Picker opens across supported sessions, but it inserts directly only
 when the route can verify the destination and supports atomic insertion.
 Otherwise it copies the snippet for you to paste.
 
-1. **Use the example now** — the guide adds a harmless `;hello` snippet when
-   you need one for the automatic expansion check. Open Quick Picker to copy
-   it and paste it into any app.
+1. **Use the example now** — every new library has one harmless example: the
+   starter `;;hello` greeting, or a `;hello` snippet the guide adds when the
+   library has none. Open Quick Picker to copy it and paste it into any app.
 2. **Set up automatic expansion** — choose *Turn on WayExpand* in the GUI, or
    run `wayexpand setup` in a terminal. Setup checks the supported input route
    without enabling raw keyboard capture by itself.
@@ -212,8 +212,8 @@ Otherwise it copies the snippet for you to paste.
    If automatic expansion is unavailable or you prefer copy and paste, choose
    *Use Quick Picker (copy & paste)*. The guide closes and records the copy-only
    choice without marking automatic expansion as verified.
-4. **Open snippets from any app** (optional) — the guide gives the Quick
-   Picker a shortcut, <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> unless
+4. **Open snippets from any app** (optional) — the guide's collapsed
+   *Open snippets from any app* section gives the Quick Picker a shortcut, <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> unless
    that is taken. From a terminal: `wayexpand shortcut set [KEYS]`. On desktops
    other than KDE Plasma and GNOME, bind `wayexpand-gui --picker` in the
    keyboard settings. Scripts can insert directly with `wayexpand insert ';sig'`.

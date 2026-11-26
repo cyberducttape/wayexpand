@@ -253,8 +253,11 @@ Until it is finished, skipped, or completed with the copy-only workflow, the
 editor shows three steps: *Prepare your desktop*, an example-snippet step, and
 *Test it*. Step two says *Your example snippet is ready* when the harmless
 example is available, and offers *Add an example snippet* if it was removed.
-The first-run header gives immediate access to Quick Picker and its
-optional shortcut. Route, permission and certification notes sit in a
+The first-run header gives immediate access to Quick Picker; it is the
+highlighted action only when the desktop has no automatic route to set up, so
+it never competes with *Turn on WayExpand*. Its optional shortcut sits in a
+collapsed section below the three steps. On a starter library the guide uses
+the `;;hello` greeting for its checks instead of adding a second example. Route, permission and certification notes sit in a
 collapsed *Troubleshooting details* section.
 *Turn on WayExpand* runs `wayexpand setup --yes` in the background, which
 configures only the Recommended mode (the route planner's choice, which may be
@@ -634,7 +637,7 @@ CyberDuctTape as the example organization:
 ```sh
 export WAYEXPAND_GUI_SCREENSHOT_PACK=terminal_blue
 : > /tmp/wayexpand-first-run.toml && chmod 600 /tmp/wayexpand-first-run.toml
-WAYEXPAND_GUI_SCREENSHOT_ONBOARDING=1 \
+WAYEXPAND_GUI_SCREENSHOT_ONBOARDING=1 WAYEXPAND_GUI_SCREENSHOT_INSTALLED=1 \
     scripts/gui-screenshot.sh /tmp/wayexpand-first-run.toml \
     docs/images/wayexpand-first-run.png 1180x780
 WAYEXPAND_GUI_SCREENSHOT_DAEMON=1 WAYEXPAND_GUI_SCREENSHOT_VIEW=preview \
@@ -646,7 +649,7 @@ WAYEXPAND_GUI_SCREENSHOT_DAEMON=1 WAYEXPAND_GUI_SCREENSHOT_PICKER=1 \
 scripts/make-social-preview.sh
 ```
 
-![WayExpand's first-run guide with automatic setup needing attention and Quick Picker ready for copy and paste](images/wayexpand-first-run.png)
+![WayExpand's first-run guide on a fresh install: automatic expansion not turned on yet, one Turn on WayExpand button, and the example snippet ready](images/wayexpand-first-run.png)
 
 ![WayExpand's editor with the Matcher preview expanding a support reply](images/wayexpand-editor-try-it-live.png)
 

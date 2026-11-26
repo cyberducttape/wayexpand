@@ -514,7 +514,6 @@ struct GuiApp {
     setup_consent_acknowledged: bool,
     setup_ibus_preflight_report: Option<serde_json::Value>,
     setup_system_integration_required: bool,
-    setup_system_integration_acknowledged: bool,
     guided_setup_waiting_for_route: bool,
     desktop_test_verified: bool,
     desktop_test_verified_application: Option<String>,
@@ -768,7 +767,11 @@ enum SaveIntent {
         index: usize,
     },
     Undo,
-    Created,
+    /// The harmless test snippet. `record_undo` is false when the guide
+    /// added it by itself: a new user has done nothing to undo yet.
+    Created {
+        record_undo: bool,
+    },
     Duplicated,
     Deleted {
         index: usize,
@@ -984,7 +987,6 @@ impl GuiApp {
             setup_consent_acknowledged: false,
             setup_ibus_preflight_report: None,
             setup_system_integration_required: false,
-            setup_system_integration_acknowledged: false,
             guided_setup_waiting_for_route: false,
             desktop_test_verified: false,
             desktop_test_verified_application: None,

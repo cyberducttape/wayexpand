@@ -915,7 +915,6 @@ impl GuiApp {
         // opened it, not a potentially older background diagnostics snapshot.
         self.setup_ibus_preflight_report = Some(report);
         self.setup_system_integration_required = registration_needed;
-        self.setup_system_integration_acknowledged = !registration_needed;
         self.setup_consent_acknowledged =
             self.config.settings.compatibility_mode != wayexpand_core::CompatibilityMode::Off;
         self.setup_consent_open = true;
@@ -1732,11 +1731,10 @@ impl GuiApp {
             ui.add_space(8.0);
             if self.setup_system_integration_required {
                 ui.add_space(8.0);
+                // The desktop's administrator password prompt is the
+                // confirmation for this system-wide step; a checkbox in
+                // front of it only asked the same question twice.
                 ui.label(self.strings.setup_admin_needed());
-                ui.checkbox(
-                    &mut self.setup_system_integration_acknowledged,
-                    self.strings.setup_admin_checkbox(),
-                );
             } else {
                 ui.add_space(8.0);
                 ui.label(self.strings.setup_admin_not_needed());
@@ -1757,14 +1755,13 @@ impl GuiApp {
             }
             ui.add_space(12.0);
             ui.horizontal(|ui| {
+                let ready = self.setup_consent_acknowledged && self.setup_task.is_none();
+                let palette = Palette::for_pack(self.colorpack, self.dark_mode);
                 if ui
-                    .add_enabled(
-                        (!self.setup_system_integration_required
-                            || self.setup_system_integration_acknowledged)
-                            && self.setup_consent_acknowledged
-                            && self.setup_task.is_none(),
-                        egui::Button::new(self.strings.setup_continue()),
-                    )
+                    .add_enabled_ui(ready, |ui| {
+                        theme::primary_button(ui, &palette, self.strings.setup_continue())
+                    })
+                    .inner
                     .clicked()
                 {
                     self.setup_consent_open = false;
@@ -1772,8 +1769,7 @@ impl GuiApp {
                         == wayexpand_core::CompatibilityMode::Off;
                     self.start_setup_with_replacement_consent(
                         replacement_consent,
-                        self.setup_system_integration_required
-                            && self.setup_system_integration_acknowledged,
+                        self.setup_system_integration_required,
                         Some("ibus"),
                     );
                 }
@@ -1781,7 +1777,6 @@ impl GuiApp {
                     self.setup_consent_open = false;
                     self.setup_consent_acknowledged = false;
                     self.setup_system_integration_required = false;
-                    self.setup_system_integration_acknowledged = false;
                 }
             });
         });

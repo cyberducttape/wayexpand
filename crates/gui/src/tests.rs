@@ -2522,6 +2522,31 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
 }
 
 #[test]
+fn the_guide_adds_its_example_without_offering_it_as_an_undo() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-first-run-undo-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.onboarding_completed = false;
+    app.onboarding_visible = true;
+    app.onboarding_test_snippet_created_for = None;
+    app.ensure_onboarding_test_snippet();
+    assert_eq!(app.config.expansion.len(), 1, "{}", app.status.text());
+    assert!(
+        app.undo.is_empty(),
+        "a brand-new user has done nothing to undo"
+    );
+
+    // An explicit creation is still undoable.
+    app.config.expansion.clear();
+    assert!(app.create_test_snippet());
+    assert_eq!(app.undo.len(), 1);
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-first-run-{}.toml",
@@ -2621,6 +2646,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
             "Configured, awaiting test",
             "Automatic replacement unavailable · copy and paste",
             "Automatic expansion needs attention",
+            "Automatic expansion is not turned on yet",
         ]
         .iter()
         .any(|state| guide_semantics.contains(*state)),
@@ -2649,7 +2675,10 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     assert!(!guide_semantics.contains("Verified working: yes"));
     // The copy-and-paste fallback is always offered until a real test passes.
     assert!(guide_semantics.contains("Use Quick Picker (copy & paste)"));
-    assert!(guide_semantics.contains("Use Ctrl+Alt+Space"));
+    // The optional picker shortcut lives in its collapsed section, not
+    // beside the setup actions.
+    assert!(!guide_semantics.contains("Use Ctrl+Alt+Space"));
+    assert!(guide_semantics.contains("Open snippets from any app (optional)"));
     assert!(guide_semantics.contains("Skip setup guide"));
     // Technical detail sits behind one collapsed section.
     assert!(guide_semantics.contains("Troubleshooting details"));
