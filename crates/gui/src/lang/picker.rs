@@ -14,12 +14,12 @@ impl Strings {
             (R::TypesDirectly, En) => "Quick Picker: types",
             (R::TypesDirectly, De) => "Schnellwähler: tippt",
             (R::TypesDirectly, Id) => "Picker: mengetik",
-            (R::Copies(_), En) => "Quick Picker: copies",
-            (R::Copies(_), De) => "Schnellwähler: kopiert",
-            (R::Copies(_), Id) => "Picker: menyalin",
-            (R::Unavailable(_), En) => "Quick Picker: off",
-            (R::Unavailable(_), De) => "Schnellwähler: aus",
-            (R::Unavailable(_), Id) => "Picker: mati",
+            (R::Copies(_), En) => "Quick Picker ready",
+            (R::Copies(_), De) => "Schnellwähler bereit",
+            (R::Copies(_), Id) => "Quick Picker siap",
+            (R::Unavailable(_), En) => "Quick Picker unavailable",
+            (R::Unavailable(_), De) => "Schnellwähler nicht verfügbar",
+            (R::Unavailable(_), Id) => "Quick Picker tidak tersedia",
         }
     }
 
