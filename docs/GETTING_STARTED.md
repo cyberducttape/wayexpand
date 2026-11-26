@@ -49,11 +49,12 @@ awaiting test**, **Verified in the controlled test field**, and **Confirmed by
 you in the tested application**. Each result applies only to the tested field
 and session.
 
-If no automatic route is available, choose **Use Quick Picker to finish** in
-the guide. This opens copy-only mode, closes first run, and records that choice
-without claiming automatic expansion was verified. Choose a snippet, switch to
-the target application, and paste it yourself. It does not enable raw capture
-or attempt insertion. You can reopen the guide later from the menu.
+If no automatic route is available, or you prefer manual paste, choose **Use
+Quick Picker to finish** in the guide. This opens copy-only mode, closes first
+run, and records that choice without claiming automatic expansion was verified.
+Choose a snippet, switch to the target application, and paste it yourself. It
+does not enable raw capture or attempt insertion. You can reopen the guide
+later from the menu.
 
 ### If setup does not work
 

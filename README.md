@@ -206,8 +206,8 @@ Otherwise it copies the snippet for you to paste.
 3. **Test it** — open a plain text field in another app, press *Test in a real
    application*, switch to that field and type the trigger once within 30
    seconds. WayExpand asks whether the text appeared correctly and records
-   setup as working only when you confirm it. Until then, *Open Quick Picker*
-   copies snippets for you to paste.
+   setup as working only when you confirm it. Until then, Quick Picker copies
+   snippets for you to paste.
    If automatic expansion is unavailable or you prefer copy and paste, choose
    *Use Quick Picker to finish*. The guide closes and records the copy-only
    choice without marking automatic expansion as verified.

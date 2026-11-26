@@ -1,7 +1,7 @@
 //! What first-run setup actually established, kept across restarts.
 //!
-//! `gui-prefs.toml` records only that the guide was finished or skipped. This
-//! separate file (`gui-setup.toml`, owner-only) records the outcome and
+//! `gui-prefs.toml` records only whether the guide was finished or skipped.
+//! This separate file (`gui-setup.toml`, owner-only) records the outcome and
 //! evidence source: whether a controlled client observed exact output, the
 //! user confirmed it visually, the user chose copy-and-paste, or the guide was
 //! skipped. A verification keeps the application, typing route, configuration
