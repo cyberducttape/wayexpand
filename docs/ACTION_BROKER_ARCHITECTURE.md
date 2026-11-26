@@ -370,6 +370,41 @@ boundaries against malicious same-UID software. The polkit check adds a fresh,
 action-specific user-consent gate; it does not provide automatic trusted-app
 identification.
 
+### Named capability postures
+
+Actions may optionally select a named capability posture. These profiles are
+opt-in and fail validation unless the action has a minimal sandbox and direct
+network socket denial:
+
+```toml
+[actions."generate-text"]
+program = "/opt/wayexpand/bin/generator"
+capability_profile = "text-generation"
+
+[actions."generate-text".sandbox]
+runtime_profile = "minimal"
+read_paths = ["/opt/wayexpand/share/model"]
+deny_network = true
+
+[actions."local-report"]
+program = "/usr/bin/report-tool"
+capability_profile = "local-diagnostics"
+
+[actions."local-report".sandbox]
+runtime_profile = "minimal"
+read_paths = ["/var/log/my-service"]
+deny_network = true
+deny_devices = true
+```
+
+`text-generation` cannot grant write paths. `local-diagnostics` requires
+explicit read paths; any write paths remain individually configured. These
+labels select a narrow per-action posture; they do not claim isolation from
+same-UID processes or indirect Unix-socket proxying. Network-enabled remote
+diagnostics and deployment profiles are not supported by this packaged runner.
+They need a separately isolated execution service and scoped credentials.
+Basic text expansion remains independent of these optional profiles.
+
 The broker socket is created only in a broker-user-owned private directory
 (no group or other permissions). The broker executable also sets `umask(0077)`
 before creating its Tokio runtime. Keep this requirement for manual launches

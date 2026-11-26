@@ -1041,6 +1041,7 @@ mod tests {
         config.actions.insert(
             "print-value".into(),
             ActionConfig {
+                capability_profile: None,
                 parameters: [(
                     "value".into(),
                     crate::config::ActionParameter {
@@ -1102,6 +1103,7 @@ mod tests {
         config.actions.insert(
             "restricted-cat".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: Some(crate::config::ActionSandbox::default()),
                 program: "/usr/bin/cat".to_string(),
@@ -1180,6 +1182,7 @@ mod tests {
         config.actions.insert(
             "minimal-runtime-probe".into(),
             ActionConfig {
+                capability_profile: None,
                 program: executable.to_string_lossy().into_owned(),
                 args: vec![
                     "--exact".into(),
@@ -1289,6 +1292,7 @@ mod tests {
         config.actions.insert(
             "network-probe".into(),
             ActionConfig {
+                capability_profile: None,
                 program: executable.to_string_lossy().into_owned(),
                 args: vec![
                     "--exact".into(),
@@ -1362,6 +1366,7 @@ mod tests {
         config.actions.insert(
             "restricted-touch".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: Some(crate::config::ActionSandbox {
                     read_paths: vec![],
@@ -1425,6 +1430,7 @@ mod tests {
         config.actions.insert(
             "action".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: program.to_string_lossy().into_owned(),
@@ -1467,6 +1473,7 @@ mod tests {
         config.actions.insert(
             "disabled".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/echo".to_string(),
@@ -1523,6 +1530,7 @@ mod tests {
         config.actions.insert(
             "sleeper".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/sleep".to_string(),
@@ -1572,6 +1580,7 @@ mod tests {
         config.actions.insert(
             "holds-output".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/sh".to_string(),
@@ -1656,6 +1665,7 @@ mod tests {
         config.actions.insert(
             "echo".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/echo".to_string(),
@@ -1694,6 +1704,7 @@ mod tests {
         config.actions.insert(
             "stream".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/sh".to_string(),
@@ -1771,6 +1782,7 @@ mod tests {
         config.actions.insert(
             "delayed-side-effect".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: HashMap::new(),
                 sandbox: None,
                 program: "/bin/sh".to_string(),
@@ -1859,6 +1871,7 @@ mod tests {
         config.actions.insert(
             "marker".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: HashMap::new(),
                 sandbox: None,
                 program: program.display().to_string(),
@@ -1908,6 +1921,7 @@ mod tests {
         config.actions.insert(
             "report-stdout".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/sh".to_string(),
@@ -1952,6 +1966,7 @@ mod tests {
         config.actions.insert(
             "true".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/true".to_string(),
@@ -2140,6 +2155,7 @@ mod tests {
         config.actions.insert(
             "print-env".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/usr/bin/env".to_string(),
@@ -2185,6 +2201,7 @@ mod tests {
         config.actions.insert(
             "print-env".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/usr/bin/env".to_string(),
@@ -2237,6 +2254,7 @@ mod tests {
         config.actions.insert(
             "noisy".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/sh".to_string(),

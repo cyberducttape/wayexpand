@@ -497,6 +497,7 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
             let state=services.state(service);
             serde_json::json!({"unit":service.unit(),"installed":state.installed,"enabled":state.enabled,"active":state.active,"failed":state.failed})
         }).collect::<Vec<_>>(),
+        "action_broker_resources":crate::services::broker_resource_headroom(),
         "output_tested":false,
         "trigger_explanation":trigger_explanation,
         "ready":ready,

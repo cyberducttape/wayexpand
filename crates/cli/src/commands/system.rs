@@ -636,6 +636,7 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
             .ok()
             .as_ref(),
     );
+    print_action_broker_resource_headroom();
     let evdev_consent_ok = crate::doctor::backends::print_evdev_consent_diagnostics();
     let capture_ready = print_backend_diagnostics(true);
     print_capabilities_diagnostics();
@@ -650,6 +651,48 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         bail!("doctor found configuration, runtime, or backend problems; follow the failed check's Next guidance above");
     }
     Ok(())
+}
+
+fn print_action_broker_resource_headroom() {
+    let report = crate::services::broker_resource_headroom();
+    if report["available"].as_bool() != Some(true) {
+        println!(
+            "Action Broker resource headroom: unavailable (systemd user manager not responding)"
+        );
+        return;
+    }
+    let quantity = |name: &str, unit: &str| {
+        let current = report[name]["current"].as_u64();
+        let limit = report[name]["limit"].as_u64();
+        let remaining = report[name]["remaining"].as_u64();
+        match (current, limit, remaining) {
+            (Some(current), Some(limit), Some(remaining)) if unit == "MiB" => format!(
+                "{} {unit} current / {} {unit} limit ({} {unit} remaining)",
+                current / (1024 * 1024),
+                limit / (1024 * 1024),
+                remaining / (1024 * 1024)
+            ),
+            (Some(current), Some(limit), Some(remaining)) => {
+                format!("{current} / {limit} ({remaining} remaining)")
+            }
+            _ => "unavailable".into(),
+        }
+    };
+    println!("Action Broker resource headroom:");
+    println!("  Memory: {}", quantity("memory_bytes", "MiB"));
+    println!("  Tasks: {}", quantity("tasks", "count"));
+    println!("  Open files: {}", quantity("open_files", "count"));
+    if let Some(causes) = report["failure_cause_hints"]
+        .as_array()
+        .filter(|items| !items.is_empty())
+    {
+        let causes = causes
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("  Recent resource failure signatures: {causes}");
+    }
 }
 
 pub(crate) fn policy_command(mut args: Args) -> Result<()> {
