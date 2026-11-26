@@ -39,6 +39,12 @@ pub struct PackManifest {
     pub version: String,
     pub name: String,
     pub publisher: String,
+    /// SPDX license expression for the snippet content and documentation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    /// Human-readable content credit or provenance statement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<String>,
     #[serde(default)]
     pub description: String,
     /// Oldest WayExpand version that understands this pack.
@@ -372,6 +378,19 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
         }
         if maintainer.chars().any(char::is_control) {
             return Err(PackError::ControlCharacters("maintainer"));
+        }
+    }
+    for (field, value, max_chars) in [
+        ("license", manifest.license.as_deref(), 128),
+        ("attribution", manifest.attribution.as_deref(), 256),
+    ] {
+        if let Some(value) = value {
+            if value.trim().is_empty() || value.chars().count() > max_chars {
+                return Err(PackError::EmptyField(field));
+            }
+            if value.chars().any(char::is_control) {
+                return Err(PackError::ControlCharacters(field));
+            }
         }
     }
     if let Some(compatibility) = &manifest.compatibility {

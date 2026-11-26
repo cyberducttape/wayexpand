@@ -1,0 +1,1 @@
+grep -HnE '^[[:space:]]*(slowlog|request_slowlog_timeout|pm\.status_path)[[:space:]]*=' /etc/php/*/fpm/pool.d/*.conf /etc/php-fpm.d/*.conf 2>/dev/null || true

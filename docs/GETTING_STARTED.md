@@ -360,8 +360,11 @@ collide with any other trigger.
 
 **Local usage statistics:** `wayexpand stats` shows how many expansions you
 used recently, keystrokes avoided, your most-used snippets, snippets unused for
-90 days, and triggers likely to fire by accident (for example plain words in
-immediate mode). The daemon records only snippet IDs, counts, and dates, never
+90 days, identical static replacement text, and triggers likely to fire by
+accident (for example plain words in immediate mode). Duplicate-content
+groups exclude templates and command-backed snippets; they flag identical
+text for review and do not imply that app-scoped entries conflict. The daemon
+records only snippet IDs, counts, and dates, never
 text, in `usage-stats.json` next to your configuration; nothing leaves your
 machine. `wayexpand stats --clear` deletes it, and
 `[settings] usage_stats = false` stops recording. If a daemon clear request

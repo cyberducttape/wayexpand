@@ -208,6 +208,19 @@ fn lint_pack(
     );
     add_check(
         &mut checks,
+        "license and attribution",
+        manifest
+            .license
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty())
+            && manifest
+                .attribution
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty()),
+        "license and attribution metadata are required for reviewed distribution",
+    );
+    add_check(
+        &mut checks,
         "compatibility",
         manifest.compatibility.is_some(),
         "shell, platform, and tool compatibility metadata is required",

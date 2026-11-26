@@ -857,10 +857,12 @@ fn pack_matches_query(inspection: &wayexpand_core::PackInspection, query: &str) 
     }
     let manifest = &inspection.manifest;
     format!(
-        "{} {} {} {} {} {}",
+        "{} {} {} {} {} {} {} {}",
         manifest.id,
         manifest.name,
         manifest.publisher,
+        manifest.license.as_deref().unwrap_or_default(),
+        manifest.attribution.as_deref().unwrap_or_default(),
         manifest.description,
         manifest.version,
         inspection.required_capabilities.join(" ")
@@ -971,6 +973,8 @@ pub(crate) fn search_pack_catalog(
             "version": manifest.version,
             "name": manifest.name,
             "publisher": manifest.publisher,
+            "license": &manifest.license,
+            "attribution": &manifest.attribution,
             "maintainer": &manifest.maintainer,
             "description": manifest.description,
             "compatibility": &manifest.compatibility,
@@ -1034,6 +1038,11 @@ pub(crate) fn search_pack_catalog(
                 pack["name"].as_str().unwrap_or("unknown"),
                 pack["publisher"].as_str().unwrap_or("unknown"),
                 signature_label
+            );
+            println!(
+                "  license: {}; attribution: {}",
+                pack["license"].as_str().unwrap_or("unspecified"),
+                pack["attribution"].as_str().unwrap_or("unspecified")
             );
             let capabilities = pack["required_capabilities"]
                 .as_array()
@@ -1129,6 +1138,8 @@ fn installed_pack_report() -> Result<Vec<serde_json::Value>> {
                 "id": inspection.manifest.id,
                 "name": inspection.manifest.name,
                 "version": inspection.manifest.version,
+                "license": inspection.manifest.license,
+                "attribution": inspection.manifest.attribution,
                 "path": path,
                 "review": inspection.manifest.review.map(|review| format!("{} ({})", review.reviewed_by, review.reviewed_at)),
                 "expansions": inspection.expansion_count,
@@ -2318,6 +2329,22 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
             );
             println!("id: {}", inspection.manifest.id);
             println!("publisher: {}", inspection.manifest.publisher);
+            println!(
+                "license: {}",
+                inspection
+                    .manifest
+                    .license
+                    .as_deref()
+                    .unwrap_or("unspecified")
+            );
+            println!(
+                "attribution: {}",
+                inspection
+                    .manifest
+                    .attribution
+                    .as_deref()
+                    .unwrap_or("unspecified")
+            );
             if let Some(maintainer) = &inspection.manifest.maintainer {
                 println!("maintainer: {maintainer}");
             }
@@ -2766,6 +2793,15 @@ pub(crate) fn stats_command(args: Args) -> Result<()> {
         println!("\n{} trigger warning(s):", report.trigger_risks.len());
         for risk in &report.trigger_risks {
             println!("  {} — {}", risk.trigger, risk.reason);
+        }
+    }
+    if !report.duplicate_content.is_empty() {
+        println!(
+            "\n{} groups of identical static content:",
+            report.duplicate_content.len()
+        );
+        for triggers in &report.duplicate_content {
+            println!("  {}", triggers.join(", "));
         }
     }
     println!(

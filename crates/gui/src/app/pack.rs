@@ -266,6 +266,11 @@ impl GuiApp {
                 {
                     ui.label(self.strings.pack_maintainer(maintainer));
                 }
+                ui.label(self.strings.pack_license(json_string(&pack, "license")));
+                ui.label(
+                    self.strings
+                        .pack_attribution(json_string(&pack, "attribution")),
+                );
                 if let Some(compatibility) =
                     pack.get("compatibility").filter(|value| value.is_object())
                 {
@@ -371,6 +376,11 @@ impl GuiApp {
         {
             ui.label(self.strings.pack_maintainer(maintainer));
         }
+        ui.label(self.strings.pack_license(json_string(manifest, "license")));
+        ui.label(
+            self.strings
+                .pack_attribution(json_string(manifest, "attribution")),
+        );
         if let Some(compatibility) = manifest
             .get("compatibility")
             .filter(|value| value.is_object())
@@ -761,7 +771,15 @@ fn pack_content_is_complete(
     let Some(command_count) = details["commands"].as_u64() else {
         return false;
     };
-    let manifest_fields = ["id", "version", "name", "publisher", "description"];
+    let manifest_fields = [
+        "id",
+        "version",
+        "name",
+        "publisher",
+        "license",
+        "attribution",
+        "description",
+    ];
     let Some(capabilities) = details["required_capabilities"].as_array() else {
         return false;
     };
@@ -1290,6 +1308,8 @@ mod tests {
                     "version": "1.0.0",
                     "name": "Example",
                     "publisher": "WayExpand",
+                    "license": "MIT",
+                    "attribution": "WayExpand contributors",
                     "description": "Reviewed fixture"
                 },
                 "fingerprint": "a".repeat(64),
@@ -1442,6 +1462,8 @@ mod tests {
             "version": "1.2.0",
             "name": "Linux Operations",
             "publisher": "Example Team",
+                "license": "MIT",
+                "attribution": "Example Team",
             "description": "Reviewed commands and replies",
             "required_capabilities": ["forms"],
             "allowed_actions": [],
@@ -1501,6 +1523,8 @@ mod tests {
                 "version": "1.0.0",
                 "name": "Example",
                 "publisher": "WayExpand",
+                    "license": "MIT",
+                    "attribution": "WayExpand contributors",
                 "description": "Reviewed fixture"
             },
             "fingerprint": "a".repeat(64),
@@ -1540,6 +1564,8 @@ mod tests {
                 "version": "1.0.0",
                 "name": "Example",
                 "publisher": "WayExpand",
+                    "license": "MIT",
+                    "attribution": "WayExpand contributors",
                 "description": "Reviewed fixture"
             },
             "fingerprint": "a".repeat(64),

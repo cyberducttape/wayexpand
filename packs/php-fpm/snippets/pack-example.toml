@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;php-fpm-pack-example"
+description = "Reviewed pack example output: PHP-FPM Operations"
+category = "PHP-FPM Operations"
+tags = ["example", "reviewed", "read-only"]
+replacement = "systemctl status --no-pager -- php8.3-fpm.service"

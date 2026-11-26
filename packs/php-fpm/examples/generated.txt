@@ -1,0 +1,1 @@
+systemctl status --no-pager -- php8.3-fpm.service

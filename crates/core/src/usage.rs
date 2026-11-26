@@ -406,6 +406,7 @@ impl UsageStats {
             top,
             unused_90_days: unused,
             trigger_risks: trigger_risks(config),
+            duplicate_content: duplicate_static_content(config),
         }
     }
 }
@@ -585,6 +586,33 @@ pub struct UsageReport {
     /// Enabled snippets never used, or not used in 90 days.
     pub unused_90_days: Vec<String>,
     pub trigger_risks: Vec<TriggerRisk>,
+    /// Enabled static snippets with identical replacement text. Templates and
+    /// command-backed snippets are excluded because their output is dynamic.
+    pub duplicate_content: Vec<Vec<String>>,
+}
+
+fn duplicate_static_content(config: &Config) -> Vec<Vec<String>> {
+    let mut by_content: std::collections::HashMap<&str, Vec<String>> =
+        std::collections::HashMap::new();
+    for expansion in config.expansion.iter().filter(|expansion| {
+        expansion.is_keyboard_matchable()
+            && expansion.command.is_none()
+            && !expansion.replacement.contains("{{")
+    }) {
+        by_content
+            .entry(&expansion.replacement)
+            .or_default()
+            .push(expansion.trigger.clone());
+    }
+    let mut duplicates: Vec<Vec<String>> = by_content
+        .into_values()
+        .filter(|triggers| triggers.len() > 1)
+        .collect();
+    for triggers in &mut duplicates {
+        triggers.sort();
+    }
+    duplicates.sort();
+    duplicates
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -719,6 +747,22 @@ mod tests {
         assert!(trigger_risks(&overlapping)
             .iter()
             .any(|risk| risk.trigger == ":mail" && risk.reason.contains(":mail-signature")));
+    }
+
+    #[test]
+    fn duplicate_content_reports_only_identical_static_enabled_snippets() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = ':one'\nreplacement = 'same text'\n\n\
+             [[expansion]]\ntrigger = ':two'\nreplacement = 'same text'\n\n\
+             [[expansion]]\ntrigger = ':dynamic'\nreplacement = 'same {{local_date}}'\n\n\
+             [[expansion]]\ntrigger = ':disabled'\nreplacement = 'same text'\nenabled = false\n\n\
+             [[expansion]]\ntrigger = ':command'\nreplacement = 'same text'\ncommand = { program = '/usr/bin/printf', args = ['dynamic'] }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            duplicate_static_content(&config),
+            vec![vec![":one".to_owned(), ":two".to_owned()]]
+        );
     }
 
     #[test]

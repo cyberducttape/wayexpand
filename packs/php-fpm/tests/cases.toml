@@ -1,0 +1,28 @@
+format_version = 1
+
+[[case]]
+trigger = ";;php-fpm-pack-example"
+expected_output = "examples/generated.txt"
+
+[[case]]
+trigger = ";fpmcheck"
+expected_output = "examples/fpmcheck.txt"
+values = { "field:service" = "php8.3-fpm.service", "field:since" = "30 minutes ago", "field:lines" = "100" }
+
+[[case]]
+trigger = ";fpmslow"
+expected_output = "examples/fpmslow.txt"
+
+[[case]]
+trigger = ";fpmram"
+expected_output = "examples/fpmram.txt"
+
+[[case]]
+trigger = ";fpmstatus"
+expected_output = "examples/fpmstatus.txt"
+values = { "field:url" = "http://127.0.0.1/fpm-status" }
+
+[[case]]
+trigger = ";fpmrestart"
+expected_output = "examples/fpmrestart.txt"
+values = { "field:service" = "php8.3-fpm.service" }
