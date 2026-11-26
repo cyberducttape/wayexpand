@@ -1263,6 +1263,12 @@ impl GuiApp {
     /// row of the editor's scroll area so the primary action stays on screen
     /// however far the snippet's replacement text scrolls.
     pub(crate) fn render_editor_actions(&mut self, root: &mut egui::Ui, palette: &Palette) {
+        // The first-run guide owns this workspace until the user continues.
+        // Keep ordinary editing actions (especially Delete for the harmless
+        // tutorial snippet) out of that flow, and give the guide more room.
+        if self.onboarding_visible && !self.new_draft {
+            return;
+        }
         if self.selected_index().is_none() && !self.new_draft {
             return;
         }
