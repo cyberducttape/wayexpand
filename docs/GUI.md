@@ -637,7 +637,7 @@ CyberDuctTape as the example organization:
 ```sh
 export WAYEXPAND_GUI_SCREENSHOT_PACK=terminal_blue
 : > /tmp/wayexpand-first-run.toml && chmod 600 /tmp/wayexpand-first-run.toml
-WAYEXPAND_GUI_SCREENSHOT_ONBOARDING=1 \
+WAYEXPAND_GUI_SCREENSHOT_ONBOARDING=1 WAYEXPAND_GUI_SCREENSHOT_INSTALLED=1 \
     scripts/gui-screenshot.sh /tmp/wayexpand-first-run.toml \
     docs/images/wayexpand-first-run.png 1180x780
 WAYEXPAND_GUI_SCREENSHOT_DAEMON=1 WAYEXPAND_GUI_SCREENSHOT_VIEW=preview \
@@ -649,7 +649,7 @@ WAYEXPAND_GUI_SCREENSHOT_DAEMON=1 WAYEXPAND_GUI_SCREENSHOT_PICKER=1 \
 scripts/make-social-preview.sh
 ```
 
-![WayExpand's first-run guide with automatic setup needing attention and Quick Picker ready for copy and paste](images/wayexpand-first-run.png)
+![WayExpand's first-run guide on a fresh install: automatic expansion not turned on yet, one Turn on WayExpand button, and the example snippet ready](images/wayexpand-first-run.png)
 
 ![WayExpand's editor with the Matcher preview expanding a support reply](images/wayexpand-editor-try-it-live.png)
 

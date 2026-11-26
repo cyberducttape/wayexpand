@@ -1757,14 +1757,16 @@ impl GuiApp {
             }
             ui.add_space(12.0);
             ui.horizontal(|ui| {
+                let ready = (!self.setup_system_integration_required
+                    || self.setup_system_integration_acknowledged)
+                    && self.setup_consent_acknowledged
+                    && self.setup_task.is_none();
+                let palette = Palette::for_pack(self.colorpack, self.dark_mode);
                 if ui
-                    .add_enabled(
-                        (!self.setup_system_integration_required
-                            || self.setup_system_integration_acknowledged)
-                            && self.setup_consent_acknowledged
-                            && self.setup_task.is_none(),
-                        egui::Button::new(self.strings.setup_continue()),
-                    )
+                    .add_enabled_ui(ready, |ui| {
+                        theme::primary_button(ui, &palette, self.strings.setup_continue())
+                    })
+                    .inner
                     .clicked()
                 {
                     self.setup_consent_open = false;

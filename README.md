@@ -192,7 +192,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Your first minute
 
-![WayExpand's first-run guide showing the ready example snippet, automatic setup status, and copy-only Quick Picker option](docs/images/wayexpand-first-run.png)
+![WayExpand's first-run guide on a fresh install: one Turn on WayExpand button, the ready example snippet, and the copy-only Quick Picker option](docs/images/wayexpand-first-run.png)
 
 Quick Picker opens across supported sessions, but it inserts directly only
 when the route can verify the destination and supports atomic insertion.

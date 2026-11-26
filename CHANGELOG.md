@@ -12,7 +12,12 @@ All notable changes to WayExpand are documented here.
   example the guide adds by itself is no longer offered as "Undo (1)". The
   optional picker shortcut button moved into its collapsed section, the
   workspace switcher waits until the guide is closed, and step 1 no longer
-  says "Checking integration support" after the check has finished.
+  says "Checking integration support" after the check has finished. Before
+  WayExpand is turned on, the guide's headline reads "Automatic expansion is
+  not turned on yet" instead of a warning that it "needs attention", step 1
+  offers only *Turn on WayExpand*, and the setup dialog's *Continue setup* is
+  the highlighted button. `scripts/gui-screenshot.sh` gains
+  `WAYEXPAND_GUI_SCREENSHOT_INSTALLED=1` to render that fresh-install state.
   `wayexpand setup` shows full detail only for the route it asks you to
   accept (`explain-backend` lists the rest) and explains the compatibility
   modes only if you decline it. On KDE, `doctor`, `setup --check` and `why`

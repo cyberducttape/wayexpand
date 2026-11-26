@@ -694,6 +694,14 @@ impl GuiApp {
             .filter(|major| !major.is_empty() && major.chars().all(|ch| ch.is_ascii_digit()))
             .map(str::to_owned);
 
+        // Nothing has failed before a new user turns WayExpand on, so that
+        // state reads as a neutral next step rather than a problem.
+        let not_turned_on = !checking
+            && !daemon_running
+            && !ibus_only
+            && self
+                .current_next_step()
+                .is_none_or(|(problem, _)| problem != super::Problem::InstallationIncomplete);
         let compact_first_run = ui.available_width() < 400.0;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -768,18 +776,24 @@ impl GuiApp {
                         ui.label(
                             RichText::new(if setup_check_pending {
                                 self.strings.first_run_checking()
+                            } else if not_turned_on && outcome == FirstRunOutcome::SetupIncomplete {
+                                self.strings.outcome_not_turned_on()
                             } else {
                                 first_run_outcome_label(&self.strings, outcome)
                             })
                             .strong()
-                            .color(if setup_check_pending {
-                                palette.muted
-                            } else {
-                                match outcome {
-                                    FirstRunOutcome::WorkingInTestedApplication => palette.success,
-                                    _ => palette.warning,
-                                }
-                            }),
+                            .color(
+                                if setup_check_pending || not_turned_on {
+                                    palette.muted
+                                } else {
+                                    match outcome {
+                                        FirstRunOutcome::WorkingInTestedApplication => {
+                                            palette.success
+                                        }
+                                        _ => palette.warning,
+                                    }
+                                },
+                            ),
                         );
                         if !self.config.expansion.is_empty() && picker_copy_allowed {
                             // Copy and paste is the clear next action only
@@ -964,6 +978,7 @@ impl GuiApp {
                             }
                         }
                         if !route_ready
+                            && !not_turned_on
                             && theme::secondary_button(
                                 ui,
                                 palette,
