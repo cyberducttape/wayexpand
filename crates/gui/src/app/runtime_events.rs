@@ -106,9 +106,15 @@ impl GuiApp {
                             }
                             Err(error) => {
                                 self.daemon_reachable = Some(false);
-                                self.status = previous_status.with_caveat(
-                                    self.strings.status_daemon_not_reloaded(error.to_string()),
-                                )
+                                self.status = if self.onboarding_visible
+                                    && previous_status.is_success()
+                                {
+                                    Status::success(self.strings.onboarding_saved_for_picker())
+                                } else {
+                                    previous_status.with_caveat(
+                                        self.strings.status_daemon_not_reloaded(error.to_string()),
+                                    )
+                                };
                             }
                         },
                         runtime::Operation::Pause { paused } => match result {

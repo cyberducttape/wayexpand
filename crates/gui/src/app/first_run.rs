@@ -123,13 +123,25 @@ pub(super) fn desktop_testable(expansion: &ExpansionConfig) -> bool {
 }
 
 /// The harmless tutorial snippet the guide can create for the test.
+fn is_onboarding_snippet(expansion: &ExpansionConfig) -> bool {
+    desktop_testable(expansion)
+        && expansion.replacement == ONBOARDING_REPLACEMENT
+        && expansion.match_mode == MatchMode::Immediate
+        && expansion.tags.iter().any(|tag| tag == "tutorial")
+}
+
 fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
-    config.expansion.iter().find(|expansion| {
-        desktop_testable(expansion)
-            && expansion.replacement == ONBOARDING_REPLACEMENT
-            && expansion.match_mode == MatchMode::Immediate
-            && expansion.tags.iter().any(|tag| tag == "tutorial")
-    })
+    config
+        .expansion
+        .iter()
+        .find(|expansion| is_onboarding_snippet(expansion))
+}
+
+fn has_user_library_snippets(config: &Config) -> bool {
+    config
+        .expansion
+        .iter()
+        .any(|expansion| !is_onboarding_snippet(expansion))
 }
 
 /// Only the dedicated harmless tutorial is used for the automatic first-run
@@ -736,13 +748,18 @@ impl GuiApp {
                             }),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if !self.config.expansion.is_empty()
+                                && ui.button(self.strings.open_quick_picker_copy()).clicked()
+                            {
+                                self.open_copy_only_picker();
+                            }
                             if ui.small_button(self.strings.onboarding_defer()).clicked() {
                                 self.defer_onboarding();
                             }
                             // Someone who already uses WayExpand (an imported
                             // library, another machine) can dismiss the guide
                             // for good; this never marks anything verified.
-                            if !self.config.expansion.is_empty()
+                            if has_user_library_snippets(&self.config)
                                 && ui.small_button(self.strings.onboarding_skip()).clicked()
                             {
                                 self.skip_onboarding();
@@ -1044,14 +1061,11 @@ impl GuiApp {
                         ),
                     );
                     ui.indent("first_run_test", |ui| {
-                        let mut offer_picker =
-                            self.config.expansion.iter().any(|entry| entry.enabled);
                         if matches!(
                             outcome,
                             FirstRunOutcome::WorkingInTestedApplication
                                 | FirstRunOutcome::UserConfirmedInTestedApplication
                         ) {
-                            offer_picker = false;
                             let saved_application = self
                                 .verification_status()
                                 .filter(|(_, staleness)| staleness.is_none())
@@ -1123,10 +1137,6 @@ impl GuiApp {
                             } else if ui.link(self.strings.first_run_try_inside()).clicked() {
                                 self.open_onboarding_matcher_preview();
                             }
-                        }
-                        if offer_picker && ui.link(self.strings.open_quick_picker_copy()).clicked()
-                        {
-                            self.open_copy_only_picker();
                         }
                         if self.onboarding_show_troubleshooting {
                             ui.add_space(8.0);
