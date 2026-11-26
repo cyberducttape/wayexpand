@@ -752,21 +752,15 @@ impl GuiApp {
                                 }
                             }),
                         );
-                        let shortcut = self
-                            .picker_shortcut
-                            .as_ref()
-                            .and_then(|shortcut| shortcut.keys.as_ref());
                         // Shortcut status arrives with the first asynchronous
                         // diagnostics snapshot. Do not invite a user to set a
-                        // shortcut during that brief unknown state; the
-                        // Quick Picker copy path below already works without
-                        // a global shortcut.
+                        // shortcut until the desktop explicitly reports that
+                        // setting one is supported and none is configured.
+                        // The Quick Picker copy path already works without it.
                         if self.diagnostics_checked_at.is_some()
-                            && shortcut.is_none()
-                            && !self
-                                .picker_shortcut
-                                .as_ref()
-                                .is_some_and(|shortcut| !shortcut.supported)
+                            && self.picker_shortcut.as_ref().is_some_and(|shortcut| {
+                                shortcut.supported && shortcut.keys.is_none()
+                            })
                             && ui
                                 .add_enabled(
                                     self.setup_task.is_none(),

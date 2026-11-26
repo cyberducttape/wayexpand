@@ -2567,6 +2567,11 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         .any(|tag| tag == "tutorial"));
     app.daemon_reachable = Some(true);
     app.route_state = Some(runtime::RouteState::Connected);
+    app.diagnostics_checked_at = Some(Instant::now());
+    app.picker_shortcut = Some(runtime::PickerShortcut {
+        supported: true,
+        keys: None,
+    });
     app.daemon_status = format!(
         "{}\ninject_atomic_replace=true\nreplacement_assurance=verified\ncompatibility_mode=off",
         current_daemon_status("source=input-method\nbackend=input-method-v2")
