@@ -748,6 +748,26 @@ impl GuiApp {
                             }),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let shortcut = self
+                                .picker_shortcut
+                                .as_ref()
+                                .and_then(|shortcut| shortcut.keys.as_ref());
+                            if shortcut.is_none()
+                                && !self
+                                    .picker_shortcut
+                                    .as_ref()
+                                    .is_some_and(|shortcut| !shortcut.supported)
+                                && ui
+                                    .add_enabled(
+                                        self.setup_task.is_none(),
+                                        egui::Button::new(
+                                            self.strings.shortcut_use_keys(DEFAULT_PICKER_SHORTCUT),
+                                        ),
+                                    )
+                                    .clicked()
+                            {
+                                self.set_picker_shortcut();
+                            }
                             if !self.config.expansion.is_empty()
                                 && ui.button(self.strings.open_quick_picker_copy()).clicked()
                             {
@@ -1192,18 +1212,6 @@ impl GuiApp {
                                     RichText::new(self.strings.shortcut_help())
                                         .color(palette.muted),
                                 );
-                                let running = self.setup_task.is_some();
-                                if ui
-                                    .add_enabled(
-                                        !running,
-                                        egui::Button::new(
-                                            self.strings.shortcut_use_keys(DEFAULT_PICKER_SHORTCUT),
-                                        ),
-                                    )
-                                    .clicked()
-                                {
-                                    self.set_picker_shortcut();
-                                }
                                 if let Some(error) = &self.picker_shortcut_error {
                                     ui.colored_label(palette.warning, error);
                                 }
