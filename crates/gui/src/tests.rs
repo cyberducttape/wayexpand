@@ -2531,6 +2531,10 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     let mut app = GuiApp::load(path.clone()).unwrap();
     app.onboarding_completed = false;
     app.onboarding_visible = true;
+    assert!(
+        !app.try_live_open,
+        "the preview should not crowd out first-run actions"
+    );
     assert!(app.config.expansion.is_empty());
     let ctx = egui::Context::default();
     ctx.enable_accesskit();

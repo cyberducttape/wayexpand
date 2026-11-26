@@ -1080,7 +1080,10 @@ impl GuiApp {
             // The in-process matcher check is useful even when a desktop
             // route is not set up yet, so make it visible in the everyday
             // workspace instead of hiding it behind an extra click.
-            try_live_open: true,
+            // Keep the primary setup steps visible on a fresh launch. The
+            // matcher preview is available on demand from the guide and
+            // stays expanded for returning users.
+            try_live_open: !onboarding_visible,
             editor_advanced: None,
             experience: GuiExperience::Everyday,
             diagnostics_details_open: false,
