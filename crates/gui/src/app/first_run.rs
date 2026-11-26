@@ -534,7 +534,18 @@ impl GuiApp {
         let picker_policy_notice = (!self.config.expansion.is_empty() && !picker_copy_allowed)
             .then(|| match picker_readiness {
                 crate::picker::PickerReadiness::TypesDirectly => {
-                    self.strings.first_run_picker_direct_shortcut().to_owned()
+                    if let Some(keys) = self
+                        .picker_shortcut
+                        .as_ref()
+                        .and_then(|shortcut| shortcut.keys.as_deref())
+                    {
+                        crate::lang::fill(
+                            self.strings.first_run_picker_direct_shortcut_with_keys(),
+                            &[&keys],
+                        )
+                    } else {
+                        self.strings.first_run_picker_direct_shortcut().to_owned()
+                    }
                 }
                 readiness => self.strings.picker_readiness_detail(readiness),
             });
