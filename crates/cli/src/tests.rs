@@ -881,6 +881,9 @@ fn status_json_matches_documented_stable_contract() {
          matcher_latency_p95_us=0\n\
          matcher_latency_p99_us=0\n\
          usage_flush_max_duration_us=25\n\
+         usage_flushes_total=12\n\
+         usage_serialized_bytes_total=8192\n\
+         usage_directory_sync_failures_total=0\n\
          usage_flush_failures_total=1\n\
          usage_queue_rejected_total=2\n\
          usage_worker_failures_total=0\n\
@@ -1045,6 +1048,9 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["command_cancelled_total"], 0);
     assert_eq!(value["command_failure_total"], 0);
     assert_eq!(value["usage_flush_max_duration_us"], 25);
+    assert_eq!(value["usage_flushes_total"], 12);
+    assert_eq!(value["usage_serialized_bytes_total"], 8192);
+    assert_eq!(value["usage_directory_sync_failures_total"], 0);
     assert_eq!(value["usage_flush_failures_total"], 1);
     assert_eq!(value["usage_queue_rejected_total"], 2);
     assert_eq!(value["clipboard_worker_threads"], 1);
@@ -1385,6 +1391,9 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "matcher_latency_p99_us",
             "window_process_identity_state",
             "usage_flush_max_duration_us",
+            "usage_flushes_total",
+            "usage_serialized_bytes_total",
+            "usage_directory_sync_failures_total",
             "usage_flush_failures_total",
             "usage_queue_rejected_total",
             "usage_worker_failures_total",

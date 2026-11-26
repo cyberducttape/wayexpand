@@ -97,8 +97,10 @@ impl Strings {
 
     pub fn snippets_count(&self, count: usize) -> String {
         match self.lang {
+            Language::English if count == 1 => "1 snippet".into(),
             Language::English => format!("{} snippets", count),
             Language::Indonesian => format!("{} cuplikan", count),
+            Language::German if count == 1 => "1 Snippet".into(),
             Language::German => format!("{} Snippets", count),
         }
     }
@@ -785,6 +787,22 @@ impl Strings {
 mod route_trust_tests {
     use super::*;
     use crate::lang::Language;
+
+    #[test]
+    fn snippet_count_uses_singular_for_the_first_run_sample() {
+        assert_eq!(
+            Strings::new(Language::English).snippets_count(1),
+            "1 snippet"
+        );
+        assert_eq!(
+            Strings::new(Language::German).snippets_count(1),
+            "1 Snippet"
+        );
+        assert_eq!(
+            Strings::new(Language::Indonesian).snippets_count(1),
+            "1 cuplikan"
+        );
+    }
 
     #[test]
     fn recommended_route_does_not_turn_unsupported_or_unknown_into_permission_errors() {

@@ -2,7 +2,7 @@
 
 ## Optional sysadmin and developer libraries
 
-The maintained catalog contains 20 optional packs. Each has a named maintainer,
+The maintained catalog contains 21 optional packs. Each has a named maintainer,
 semantic version, supported shells/platforms/tools, a risk classification, a
 review record, an example output, and an automated generated-output fixture.
 The fixtures are exercised by `wayexpand pack test`, run alongside
@@ -21,7 +21,8 @@ wayexpand pack diff wayexpand.database-operations ./packs/database-operations --
 ```
 
 `pack lint` checks structural and configuration validity, required maintainer,
-compatibility, risk, review, and verification metadata, safe fixture paths,
+license and attribution, compatibility, risk, review, and verification
+metadata, safe fixture paths,
 signatures, active organization policy admission, and operational form fields.
 In command or configuration snippets, every free-text field must use a
 context-appropriate `validate=...` rule or explicitly declare
@@ -53,6 +54,16 @@ update. Pack signatures cover the manifest, snippets, examples, and tests.
 Git commit history and the signature signer provide source provenance without
 uploading snippet content to a service.
 
+Pack search and review show the declared license and attribution. A pack must
+also disclose capabilities, compatibility, operational risk, reviewer, and
+signature status before installation. `pack lint` requires a license and
+attribution for curated distribution. Read-only commands use a `read-only`
+classification in their snippet tags; commands that can change infrastructure
+must be tagged `state-changing` and explain that WayExpand inserts text only.
+Installation remains explicit, command-backed snippets are subject to the
+existing executable-content consent policy, and WayExpand never runs inserted
+text.
+
 | Pack | Contents |
 | --- | --- |
 | `linux-administration` | Bash, SSH, systemd, and journalctl templates |
@@ -60,6 +71,7 @@ uploading snippet content to a service.
 | `kubernetes` | Explicit-context, parameterized, read-only `kubectl` inspection commands |
 | `ansible` | Playbook, inventory, and role starters with syntax checks |
 | `nginx` | Configuration checks, request probes, and server-block starters |
+| `php-fpm` | Read-only pool, slow-log, memory-estimate, and status checks; a separately tagged restart command prepared for manual review |
 | `git` | Review-first Git commands and collaborative workflow templates |
 | `customer-support` | Acknowledgements, status updates, maintenance notices, ticket resolutions |
 | `developer` | SQL, shell, and Markdown starters |

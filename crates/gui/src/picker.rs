@@ -12,6 +12,7 @@
 use std::{
     collections::HashMap,
     fs,
+    hash::{Hash, Hasher},
     io::{Read, Write},
     os::unix::{
         fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt},
@@ -433,10 +434,10 @@ fn score(query: &str, trigger: &str, description: &str) -> Option<i64> {
 }
 
 fn score_normalized(query: &str, trigger: &str, description: &str) -> Option<i64> {
-    if let Some(position) = trigger.find(query) {
+    if let Some(position) = find_char_position(trigger, query) {
         return Some(3_000 - position as i64 + i64::from(trigger == query) * 1_000);
     }
-    if let Some(position) = description.find(query) {
+    if let Some(position) = find_char_position(description, query) {
         return Some(2_000 - position as i64);
     }
     let mut gaps = 0_i64;
@@ -465,12 +466,41 @@ fn score_normalized(query: &str, trigger: &str, description: &str) -> Option<i64
     Some(1_000 - gaps.min(999))
 }
 
+fn find_char_position(text: &str, query: &str) -> Option<usize> {
+    text.find(query)
+        .map(|byte_position| text[..byte_position].chars().count())
+}
+
 #[derive(Debug, Clone)]
 struct SearchEntry {
     trigger: String,
     description: String,
     app_scope: String,
     availability: Availability,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct PreviewDependencies {
+    utc_day: bool,
+    local_day: bool,
+    second: bool,
+    host_context: bool,
+    uncached: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct PreviewKey {
+    utc_day: Option<u64>,
+    local_day: Option<String>,
+    second: Option<u64>,
+    username: Option<u64>,
+    hostname: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedPreview {
+    key: PreviewKey,
+    text: String,
 }
 
 /// Whether the picker can insert or copy a snippet, and if not, why. A
@@ -667,6 +697,57 @@ impl SearchEntry {
     }
 }
 
+fn preview_dependencies(template: &str) -> PreviewDependencies {
+    let mut dependencies = PreviewDependencies::default();
+    for name in template_variables(template) {
+        let clock = name.split(':').next().unwrap_or(name);
+        let base = clock
+            .find(['+', '-'])
+            .map_or(clock, |offset| &clock[..offset]);
+        match base {
+            "date" => dependencies.utc_day = true,
+            "local_date" => dependencies.local_day = true,
+            "time" | "datetime" | "local_time" | "local_datetime" | "unix_timestamp" => {
+                dependencies.second = true;
+            }
+            "username" | "hostname" => dependencies.host_context = true,
+            _ if name == "clipboard"
+                || name.starts_with("env:")
+                || name.starts_with("context:")
+                || name.starts_with("field:")
+                || name.starts_with("prompt:")
+                || name.starts_with("datefield:")
+                || name.starts_with("shellq:env:")
+                || name.starts_with("shellq:context:")
+                || name.starts_with("shellq:field:") =>
+            {
+                dependencies.uncached = true;
+            }
+            _ => {}
+        }
+    }
+    dependencies
+}
+
+impl PreviewDependencies {
+    fn key(self, context: &TemplateContext) -> PreviewKey {
+        let hash = |value: &str| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            value.hash(&mut hasher);
+            hasher.finish()
+        };
+        PreviewKey {
+            utc_day: self.utc_day.then_some(context.unix_timestamp / 86_400),
+            local_day: self
+                .local_day
+                .then(|| wayexpand_core::today_local_date().unwrap_or_default()),
+            second: self.second.then_some(context.unix_timestamp),
+            username: self.host_context.then(|| hash(&context.username)),
+            hostname: self.host_context.then(|| hash(&context.hostname)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FocusTarget {
     generation: u64,
@@ -688,7 +769,13 @@ pub(crate) struct PickerApp {
     search_index: Vec<SearchEntry>,
     cached_query: Option<String>,
     cached_revision: Option<ConfigRevision>,
-    preview_cache: HashMap<String, String>,
+    cached_show_unavailable: Option<bool>,
+    /// All matching candidates for the cached query, not only the visible top
+    /// results. A longer query can safely filter this set because substring
+    /// and subsequence matches are both monotonic under query extension.
+    candidate_indices: Vec<usize>,
+    preview_dependencies: Vec<PreviewDependencies>,
+    preview_cache: HashMap<String, CachedPreview>,
     last_preview_context_refresh: Instant,
     ranked_scratch: Vec<(i64, usize)>,
     result_indices: Vec<usize>,
@@ -741,6 +828,11 @@ enum InsertState {
         text: String,
         error: String,
     },
+    Uncertain {
+        trigger: String,
+        text: String,
+        error: String,
+    },
 }
 
 /// The parts of `InsertState` the picker shows, copied for one frame.
@@ -750,6 +842,11 @@ enum ShownInsertState {
         cancel_refused: bool,
     },
     Failed {
+        trigger: String,
+        error: String,
+        text: String,
+    },
+    Uncertain {
         trigger: String,
         error: String,
         text: String,
@@ -769,6 +866,11 @@ impl PickerApp {
         clipboard_fallback_allowed: bool,
         target_focus: Option<FocusTarget>,
     ) -> Self {
+        let preview_dependencies = config
+            .expansion
+            .iter()
+            .map(|expansion| preview_dependencies(&expansion.replacement))
+            .collect();
         Self {
             search_index: config
                 .expansion
@@ -786,6 +888,9 @@ impl PickerApp {
             config_revision,
             cached_query: None,
             cached_revision: None,
+            cached_show_unavailable: None,
+            candidate_indices: Vec::new(),
+            preview_dependencies,
             preview_cache: HashMap::new(),
             last_preview_context_refresh: Instant::now(),
             ranked_scratch: Vec::new(),
@@ -814,28 +919,57 @@ impl PickerApp {
     /// turned off are left out.
     fn refresh_results(&mut self) {
         let query = self.query.trim().to_lowercase();
-        if self.cached_query.as_deref() == Some(query.as_str())
-            && self.cached_revision.as_ref() == Some(&self.config_revision)
+        let same_revision = self.cached_revision.as_ref() == Some(&self.config_revision);
+        let same_visibility = self.cached_show_unavailable == Some(self.show_unavailable);
+        if self.cached_query.as_deref() == Some(query.as_str()) && same_revision && same_visibility
         {
             return;
         }
-        if self.cached_revision.as_ref() != Some(&self.config_revision) {
+        if !same_revision {
             self.preview_cache.clear();
         }
+        let incremental = same_revision
+            && same_visibility
+            && self.cached_query.as_ref().is_some_and(|previous| {
+                query.len() > previous.len() && query.starts_with(previous)
+            });
+        if !incremental {
+            self.candidate_indices.clear();
+        }
         self.ranked_scratch.clear();
-        for (index, entry) in self.search_index.iter().enumerate() {
-            if entry.availability == Availability::Hidden
-                || !self.show_unavailable && !entry.selectable()
-            {
-                continue;
-            }
-            if let Some(score) = score_normalized(&query, &entry.trigger, &entry.description) {
-                let score = if entry.selectable() {
-                    score
+        if incremental {
+            let search_index = &self.search_index;
+            let ranked_scratch = &mut self.ranked_scratch;
+            self.candidate_indices.retain(|index| {
+                let entry = &search_index[*index];
+                if let Some(score) = score_normalized(&query, &entry.trigger, &entry.description) {
+                    let score = if entry.selectable() {
+                        score
+                    } else {
+                        score - UNAVAILABLE_PENALTY
+                    };
+                    ranked_scratch.push((score, *index));
+                    true
                 } else {
-                    score - UNAVAILABLE_PENALTY
-                };
-                self.ranked_scratch.push((score, index));
+                    false
+                }
+            });
+        } else {
+            for (index, entry) in self.search_index.iter().enumerate() {
+                if entry.availability == Availability::Hidden
+                    || !self.show_unavailable && !entry.selectable()
+                {
+                    continue;
+                }
+                if let Some(score) = score_normalized(&query, &entry.trigger, &entry.description) {
+                    let score = if entry.selectable() {
+                        score
+                    } else {
+                        score - UNAVAILABLE_PENALTY
+                    };
+                    self.candidate_indices.push(index);
+                    self.ranked_scratch.push((score, index));
+                }
             }
         }
         top_ranked_into(
@@ -845,6 +979,7 @@ impl PickerApp {
         );
         self.cached_query = Some(query);
         self.cached_revision = Some(self.config_revision.clone());
+        self.cached_show_unavailable = Some(self.show_unavailable);
     }
 
     fn choose(&mut self, ctx: &egui::Context, expansion: &ExpansionConfig) {
@@ -963,10 +1098,10 @@ impl PickerApp {
             })
     }
 
-    /// Why "Copy instead" is not offered for `trigger` after a failed
-    /// insert, if it is not: organization policy, or a snippet copy-only mode
-    /// would hide (app-restricted, or reading the clipboard or a secret).
-    /// A failed insert must never widen what can reach the clipboard.
+    /// Why copying `trigger` after an unsuccessful or uncertain insert is
+    /// blocked: organization policy, or a snippet copy-only mode would hide
+    /// it (app-restricted, or reading the clipboard or a secret). A failed
+    /// insert must never widen what can reach the clipboard.
     fn fallback_copy_blocked(&self, trigger: &str) -> Option<String> {
         if !self.clipboard_fallback_allowed {
             return Some(
@@ -985,8 +1120,8 @@ impl PickerApp {
         })
     }
 
-    /// The text "Copy instead" puts on the clipboard, after the same checks
-    /// as [`Self::fallback_copy_blocked`].
+    /// The text a user explicitly chooses to copy, after the same checks as
+    /// [`Self::fallback_copy_blocked`].
     fn fallback_copy_text(&self, trigger: &str, text: &str) -> Result<String, String> {
         if let Some(reason) = self.fallback_copy_blocked(trigger) {
             return Err(reason);
@@ -1009,22 +1144,42 @@ impl PickerApp {
     /// instead of cloning it on every repaint.
     fn preview_at(&mut self, index: usize) -> String {
         if self.last_preview_context_refresh.elapsed() >= PREVIEW_CONTEXT_REFRESH {
-            let context = self.config.template_context(None);
-            if context.unix_timestamp != self.template_context.unix_timestamp {
-                self.template_context = context;
-                self.preview_cache.clear();
-            }
+            self.template_context = self.config.template_context(None);
             self.last_preview_context_refresh = Instant::now();
         }
         let expansion = &self.config.expansion[index];
         if expansion.command.is_some() {
             return self.strings.picker_review_no_execution().to_owned();
         }
-        if let Some(preview) = self.preview_cache.get(&expansion.id) {
-            return preview.clone();
+        let dependencies = self.preview_dependencies[index];
+        if !dependencies.uncached {
+            let key = dependencies.key(&self.template_context);
+            if let Some(preview) = self.preview_cache.get(&expansion.id) {
+                if preview.key == key {
+                    return preview.text.clone();
+                }
+            }
+            let preview = self.render_preview(index);
+            self.preview_cache.insert(
+                expansion.id.clone(),
+                CachedPreview {
+                    key,
+                    text: preview.clone(),
+                },
+            );
+            preview
+        } else {
+            self.render_preview(index)
         }
-        let rendered = render_template_preview(&expansion.replacement, &self.template_context, 512)
-            .unwrap_or_else(|_| "(preview unavailable)".to_owned());
+    }
+
+    fn render_preview(&self, index: usize) -> String {
+        let rendered = render_template_preview(
+            &self.config.expansion[index].replacement,
+            &self.template_context,
+            512,
+        )
+        .unwrap_or_else(|_| "(preview unavailable)".to_owned());
         let preview = rendered
             .lines()
             .next()
@@ -1032,8 +1187,6 @@ impl PickerApp {
             .chars()
             .take(90)
             .collect::<String>();
-        self.preview_cache
-            .insert(expansion.id.clone(), preview.clone());
         preview
     }
 
@@ -1063,6 +1216,14 @@ impl PickerApp {
                 self.insert_state = failed(self.strings.picker_message(&message));
                 bring_back(ctx);
             }
+            Ok(InsertOutcome::Uncertain(message)) => {
+                self.insert_state = InsertState::Uncertain {
+                    trigger,
+                    text,
+                    error: self.strings.picker_message(&message),
+                };
+                bring_back(ctx);
+            }
             Err(TryRecvError::Empty) => {
                 self.insert_state = InsertState::Waiting {
                     trigger,
@@ -1074,8 +1235,11 @@ impl PickerApp {
                 ctx.request_repaint_after(FOCUS_POLL_INTERVAL);
             }
             Err(TryRecvError::Disconnected) => {
-                self.insert_state =
-                    failed(self.strings.picker_message(&PickerMessage::WorkerStopped));
+                self.insert_state = InsertState::Uncertain {
+                    trigger,
+                    text,
+                    error: self.strings.picker_message(&PickerMessage::WorkerStopped),
+                };
                 bring_back(ctx);
             }
         }
@@ -1558,6 +1722,15 @@ impl eframe::App for PickerApp {
                         error: error.clone(),
                         text: text.clone(),
                     },
+                    InsertState::Uncertain {
+                        trigger,
+                        error,
+                        text,
+                    } => ShownInsertState::Uncertain {
+                        trigger: trigger.clone(),
+                        error: error.clone(),
+                        text: text.clone(),
+                    },
                     InsertState::Ready => ShownInsertState::Ready,
                 };
                 match &shown_state {
@@ -1624,11 +1797,49 @@ impl eframe::App for PickerApp {
                         });
                         ui.add_space(10.0);
                     }
+                    ShownInsertState::Uncertain {
+                        trigger,
+                        error,
+                        text,
+                    } => {
+                        theme::card(ui, &palette, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(
+                                RichText::new(self.strings.picker_insert_uncertain())
+                                    .strong()
+                                    .color(palette.warning),
+                            );
+                            ui.colored_label(palette.warning, error);
+                            let copy_blocked = self.fallback_copy_blocked(trigger);
+                            if let Some(reason) = &copy_blocked {
+                                ui.label(RichText::new(reason).small().color(palette.muted));
+                            }
+                            ui.horizontal(|ui| {
+                                if copy_blocked.is_none()
+                                    && ui.button(self.strings.picker_copy_after_check()).clicked()
+                                {
+                                    match self.fallback_copy_text(trigger, text) {
+                                        Ok(rendered) => {
+                                            self.copied =
+                                                Some(copy_snippet(&ctx, rendered, trigger));
+                                        }
+                                        Err(message) => fallback_error = Some(message),
+                                    }
+                                }
+                                if ui.button(self.strings.picker_cancel()).clicked() {
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                }
+                            });
+                        });
+                        ui.add_space(10.0);
+                    }
                     ShownInsertState::Ready => {}
                 }
                 if let Some(error) = fallback_error {
-                    if let InsertState::Failed { error: shown, .. } = &mut self.insert_state {
-                        *shown = error;
+                    match &mut self.insert_state {
+                        InsertState::Failed { error: shown, .. }
+                        | InsertState::Uncertain { error: shown, .. } => *shown = error,
+                        _ => {}
                     }
                 }
 
@@ -1922,8 +2133,10 @@ enum InsertOutcome {
     OutputAcknowledged,
     /// The user cancelled before anything was sent.
     Cancelled,
-    /// Nothing, or possibly part, was inserted; the message says which.
+    /// The request was refused before insertion.
     Failed(PickerMessage),
+    /// The request may have modified the target, but its outcome was lost.
+    Uncertain(PickerMessage),
 }
 
 /// Everything the picker tells the user about an insert or a copy. The
@@ -1949,6 +2162,21 @@ pub(crate) enum PickerMessage {
     LostTrack,
     Uncertain,
     NotInserted(wayexpand_core::InsertFailure),
+}
+
+impl PickerMessage {
+    fn delivery_uncertain(&self) -> bool {
+        matches!(
+            self,
+            Self::WorkerStopped
+                | Self::CallFailed(_)
+                | Self::LostContact(_)
+                | Self::UnexpectedReply(_)
+                | Self::NotConfirmed(_)
+                | Self::LostTrack
+                | Self::Uncertain
+        )
+    }
 }
 
 /// The daemon calls the insert worker makes, so tests can drive it.
@@ -2017,7 +2245,9 @@ fn wait_for_focus_and_insert(
                 }
                 let response = match daemon.insert_tracked(&current, trigger) {
                     Ok(response) => response,
-                    Err(error) => return InsertOutcome::Failed(PickerMessage::CallFailed(error)),
+                    Err(error) => {
+                        return InsertOutcome::Uncertain(PickerMessage::CallFailed(error))
+                    }
                 };
                 if let Some(id) = wayexpand_core::parse_insert_scheduled_id(&response) {
                     return wait_for_delivery(daemon, id, timing);
@@ -2050,20 +2280,23 @@ fn wait_for_delivery(
     loop {
         let response = match daemon.insert_result(id) {
             Ok(response) => response,
-            Err(error) => return InsertOutcome::Failed(PickerMessage::LostContact(error)),
+            Err(error) => return InsertOutcome::Uncertain(PickerMessage::LostContact(error)),
         };
         let Ok(state) = wayexpand_core::InsertDelivery::parse_response(&response, id) else {
-            return InsertOutcome::Failed(PickerMessage::UnexpectedReply(
+            return InsertOutcome::Uncertain(PickerMessage::UnexpectedReply(
                 response.trim_end().to_owned(),
             ));
         };
         match delivery_verdict(state) {
             Some(Ok(())) => return InsertOutcome::OutputAcknowledged,
+            Some(Err(message)) if message.delivery_uncertain() => {
+                return InsertOutcome::Uncertain(message)
+            }
             Some(Err(message)) => return InsertOutcome::Failed(message),
             None => {}
         }
         if Instant::now() >= deadline {
-            return InsertOutcome::Failed(PickerMessage::NotConfirmed(
+            return InsertOutcome::Uncertain(PickerMessage::NotConfirmed(
                 timing.delivery_timeout.as_secs(),
             ));
         }
@@ -2072,7 +2305,8 @@ fn wait_for_delivery(
 }
 
 /// What the picker does with a reported insert state: `None` keeps waiting,
-/// `Ok` closes the picker, `Err` shows the failure with "Copy instead".
+/// `Ok` closes the picker, and `Err` is classified as a definite refusal or
+/// an uncertain outcome before it is shown.
 fn delivery_verdict(
     state: Option<wayexpand_core::InsertDelivery>,
 ) -> Option<Result<(), PickerMessage>> {
@@ -2580,6 +2814,12 @@ mod tests {
     }
 
     #[test]
+    fn substring_position_uses_characters_for_ascii_and_multibyte_text() {
+        assert_eq!(score("a", "éa", ""), score("a", "xa", ""));
+        assert_eq!(score("a", "", "éa"), score("a", "", "xa"));
+    }
+
+    #[test]
     fn focus_target_parser_fails_closed_for_missing_or_empty_tokens() {
         assert_eq!(
             focus_target_from_response(
@@ -3033,6 +3273,30 @@ command = { program = "/usr/bin/systemctl", args = ["status", "nginx.service"] }
     }
 
     #[test]
+    fn ambiguous_insert_messages_have_a_distinct_uncertain_outcome() {
+        use wayexpand_core::InsertFailure;
+        for message in [
+            PickerMessage::WorkerStopped,
+            PickerMessage::CallFailed("connection lost".into()),
+            PickerMessage::LostContact("connection lost".into()),
+            PickerMessage::UnexpectedReply("unknown state".into()),
+            PickerMessage::NotConfirmed(15),
+            PickerMessage::LostTrack,
+            PickerMessage::Uncertain,
+        ] {
+            assert!(message.delivery_uncertain(), "{message:?}");
+        }
+        for message in [
+            PickerMessage::FocusNotReturned,
+            PickerMessage::Refused("refused".into()),
+            PickerMessage::OlderService,
+            PickerMessage::NotInserted(InsertFailure::NotApplied),
+        ] {
+            assert!(!message.delivery_uncertain(), "{message:?}");
+        }
+    }
+
+    #[test]
     fn every_picker_message_is_translated() {
         use crate::lang::{Language, Strings};
         use wayexpand_core::InsertFailure;
@@ -3381,6 +3645,57 @@ command = { program = "/usr/bin/systemctl", args = ["status", "nginx.service"] }
                     "{availability:?}"
                 );
             }
+        }
+
+        #[test]
+        fn clock_preview_changes_do_not_evict_static_previews() {
+            let mut app = picker(
+                "[[expansion]]\ntrigger = ':static'\nreplacement = 'Fixed text'\n\n\
+                 [[expansion]]\ntrigger = ':date'\nreplacement = '{{date}}'\n",
+                false,
+            );
+            app.template_context.unix_timestamp = 1_700_000_000;
+            app.last_preview_context_refresh = std::time::Instant::now();
+            let static_before = app.preview_at(0);
+            let date_before = app.preview_at(1);
+            assert_eq!(app.preview_cache.len(), 2);
+
+            app.template_context.unix_timestamp += 86_400;
+            app.last_preview_context_refresh = std::time::Instant::now();
+            let date_after = app.preview_at(1);
+            assert_ne!(date_before, date_after);
+            assert_eq!(app.preview_at(0), static_before);
+            assert_eq!(app.preview_cache.len(), 2);
+        }
+
+        #[test]
+        fn environment_dependent_previews_are_not_persistently_cached() {
+            let mut app = picker(
+                "[settings]\ntemplate_env = ['HOME']\n\n\
+                 [[expansion]]\ntrigger = ':env'\nreplacement = '{{env:HOME}}'\n",
+                false,
+            );
+            let id = app.config.expansion[0].id.clone();
+            let _ = app.preview_at(0);
+            assert!(!app.preview_cache.contains_key(&id));
+        }
+
+        #[test]
+        fn extending_a_query_filters_cached_candidates_without_changing_results() {
+            let mut incremental = picker(LIBRARY, false);
+            incremental.query = ";s".into();
+            incremental.refresh_results();
+            let candidates_after_first_query = incremental.candidate_indices.len();
+            assert!(candidates_after_first_query > 1);
+
+            incremental.query = ";si".into();
+            incremental.refresh_results();
+            assert!(incremental.candidate_indices.len() < candidates_after_first_query);
+
+            let mut full_scan = picker(LIBRARY, false);
+            full_scan.query = ";si".into();
+            full_scan.refresh_results();
+            assert_eq!(incremental.result_indices, full_scan.result_indices);
         }
 
         #[test]

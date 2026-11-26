@@ -249,6 +249,7 @@ fn broker_config_validation() {
     config.actions.insert(
         "valid".to_string(),
         ActionConfig {
+            capability_profile: None,
             parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/usr/bin/echo".to_string(),
@@ -281,6 +282,7 @@ fn broker_config_rejects_relative_paths_when_required() {
     config.actions.insert(
         "relative".to_string(),
         ActionConfig {
+            capability_profile: None,
             parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "echo".to_string(), // Not absolute

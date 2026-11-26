@@ -227,12 +227,12 @@ integration are running. Enter copies the snippet, and the window stays open so
 the clipboard remains available; press Esc when done. An enforced organization
 policy requiring a verified insertion target blocks this path.
 
-The main window shows which of the two applies before you open the picker: a
-second header chip reads `Quick Picker: types`, `Quick Picker: copies` or
-`Quick Picker: off` (policy forbids copying and typing is not possible), and
-its tooltip gives the reason (no running service, a typing route that cannot
-replace text in one step, or no exact window identity). It applies the same
-rule as the picker itself, using the service status and organization policy.
+The main window shows what the picker can do before you open it: its header
+chip reads `Quick Picker: types`, `Quick Picker ready` (copy and paste), or
+`Quick Picker unavailable` (policy forbids copying and typing is not possible).
+The tooltip explains why, such as no running service, a typing route that
+cannot replace text in one step, or no exact window identity. It applies the
+same rule as the picker itself, using service status and organization policy.
 
 **Snippets the picker cannot use** stay listed, greyed and after every usable
 match, with the reason in place of the preview: a command-backed snippet
@@ -249,10 +249,13 @@ desktop's shortcut settings.
 
 ### First run and one-click setup
 
-Until it is finished or skipped, the editor shows a guide with three steps and
-an optional fourth: *Connect your desktop*, *Create a snippet*, *Test it*, and
-*Open snippets from any app* (a Quick Picker shortcut). Route, permission and
-certification notes sit in a collapsed *Troubleshooting details* section.
+Until it is finished, skipped, or completed with the copy-only workflow, the
+editor shows three steps: *Prepare your desktop*, an example-snippet step, and
+*Test it*. Step two says *Your example snippet is ready* when the harmless
+example is available, and offers *Add an example snippet* if it was removed.
+The first-run header gives immediate access to Quick Picker and its
+optional shortcut. Route, permission and certification notes sit in a
+collapsed *Troubleshooting details* section.
 *Turn on WayExpand* runs `wayexpand setup --yes` in the background, which
 configures only the Recommended mode (the route planner's choice, which may be
 an experimental route such as input-method-v2 and is labelled as such) and
@@ -298,6 +301,15 @@ action, then list the facts behind the state. Other chips appear only for the Qu
 partial or uncertain output, and a service that must restart after an
 update. The ☰ menu holds the remaining actions; the profile switcher appears in
 the toolbar once profiles exist.
+
+Diagnostics includes a collapsible **Local compatibility observations**
+report. The real-application test asks for the application name and persists
+confirmed checks in `gui-setup.toml`; the report marks checks from another
+route, session, build, or configuration as needing a retest. Common desktop
+applications remain listed as *Not checked* until the user tests them. The
+report also shows route-reported password-field and layout capabilities
+separately from application results. It stores no snippet trigger or
+replacement text and is local evidence, not official certification.
 
 The `Settings` window is the single place for preferences and has two tabs:
 
@@ -634,7 +646,7 @@ WAYEXPAND_GUI_SCREENSHOT_DAEMON=1 WAYEXPAND_GUI_SCREENSHOT_PICKER=1 \
 scripts/make-social-preview.sh
 ```
 
-![WayExpand's first-run screen with the steps Connect your desktop, Create a snippet, Test it, and an optional Quick Picker shortcut](images/wayexpand-first-run.png)
+![WayExpand's first-run guide with automatic setup needing attention and Quick Picker ready for copy and paste](images/wayexpand-first-run.png)
 
 ![WayExpand's editor with the Matcher preview expanding a support reply](images/wayexpand-editor-try-it-live.png)
 

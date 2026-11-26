@@ -193,6 +193,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<(bool, Option<String
             "Cgroup cleanup reaper is within its configured backlog limit."
         },
     });
+    let action_broker_resources = crate::services::broker_resource_headroom();
     let ibus_route = crate::commands::ibus::report_json(
         &wayexpand_backend_ibus::chain::diagnose(),
         &crate::commands::ibus::RouteOverlap::from_status(daemon_status_snapshot.as_ref()),
@@ -240,6 +241,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<(bool, Option<String
             "command_cleanup": command_cleanup,
             "production_readiness": production_readiness,
             "action_broker": broker,
+            "action_broker_resources": action_broker_resources,
             "ibus": {
                 "installed": ibus_installed,
                 "status": if ibus_installed { "available to configure" } else { "not installed" },

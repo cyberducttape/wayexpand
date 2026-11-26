@@ -361,7 +361,12 @@ impl GuiApp {
                 self.remember_undo(previous);
                 // The test snippet is appended, so it is the last item.
                 self.select(self.config.expansion.len() - 1);
+                let onboarding_pref_error = self.record_onboarding_test_snippet_saved().err();
                 self.set_saved_status(Status::success(self.strings.status_created()));
+                if let Some(error) = onboarding_pref_error {
+                    self.status =
+                        Status::warning(self.strings.onboarding_test_state_save_failed(&error));
+                }
             }
             SaveIntent::Duplicated => {
                 let previous = std::mem::replace(&mut self.config, candidate);

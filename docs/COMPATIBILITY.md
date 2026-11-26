@@ -714,6 +714,9 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "matcher_latency_p95_us": 0,
   "matcher_latency_p99_us": 0,
   "usage_flush_max_duration_us": 0,
+  "usage_flushes_total": 0,
+  "usage_serialized_bytes_total": 0,
+  "usage_directory_sync_failures_total": 0,
   "usage_flush_failures_total": 0,
   "usage_queue_rejected_total": 0,
   "usage_worker_failures_total": 0,
@@ -830,6 +833,9 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `matcher_latency_dropped_total` (integer): Matcher timing samples skipped because a diagnostics snapshot held the recording lock; measurement is best-effort and never blocks input processing
 - `matcher_latency_p50_us`, `matcher_latency_p95_us`, `matcher_latency_p99_us` (integers): Nearest-rank matcher/preparation latency percentiles, excluding output injection, in microseconds
 - `usage_flush_max_duration_us` (integer): Maximum usage-statistics write duration since daemon start, in microseconds
+- `usage_flushes_total` (integer): Successful usage-statistics atomic replacements since daemon start
+- `usage_serialized_bytes_total` (integer): Total bytes serialized for successful usage-statistics replacements since daemon start
+- `usage_directory_sync_failures_total` (integer): Replacements visible after rename but not confirmed durable by a parent-directory sync
 - `usage_flush_failures_total` (integer): Usage-statistics flush attempts that failed; queued events are retained for retry while the worker remains active
 - `usage_worker_failures_total` (integer): Usage-statistics writer worker start failures or panics
 - `usage_queue_rejected_total` (integer): Usage events dropped because bounded in-memory queue limits were exceeded or the persistence worker became unavailable

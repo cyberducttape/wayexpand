@@ -1,0 +1,34 @@
+[[expansion]]
+trigger = ";fpmcheck"
+description = "Inspect PHP-FPM service state and recent unit messages (read-only)"
+category = "PHP-FPM"
+tags = ["php-fpm", "systemd", "read-only"]
+replacement = "systemctl status --no-pager -- {{shellq:service=php8.3-fpm.service|required|max=255|validate=systemd-unit}}; journalctl -u {{shellq:service}} --since {{shellq:since=30 minutes ago|required|max=80|validate=relative-time}} -n {{shellq:lines=100|required|max=5|validate=positive-integer}} --no-pager"
+
+[[expansion]]
+trigger = ";fpmslow"
+description = "Locate configured PHP-FPM slow-log and status settings (read-only)"
+category = "PHP-FPM"
+tags = ["php-fpm", "logs", "read-only"]
+replacement = "grep -HnE '^[[:space:]]*(slowlog|request_slowlog_timeout|pm\\.status_path)[[:space:]]*=' /etc/php/*/fpm/pool.d/*.conf /etc/php-fpm.d/*.conf 2>/dev/null || true"
+
+[[expansion]]
+trigger = ";fpmram"
+description = "Estimate aggregate resident memory for PHP-FPM processes (read-only; RSS may double-count shared pages)"
+category = "PHP-FPM"
+tags = ["php-fpm", "memory", "read-only", "estimate"]
+replacement = "ps -eo rss=,comm= | awk '$2 ~ /^php-fpm/ { total += $1; workers++; if (min == 0 || $1 < min) min = $1; if ($1 > max) max = $1 } END { if (!workers) { print \"No PHP-FPM processes found\"; exit } printf \"processes=%d summed_rss_mib=%.1f min_rss_mib=%.1f max_rss_mib=%.1f\\n\", workers, total/1024, min/1024, max/1024 }'"
+
+[[expansion]]
+trigger = ";fpmstatus"
+description = "Query an explicitly configured PHP-FPM status endpoint (read-only; verify access controls)"
+category = "PHP-FPM"
+tags = ["php-fpm", "http", "read-only"]
+replacement = "curl --silent --show-error --fail --max-time 5 -- {{shellq:url=http://127.0.0.1/fpm-status|required|max=2048|validate=url}}"
+
+[[expansion]]
+trigger = ";fpmrestart"
+description = "Prepare a PHP-FPM restart command for review; this changes service state when manually run"
+category = "PHP-FPM"
+tags = ["php-fpm", "systemd", "state-changing", "manual-review-required"]
+replacement = "sudo systemctl restart -- {{shellq:service=php8.3-fpm.service|required|max=255|validate=systemd-unit}}"

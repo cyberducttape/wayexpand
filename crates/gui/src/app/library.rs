@@ -101,6 +101,12 @@ impl GuiApp {
         if self.config.expansion.is_empty() && !self.new_draft {
             return;
         }
+        // The guide needs the full workspace width on compact windows. The
+        // user can leave onboarding to browse or edit the library; wider
+        // windows keep it visible beside the setup steps.
+        if self.onboarding_visible && root.available_width() < 800.0 {
+            return;
+        }
         // Proportional first-open width so a small window still leaves the
         // editor usable; the user can drag it wider afterwards.
         let default_width = (root.available_width() * 0.34).clamp(250.0, 340.0);

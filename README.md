@@ -176,9 +176,11 @@ out and back in before resuming.
 
 ### After installing
 
-Open **WayExpand** from your application menu. Its guide connects your
-desktop, makes a test snippet, and asks you to confirm one real expansion
-before it calls setup done. It never turns on raw keyboard access by itself.
+Open **WayExpand** from your application menu. Your snippet library and
+copy-and-paste Quick Picker are ready immediately. The guide also offers
+automatic expansion setup and a real-application check. The copy-only choice
+does not claim automatic typing is verified, and the guide never turns on raw
+keyboard access by itself.
 
 Installed for your user and `wayexpand` is not found in a terminal? Add
 `~/.local/bin` to PATH (put the same line in `~/.bashrc` or `~/.zshrc` to keep
@@ -190,22 +192,26 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Your first minute
 
-![WayExpand's first-run screen in the Terminal Blue color pack with the steps Connect your desktop, Create a snippet, Test it, and an optional Quick Picker shortcut](docs/images/wayexpand-first-run.png)
+![WayExpand's first-run guide showing the ready example snippet, automatic setup status, and copy-only Quick Picker option](docs/images/wayexpand-first-run.png)
 
 Quick Picker opens across supported sessions, but it inserts directly only
 when the route can verify the destination and supports atomic insertion.
 Otherwise it copies the snippet for you to paste.
 
-1. **Connect your desktop** — *Turn on WayExpand* in the GUI, or run
-   `wayexpand setup` in a terminal. Setup configures the supported input route
-   without manual IBus commands, and says what is missing if it cannot.
-2. **Create a snippet** — *Create test snippet*, write your own, or import
-   Espanso.
-3. **Test it** — open a plain text field in another app, press *Test in a real
-   application*, switch to that field and type the trigger once within 30
-   seconds. WayExpand asks whether the text appeared correctly and records
-   setup as working only when you confirm it. Until then, *Open Quick Picker*
-   copies snippets for you to paste.
+1. **Use the example now** — the guide adds a harmless `;hello` snippet when
+   you need one for the automatic expansion check. Open Quick Picker to copy
+   it and paste it into any app.
+2. **Set up automatic expansion** — choose *Turn on WayExpand* in the GUI, or
+   run `wayexpand setup` in a terminal. Setup checks the supported input route
+   without enabling raw keyboard capture by itself.
+3. **Test automatic expansion** — open a plain text field in another app,
+   press *Test in a real application*, switch to that field and type the
+   trigger once within 30 seconds. WayExpand asks whether the text appeared
+   correctly and records setup as working only when you confirm it. Until then,
+   Quick Picker copies snippets for you to paste.
+   If automatic expansion is unavailable or you prefer copy and paste, choose
+   *Use Quick Picker (copy & paste)*. The guide closes and records the copy-only
+   choice without marking automatic expansion as verified.
 4. **Open snippets from any app** (optional) — the guide gives the Quick
    Picker a shortcut, <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> unless
    that is taken. From a terminal: `wayexpand shortcut set [KEYS]`. On desktops

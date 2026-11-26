@@ -14,6 +14,10 @@ use std::{collections::HashMap, fs};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActionConfig {
+    /// Optional named capability posture. This is an enforceable policy label,
+    /// not an isolation claim; profiles require a per-action sandbox below.
+    #[serde(default)]
+    pub capability_profile: Option<ActionCapabilityProfile>,
     /// The command to execute.
     pub program: String,
 
@@ -74,6 +78,16 @@ pub struct ActionConfig {
     /// action is refused unless the running kernel can enforce the profile.
     #[serde(default)]
     pub sandbox: Option<ActionSandbox>,
+}
+
+/// Capability postures currently enforceable by the packaged broker service.
+/// Network-enabled profiles require a separately isolated runner and are not
+/// accepted here.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ActionCapabilityProfile {
+    TextGeneration,
+    LocalDiagnostics,
 }
 
 /// Input contract for one named broker action parameter.
@@ -222,6 +236,34 @@ impl ActionConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if self.capability_profile.is_some() {
+            let Some(sandbox) = self.sandbox.as_ref() else {
+                return Err("capability_profile requires an explicit sandbox".into());
+            };
+            if !sandbox.deny_network {
+                return Err("capability_profile requires sandbox.deny_network = true".into());
+            }
+            if sandbox.runtime_profile != RuntimeProfile::Minimal {
+                return Err(
+                    "capability_profile requires sandbox.runtime_profile = `minimal`".into(),
+                );
+            }
+            match self.capability_profile {
+                Some(ActionCapabilityProfile::TextGeneration)
+                    if !sandbox.write_paths.is_empty() =>
+                {
+                    return Err("text-generation profile cannot grant write_paths".into());
+                }
+                Some(ActionCapabilityProfile::LocalDiagnostics)
+                    if sandbox.read_paths.is_empty() =>
+                {
+                    return Err(
+                        "local-diagnostics profile requires explicit sandbox.read_paths".into(),
+                    );
+                }
+                _ => {}
+            }
+        }
         if self.log_output
             && self
                 .sandbox
@@ -604,6 +646,7 @@ mod tests {
         config.actions.insert(
             "cluster.read".into(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/usr/bin/true".into(),
@@ -628,6 +671,7 @@ mod tests {
     #[test]
     fn action_config_validation() {
         let config = ActionConfig {
+            capability_profile: None,
             parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/usr/bin/kubectl".to_string(),
@@ -647,8 +691,38 @@ mod tests {
     }
 
     #[test]
+    fn capability_profiles_require_enforceable_narrow_sandbox() {
+        let mut action = config_with_timeout(1_000);
+        action.capability_profile = Some(ActionCapabilityProfile::TextGeneration);
+        action.sandbox = Some(ActionSandbox {
+            runtime_profile: RuntimeProfile::Minimal,
+            deny_network: true,
+            ..ActionSandbox::default()
+        });
+        assert!(action.validate().is_ok());
+        action
+            .sandbox
+            .as_mut()
+            .unwrap()
+            .write_paths
+            .push("/tmp/output".into());
+        assert!(action
+            .validate()
+            .unwrap_err()
+            .contains("cannot grant write_paths"));
+
+        action.capability_profile = Some(ActionCapabilityProfile::LocalDiagnostics);
+        action.sandbox.as_mut().unwrap().write_paths.clear();
+        assert!(action
+            .validate()
+            .unwrap_err()
+            .contains("explicit sandbox.read_paths"));
+    }
+
+    #[test]
     fn action_parameter_schema_replaces_only_fixed_argument_slots() {
         let mut action = ActionConfig {
+            capability_profile: None,
             parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/usr/bin/kubectl".to_string(),
@@ -691,6 +765,7 @@ mod tests {
     #[test]
     fn parameter_schema_rejects_duplicate_and_out_of_range_argument_slots() {
         let mut action = ActionConfig {
+            capability_profile: None,
             parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/usr/bin/true".into(),
@@ -722,6 +797,7 @@ mod tests {
     #[test]
     fn parameterized_actions_cannot_launch_shells_or_interpreters() {
         let action = ActionConfig {
+            capability_profile: None,
             parameters: [(
                 "value".into(),
                 ActionParameter {
@@ -791,6 +867,7 @@ mod tests {
 
     fn config_with_timeout(timeout_ms: u64) -> ActionConfig {
         ActionConfig {
+            capability_profile: None,
             parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/bin/true".to_string(),
@@ -831,6 +908,7 @@ mod tests {
     #[test]
     fn action_config_empty_program() {
         let config = ActionConfig {
+            capability_profile: None,
             parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: String::new(),
@@ -851,6 +929,7 @@ mod tests {
     #[test]
     fn action_config_rejects_process_argument_and_environment_nuls() {
         let mut config = ActionConfig {
+            capability_profile: None,
             parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/usr/bin/echo".to_string(),
@@ -878,6 +957,7 @@ mod tests {
     #[test]
     fn action_config_rejects_dangerous_environment_by_default() {
         let mut config = ActionConfig {
+            capability_profile: None,
             parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/usr/bin/echo".to_string(),
@@ -989,6 +1069,7 @@ program = "echo"
         config.actions.insert(
             "test".to_string(),
             ActionConfig {
+                capability_profile: None,
                 parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "echo".to_string(), // Not absolute
@@ -1120,6 +1201,7 @@ enabled = true
     #[test]
     fn device_restriction_rejects_inherited_log_output() {
         let mut action = ActionConfig {
+            capability_profile: None,
             parameters: std::collections::HashMap::new(),
             sandbox: Some(ActionSandbox {
                 deny_devices: true,
@@ -1183,6 +1265,7 @@ enabled = true
             actions: HashMap::from([(
                 "self".to_string(),
                 ActionConfig {
+                    capability_profile: None,
                     parameters: std::collections::HashMap::new(),
                     sandbox: None,
                     program: executable.to_string_lossy().into_owned(),
@@ -1215,6 +1298,7 @@ enabled = true
             actions: HashMap::from([(
                 "missing".to_string(),
                 ActionConfig {
+                    capability_profile: None,
                     parameters: std::collections::HashMap::new(),
                     sandbox: None,
                     program: "/definitely/missing/wayexpand-action".to_string(),
@@ -1238,6 +1322,7 @@ enabled = true
             actions: HashMap::from([(
                 "directory".to_string(),
                 ActionConfig {
+                    capability_profile: None,
                     parameters: std::collections::HashMap::new(),
                     sandbox: None,
                     program: std::env::current_exe()

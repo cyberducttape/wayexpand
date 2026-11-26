@@ -1,0 +1,27 @@
+format_version = 1
+id = "wayexpand.php-fpm"
+version = "1.0.0"
+name = "PHP-FPM Operations"
+publisher = "WayExpand project"
+license = "MIT"
+attribution = "WayExpand contributors; see repository history"
+maintainer = "WayExpand Web Operations Maintainers"
+description = "PHP-FPM service, pool, slow-log, worker-memory, and status-endpoint checks."
+capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["systemctl", "journalctl", "grep", "ps", "awk", "curl"]
+
+[risk]
+level = "moderate"
+summary = "Diagnostic snippets only inspect local service state and configured endpoints. The restart snippet only prepares text for review; WayExpand never executes it."
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-11-25"
+summary = "Reviewed by WayExpand Web Operations Maintainers. Read-only checks are labeled explicitly; the restart command is labeled state-changing and requires separate manual review and execution."
+
+[verification]
+test_cases = "tests/cases.toml"

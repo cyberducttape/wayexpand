@@ -20,7 +20,9 @@ use wayexpand_core::{ExpansionEngine, UsageStats};
 #[cfg(test)]
 use wayexpand_core::{InputEvent, UsageEvent};
 
-const SAVE_INTERVAL: Duration = Duration::from_secs(60);
+const MIN_SAVE_INTERVAL: Duration = Duration::from_secs(15);
+const NORMAL_SAVE_INTERVAL: Duration = Duration::from_secs(60);
+const MAX_SAVE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 const SHUTDOWN_ENQUEUE_WAIT: Duration = Duration::from_millis(250);
 const QUEUE_CAPACITY: usize = 8;
@@ -29,6 +31,9 @@ const QUEUE_CAPACITY: usize = 8;
 const CLEAR_REPLY_WAIT: Duration = Duration::from_millis(1500);
 
 static MAX_FLUSH_DURATION_US: AtomicU64 = AtomicU64::new(0);
+static FLUSHES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static SERIALIZED_BYTES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static DIRECTORY_SYNC_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static FLUSH_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static WORKER_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static QUEUE_REJECTED_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -39,6 +44,9 @@ static EVENTS_DROPPED_TOTAL: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct UsageMetrics {
     pub max_flush_duration_us: u64,
+    pub flushes_total: u64,
+    pub serialized_bytes_total: u64,
+    pub directory_sync_failures_total: u64,
     pub flush_failures_total: u64,
     pub worker_failures_total: u64,
     pub queue_rejected_total: u64,
@@ -50,6 +58,9 @@ pub struct UsageMetrics {
 pub fn metrics_snapshot() -> UsageMetrics {
     UsageMetrics {
         max_flush_duration_us: MAX_FLUSH_DURATION_US.load(Ordering::Relaxed),
+        flushes_total: FLUSHES_TOTAL.load(Ordering::Relaxed),
+        serialized_bytes_total: SERIALIZED_BYTES_TOTAL.load(Ordering::Relaxed),
+        directory_sync_failures_total: DIRECTORY_SYNC_FAILURES_TOTAL.load(Ordering::Relaxed),
         flush_failures_total: FLUSH_FAILURES_TOTAL.load(Ordering::Relaxed),
         worker_failures_total: WORKER_FAILURES_TOTAL.load(Ordering::Relaxed),
         queue_rejected_total: QUEUE_REJECTED_TOTAL.load(Ordering::Relaxed),
@@ -420,7 +431,8 @@ fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>, outstanding: &A
     let mut pending = UsageStats::default();
     let mut last_flush = Instant::now();
     loop {
-        let wait = SAVE_INTERVAL.saturating_sub(last_flush.elapsed());
+        let interval = adaptive_save_interval(event_count(&pending));
+        let wait = interval.saturating_sub(last_flush.elapsed());
         match receiver.recv_timeout(wait) {
             Ok(UsageMessage::Batch(batch)) => {
                 pending.merge(&batch);
@@ -482,6 +494,16 @@ fn event_count(stats: &UsageStats) -> u64 {
         .fold(0_u64, |count, usage| count.saturating_add(usage.count))
 }
 
+fn adaptive_save_interval(pending_events: u64) -> Duration {
+    if pending_events >= 128 {
+        MIN_SAVE_INTERVAL
+    } else if pending_events >= 16 {
+        NORMAL_SAVE_INTERVAL
+    } else {
+        MAX_SAVE_INTERVAL
+    }
+}
+
 fn clear_pending(path: &std::path::Path, pending: &mut UsageStats) -> std::io::Result<bool> {
     let cleared = UsageStats::clear(path)?;
     *pending = UsageStats::default();
@@ -495,11 +517,17 @@ fn flush_pending(
 ) -> bool {
     let started = Instant::now();
     let persisted = event_count(pending);
-    match UsageStats::merge_and_save(path, pending) {
-        Ok(()) => {
+    match UsageStats::merge_and_save_measured(path, pending) {
+        Ok(outcome) => {
             *pending = UsageStats::default();
+            FLUSHES_TOTAL.fetch_add(1, Ordering::Relaxed);
+            SERIALIZED_BYTES_TOTAL.fetch_add(outcome.serialized_bytes, Ordering::Relaxed);
             EVENTS_PERSISTED_TOTAL.fetch_add(persisted, Ordering::Relaxed);
             decrement_outstanding(outstanding, persisted);
+            if let Some(error) = outcome.directory_sync_error {
+                DIRECTORY_SYNC_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
+                warn!(%error, "usage statistics were replaced, but directory sync failed; durability is uncertain");
+            }
         }
         Err(error) => {
             FLUSH_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
@@ -528,6 +556,15 @@ mod tests {
             inserted_chars: 20,
             unix_timestamp: 1_700_000_000,
         }
+    }
+
+    #[test]
+    fn adaptive_flush_interval_tracks_pending_volume() {
+        assert_eq!(adaptive_save_interval(0), MAX_SAVE_INTERVAL);
+        assert_eq!(adaptive_save_interval(15), MAX_SAVE_INTERVAL);
+        assert_eq!(adaptive_save_interval(16), NORMAL_SAVE_INTERVAL);
+        assert_eq!(adaptive_save_interval(127), NORMAL_SAVE_INTERVAL);
+        assert_eq!(adaptive_save_interval(128), MIN_SAVE_INTERVAL);
     }
 
     #[test]

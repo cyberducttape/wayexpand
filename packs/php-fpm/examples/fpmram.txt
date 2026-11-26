@@ -1,0 +1,1 @@
+ps -eo rss=,comm= | awk '$2 ~ /^php-fpm/ { total += $1; workers++; if (min == 0 || $1 < min) min = $1; if ($1 > max) max = $1 } END { if (!workers) { print "No PHP-FPM processes found"; exit } printf "processes=%d summed_rss_mib=%.1f min_rss_mib=%.1f max_rss_mib=%.1f\n", workers, total/1024, min/1024, max/1024 }'

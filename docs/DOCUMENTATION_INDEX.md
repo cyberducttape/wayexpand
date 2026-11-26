@@ -2,6 +2,10 @@
 
 Complete guide to all WayExpand documentation, organized by use case and audience.
 
+For contributors, see [BENCHMARKS.md](BENCHMARKS.md) for recorded and proposed
+performance measurements and [SUBSYSTEM_CONTRACTS.md](SUBSYSTEM_CONTRACTS.md)
+for the guarantees that backend and cross-thread changes must preserve.
+
 ## Quick Navigation by Use Case
 
 ### I want to install WayExpand

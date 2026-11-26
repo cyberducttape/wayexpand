@@ -123,13 +123,18 @@ pub(super) fn desktop_testable(expansion: &ExpansionConfig) -> bool {
 }
 
 /// The harmless tutorial snippet the guide can create for the test.
+fn is_onboarding_snippet(expansion: &ExpansionConfig) -> bool {
+    desktop_testable(expansion)
+        && expansion.replacement == ONBOARDING_REPLACEMENT
+        && expansion.match_mode == MatchMode::Immediate
+        && expansion.tags.iter().any(|tag| tag == "tutorial")
+}
+
 fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
-    config.expansion.iter().find(|expansion| {
-        desktop_testable(expansion)
-            && expansion.replacement == ONBOARDING_REPLACEMENT
-            && expansion.match_mode == MatchMode::Immediate
-            && expansion.tags.iter().any(|tag| tag == "tutorial")
-    })
+    config
+        .expansion
+        .iter()
+        .find(|expansion| is_onboarding_snippet(expansion))
 }
 
 /// Only the dedicated harmless tutorial is used for the automatic first-run
@@ -149,23 +154,51 @@ impl GuiApp {
         if !self.onboarding_visible
             || self.onboarding_test_snippet_created_for.as_deref() == Some(config_identity.as_str())
             || onboarding_test_snippet(&self.config).is_some()
+            || self
+                .pending_save
+                .as_ref()
+                .is_some_and(|pending| onboarding_test_snippet(&pending.candidate).is_some())
+            || self
+                .queued_save
+                .as_ref()
+                .is_some_and(|pending| onboarding_test_snippet(&pending.candidate).is_some())
+            || self
+                .conflicted_save
+                .as_ref()
+                .is_some_and(|pending| onboarding_test_snippet(&pending.candidate).is_some())
+            || self
+                .failed_save
+                .as_ref()
+                .is_some_and(|pending| onboarding_test_snippet(&pending.candidate).is_some())
         {
             return;
         }
-        if !self.create_test_snippet() || self.failed_save.is_some() {
-            return;
+        // Failure is reported by create_test_snippet itself; nothing follows.
+        let _ = self.create_test_snippet();
+    }
+
+    /// Record the tutorial only after its config save has committed. The
+    /// preference prevents a deliberately removed example from returning, so
+    /// writing it before an asynchronous config save succeeds could strand a
+    /// first-run library with no example at all.
+    pub(crate) fn record_onboarding_test_snippet_saved(&mut self) -> Result<(), String> {
+        let config_identity = self.path.to_string_lossy().into_owned();
+        if !self.onboarding_visible
+            || self.onboarding_test_snippet_created_for.as_deref() == Some(config_identity.as_str())
+            || onboarding_test_snippet(&self.config).is_none()
+        {
+            return Ok(());
         }
         self.onboarding_test_snippet_created_for = Some(config_identity);
-        if let Err(error) = save_gui_prefs(
+        save_gui_prefs(
             self.language,
             self.colorpack,
             self.settings_font_scale,
             self.dark_mode,
             self.onboarding_completed,
             self.onboarding_test_snippet_created_for.clone(),
-        ) {
-            self.status = Status::warning(self.strings.onboarding_test_state_save_failed(&error));
-        }
+        )
+        .map_err(|error| error.to_string())
     }
 
     /// Persist the pending-test state so a previously completed guide reopens
@@ -240,7 +273,8 @@ impl GuiApp {
             .as_ref()
             .is_some_and(|record| record.outcome == crate::setup_record::SetupOutcome::Verified);
         if !verified {
-            let record = crate::setup_record::SetupRecord::skipped();
+            let mut record = crate::setup_record::SetupRecord::skipped();
+            record.inherit_application_checks(self.setup_record.as_ref());
             if crate::setup_record::save(&record).is_ok() {
                 self.setup_record = Some(record);
             }
@@ -248,10 +282,38 @@ impl GuiApp {
         self.persist_onboarding(self.strings.onboarding_skipped_note());
     }
 
+    /// Finish first run by choosing the safe copy-and-paste workflow. This
+    /// closes the guide without claiming that automatic insertion works.
+    pub(crate) fn finish_onboarding_with_copy_only(&mut self) {
+        let already_verified = self
+            .setup_record
+            .as_ref()
+            .is_some_and(|record| record.outcome == crate::setup_record::SetupOutcome::Verified);
+        if !already_verified {
+            let mut record = crate::setup_record::SetupRecord::copy_only();
+            record.inherit_application_checks(self.setup_record.as_ref());
+            if crate::setup_record::save(&record).is_err() {
+                self.setup_record_saved = false;
+                self.status = Status::warning(self.strings.onboarding_copy_only_not_saved());
+                return;
+            }
+            self.setup_record = Some(record);
+        }
+        self.setup_record_saved = true;
+        self.persist_onboarding(self.strings.onboarding_copy_only_note());
+    }
+
+    fn use_quick_picker_for_first_run(&mut self) {
+        self.open_copy_only_picker();
+        if !self.status.is_error() {
+            self.finish_onboarding_with_copy_only();
+        }
+    }
+
     pub(crate) fn defer_onboarding(&mut self) {
-        // Let users continue working while preserving the incomplete state.
-        // The guide returns on the next launch and cannot be recorded as
-        // completed without a real-application verification.
+        // Let users continue working for this session while preserving the
+        // incomplete state. They can still finish with the copy-only workflow
+        // without claiming a real-application verification.
         self.onboarding_visible = false;
         self.status = Status::warning(self.strings.status_setup_deferred());
     }
@@ -462,6 +524,30 @@ impl GuiApp {
         };
         let test_snippet = onboarding_test_snippet(&self.config)
             .map(|expansion| (expansion.trigger.clone(), expansion.replacement.clone()));
+        let picker_policy = crate::picker::PickerPolicy::merge(
+            &self.config.organization,
+            self.administrator_policy.as_ref(),
+        );
+        let picker_copy_allowed = picker_policy.clipboard_allowed;
+        let picker_readiness = self.picker_readiness();
+        let picker_policy_notice = (!self.config.expansion.is_empty() && !picker_copy_allowed)
+            .then(|| match picker_readiness {
+                crate::picker::PickerReadiness::TypesDirectly => {
+                    if let Some(keys) = self
+                        .picker_shortcut
+                        .as_ref()
+                        .and_then(|shortcut| shortcut.keys.as_deref())
+                    {
+                        crate::lang::fill(
+                            self.strings.first_run_picker_direct_shortcut_with_keys(),
+                            &[&keys],
+                        )
+                    } else {
+                        self.strings.first_run_picker_direct_shortcut().to_owned()
+                    }
+                }
+                readiness => self.strings.picker_readiness_detail(readiness),
+            });
         let sample_trigger = test_snippet
             .as_ref()
             .map(|(trigger, _)| trigger.clone())
@@ -474,7 +560,7 @@ impl GuiApp {
                 .is_some_and(|(_, replacement)| self.playground.text.contains(replacement));
         // A pending or stale diagnostic is not yet a setup failure. Keep the
         // headline aligned with the connection step while it refreshes or
-        // reconnects, and reserve Setup incomplete for an observed blocker.
+        // reconnects, and reserve the attention state for an observed blocker.
         let setup_check_pending = checking
             || matches!(
                 self.current_next_step().map(|(problem, _)| problem),
@@ -589,94 +675,36 @@ impl GuiApp {
             .filter(|major| !major.is_empty() && major.chars().all(|ch| ch.is_ascii_digit()))
             .map(str::to_owned);
 
+        let compact_first_run = ui.available_width() < 400.0;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .id_salt("first_run_guide")
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    theme::brand_mark(ui, 36.0, palette.accent);
+                    ui.add_space(if compact_first_run { 4.0 } else { 20.0 });
+                    theme::brand_mark(
+                        ui,
+                        if compact_first_run { 30.0 } else { 36.0 },
+                        palette.accent,
+                    );
                     ui.label(
                         RichText::new(self.strings.welcome_title())
-                            .size(26.0)
+                            .size(if compact_first_run { 24.0 } else { 26.0 })
                             .strong()
                             .color(ui.visuals().strong_text_color()),
                     );
-                    ui.label(RichText::new(self.strings.welcome_intro()).color(palette.muted));
+                    ui.label(
+                        RichText::new(if !picker_copy_allowed {
+                            self.strings.welcome_intro_insert_only()
+                        } else if test_snippet.is_some() {
+                            self.strings.welcome_intro()
+                        } else {
+                            self.strings.welcome_intro_needs_example()
+                        })
+                        .color(palette.muted),
+                    );
                 });
-                ui.add_space(14.0);
-                // Keep first run focused on the one next action: show only
-                // the detected desktop here and fold the full table away.
-                theme::card(ui, palette, |ui| {
-                    ui.set_width(ui.available_width());
-                    if wayexpand_backend_selection::Compositor::detect()
-                        == wayexpand_backend_selection::Compositor::Gnome
-                    {
-                        let version_hint = detected_gnome_version
-                            .as_deref()
-                            .map(|version| {
-                                self.strings.desktop_compatibility_detected_version(version)
-                            })
-                            .unwrap_or_else(|| {
-                                self.strings.desktop_compatibility_version_hint().to_owned()
-                            });
-                        ui.label(RichText::new(version_hint).small().color(palette.muted));
-                    }
-                    egui::CollapsingHeader::new(self.strings.desktop_compatibility_heading())
-                        .id_salt("first_run_desktop_compatibility_details")
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            egui::Grid::new("first_run_desktop_compatibility")
-                                .num_columns(2)
-                                .striped(true)
-                                .show(ui, |ui| {
-                                    let rows = self.strings.desktop_compatibility_rows();
-                                    let detected_major_is_listed =
-                                        detected_gnome_major.as_deref().is_some_and(|major| {
-                                            rows.iter().any(|(desktop, _)| {
-                                                desktop.strip_prefix("GNOME ").is_some_and(
-                                                    |versions| {
-                                                        versions
-                                                            .split(',')
-                                                            .any(|version| version.trim() == major)
-                                                    },
-                                                )
-                                            })
-                                        });
-                                    for (desktop, route) in rows {
-                                        let is_detected =
-                                            detected_gnome_major.as_deref().is_some_and(|major| {
-                                                desktop.strip_prefix("GNOME ").is_some_and(
-                                                    |versions| {
-                                                        versions
-                                                            .split(',')
-                                                            .any(|version| version.trim() == major)
-                                                    },
-                                                ) || desktop.starts_with("Other GNOME")
-                                                    && !detected_major_is_listed
-                                            });
-                                        if is_detected {
-                                            let color = if detected_gnome_major
-                                                .as_deref()
-                                                .is_some_and(|major| {
-                                                    matches!(major, "46" | "48" | "50" | "51")
-                                                }) {
-                                                palette.accent
-                                            } else {
-                                                palette.warning
-                                            };
-                                            ui.label(RichText::new(desktop).strong().color(color));
-                                            ui.label(RichText::new(route).color(color));
-                                        } else {
-                                            ui.label(RichText::new(desktop).strong());
-                                            ui.label(route);
-                                        }
-                                        ui.end_row();
-                                    }
-                                });
-                        });
-                });
-                ui.add_space(10.0);
+                ui.add_space(if compact_first_run { 8.0 } else { 14.0 });
                 if self.gnome_setup_resume_pending {
                     theme::card(ui, palette, |ui| {
                         ui.set_width(ui.available_width());
@@ -734,20 +762,60 @@ impl GuiApp {
                                 }
                             }),
                         );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button(self.strings.onboarding_defer()).clicked() {
-                                self.defer_onboarding();
+                        // Shortcut status arrives with the first asynchronous
+                        // diagnostics snapshot. Do not invite a user to set a
+                        // shortcut until the desktop explicitly reports that
+                        // setting one is supported and none is configured.
+                        // The Quick Picker copy path already works without it.
+                        if self.diagnostics_checked_at.is_some()
+                            && (picker_copy_allowed
+                                || picker_readiness
+                                    == crate::picker::PickerReadiness::TypesDirectly)
+                            && self.picker_shortcut.as_ref().is_some_and(|shortcut| {
+                                shortcut.supported && shortcut.keys.is_none()
+                            })
+                            && ui
+                                .add_enabled(
+                                    self.setup_task.is_none(),
+                                    egui::Button::new(
+                                        self.strings.shortcut_use_keys(DEFAULT_PICKER_SHORTCUT),
+                                    ),
+                                )
+                                .clicked()
+                        {
+                            self.set_picker_shortcut();
+                        }
+                        if !self.config.expansion.is_empty() && picker_copy_allowed {
+                            // When automatic expansion is unavailable, make
+                            // the working copy-and-paste path the clear next
+                            // action. Keep it secondary once a route is ready.
+                            let quick_picker_button = if route_ready {
+                                ui.button(self.strings.first_run_use_quick_picker())
+                            } else {
+                                theme::primary_button(
+                                    ui,
+                                    palette,
+                                    self.strings.first_run_use_quick_picker(),
+                                )
+                            };
+                            if quick_picker_button.clicked() {
+                                self.use_quick_picker_for_first_run();
                             }
-                            // Someone who already uses WayExpand (an imported
-                            // library, another machine) can dismiss the guide
-                            // for good; this never marks anything verified.
-                            if !self.config.expansion.is_empty()
-                                && ui.small_button(self.strings.onboarding_skip()).clicked()
-                            {
-                                self.skip_onboarding();
-                            }
-                        });
+                        }
+                        if ui.small_button(self.strings.onboarding_defer()).clicked() {
+                            self.defer_onboarding();
+                        }
+                        // Skipping is always available, including when the
+                        // only snippet is the tutorial. It records no
+                        // verification and can be reversed from Getting
+                        // started in the menu.
+                        if ui.small_button(self.strings.onboarding_skip()).clicked() {
+                            self.skip_onboarding();
+                        }
                     });
+                    if let Some(notice) = picker_policy_notice {
+                        ui.label(RichText::new(notice).color(palette.warning));
+                    }
                     ui.add_space(10.0);
 
                     // 1. Connect your desktop.
@@ -826,27 +894,6 @@ impl GuiApp {
                                         self.strings.problem_text(problem),
                                     );
                                     let help = match problem {
-                                        super::Problem::InstallationIncomplete
-                                            if !self
-                                                .installation_audit
-                                                .failed_components
-                                                .is_empty() =>
-                                        {
-                                            let components = self
-                                                .installation_audit
-                                                .failed_components
-                                                .iter()
-                                                .map(|component| {
-                                                    self.strings
-                                                        .dg_installation_component(component)
-                                                })
-                                                .collect::<Vec<_>>()
-                                                .join(", ");
-                                            Some(
-                                                self.strings
-                                                    .dg_installation_components(&components),
-                                            )
-                                        }
                                         super::Problem::InputSourceNotSetUp => {
                                             Some(self.strings.gnome_register_help().to_owned())
                                         }
@@ -960,12 +1007,16 @@ impl GuiApp {
                     });
                     ui.add_space(12.0);
 
-                    // 2. Create a snippet.
+                    // 2. Use the harmless example, or add it if needed.
                     onboarding_step(
                         ui,
                         palette,
                         2,
-                        self.strings.step_create_title(),
+                        if test_snippet.is_some() {
+                            self.strings.step_example_ready_title()
+                        } else {
+                            self.strings.step_create_title()
+                        },
                         test_snippet.is_some(),
                     );
                     ui.indent("first_run_snippet", |ui| {
@@ -1043,14 +1094,11 @@ impl GuiApp {
                         ),
                     );
                     ui.indent("first_run_test", |ui| {
-                        let mut offer_picker =
-                            self.config.expansion.iter().any(|entry| entry.enabled);
                         if matches!(
                             outcome,
                             FirstRunOutcome::WorkingInTestedApplication
                                 | FirstRunOutcome::UserConfirmedInTestedApplication
                         ) {
-                            offer_picker = false;
                             let saved_application = self
                                 .verification_status()
                                 .filter(|(_, staleness)| staleness.is_none())
@@ -1123,10 +1171,6 @@ impl GuiApp {
                                 self.open_onboarding_matcher_preview();
                             }
                         }
-                        if offer_picker && ui.link(self.strings.open_quick_picker_copy()).clicked()
-                        {
-                            self.open_copy_only_picker();
-                        }
                         if self.onboarding_show_troubleshooting {
                             ui.add_space(8.0);
                             ui.colored_label(
@@ -1181,18 +1225,6 @@ impl GuiApp {
                                     RichText::new(self.strings.shortcut_help())
                                         .color(palette.muted),
                                 );
-                                let running = self.setup_task.is_some();
-                                if ui
-                                    .add_enabled(
-                                        !running,
-                                        egui::Button::new(
-                                            self.strings.shortcut_use_keys(DEFAULT_PICKER_SHORTCUT),
-                                        ),
-                                    )
-                                    .clicked()
-                                {
-                                    self.set_picker_shortcut();
-                                }
                                 if let Some(error) = &self.picker_shortcut_error {
                                     ui.colored_label(palette.warning, error);
                                 }
@@ -1275,6 +1307,78 @@ impl GuiApp {
                         }
                     });
                 });
+                ui.add_space(10.0);
+                // Compatibility details are useful but do not belong ahead
+                // of the first working action, especially in a short window.
+                theme::card(ui, palette, |ui| {
+                    ui.set_width(ui.available_width());
+                    if wayexpand_backend_selection::Compositor::detect()
+                        == wayexpand_backend_selection::Compositor::Gnome
+                    {
+                        let version_hint = detected_gnome_version
+                            .as_deref()
+                            .map(|version| {
+                                self.strings.desktop_compatibility_detected_version(version)
+                            })
+                            .unwrap_or_else(|| {
+                                self.strings.desktop_compatibility_version_hint().to_owned()
+                            });
+                        ui.label(RichText::new(version_hint).small().color(palette.muted));
+                    }
+                    egui::CollapsingHeader::new(self.strings.desktop_compatibility_heading())
+                        .id_salt("first_run_desktop_compatibility_details")
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            egui::Grid::new("first_run_desktop_compatibility")
+                                .num_columns(2)
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    let rows = self.strings.desktop_compatibility_rows();
+                                    let detected_major_is_listed =
+                                        detected_gnome_major.as_deref().is_some_and(|major| {
+                                            rows.iter().any(|(desktop, _)| {
+                                                desktop.strip_prefix("GNOME ").is_some_and(
+                                                    |versions| {
+                                                        versions
+                                                            .split(',')
+                                                            .any(|version| version.trim() == major)
+                                                    },
+                                                )
+                                            })
+                                        });
+                                    for (desktop, route) in rows {
+                                        let is_detected =
+                                            detected_gnome_major.as_deref().is_some_and(|major| {
+                                                desktop.strip_prefix("GNOME ").is_some_and(
+                                                    |versions| {
+                                                        versions
+                                                            .split(',')
+                                                            .any(|version| version.trim() == major)
+                                                    },
+                                                ) || desktop.starts_with("Other GNOME")
+                                                    && !detected_major_is_listed
+                                            });
+                                        if is_detected {
+                                            let color = if detected_gnome_major
+                                                .as_deref()
+                                                .is_some_and(|major| {
+                                                    matches!(major, "46" | "48" | "50" | "51")
+                                                }) {
+                                                palette.accent
+                                            } else {
+                                                palette.warning
+                                            };
+                                            ui.label(RichText::new(desktop).strong().color(color));
+                                            ui.label(RichText::new(route).color(color));
+                                        } else {
+                                            ui.label(RichText::new(desktop).strong());
+                                            ui.label(route);
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+                });
                 ui.add_space(16.0);
             });
     }
@@ -1337,7 +1441,7 @@ mod guided_setup_tests {
         );
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::SetupIncomplete),
-            "Setup incomplete"
+            "Automatic expansion needs attention"
         );
     }
 

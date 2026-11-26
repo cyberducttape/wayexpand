@@ -2531,6 +2531,10 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     let mut app = GuiApp::load(path.clone()).unwrap();
     app.onboarding_completed = false;
     app.onboarding_visible = true;
+    assert!(
+        !app.try_live_open,
+        "the preview should not crowd out first-run actions"
+    );
     assert!(app.config.expansion.is_empty());
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
@@ -2563,6 +2567,11 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         .any(|tag| tag == "tutorial"));
     app.daemon_reachable = Some(true);
     app.route_state = Some(runtime::RouteState::Connected);
+    app.diagnostics_checked_at = Some(Instant::now());
+    app.picker_shortcut = Some(runtime::PickerShortcut {
+        supported: true,
+        keys: None,
+    });
     app.daemon_status = format!(
         "{}\ninject_atomic_replace=true\nreplacement_assurance=verified\ncompatibility_mode=off",
         current_daemon_status("source=input-method\nbackend=input-method-v2")
@@ -2599,7 +2608,11 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
             .nodes
     );
     // Three steps, each with a plain-language title.
-    for step in ["Prepare your desktop", "Create a snippet", "Test it"] {
+    for step in [
+        "Prepare your desktop",
+        "Your example snippet is ready",
+        "Test it",
+    ] {
         assert!(guide_semantics.contains(step), "{step}: {guide_semantics}");
     }
     assert!(
@@ -2607,7 +2620,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
             "Working in tested application",
             "Configured, awaiting test",
             "Automatic replacement unavailable · copy and paste",
-            "Setup incomplete",
+            "Automatic expansion needs attention",
         ]
         .iter()
         .any(|state| guide_semantics.contains(*state)),
@@ -2635,7 +2648,9 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     assert!(!guide_semantics.contains("Working in tested application"));
     assert!(!guide_semantics.contains("Verified working: yes"));
     // The copy-and-paste fallback is always offered until a real test passes.
-    assert!(guide_semantics.contains("Open Quick Picker (copy and paste)"));
+    assert!(guide_semantics.contains("Use Quick Picker (copy & paste)"));
+    assert!(guide_semantics.contains("Use Ctrl+Alt+Space"));
+    assert!(guide_semantics.contains("Skip setup guide"));
     // Technical detail sits behind one collapsed section.
     assert!(guide_semantics.contains("Troubleshooting details"));
     assert!(!guide_semantics.contains("Backend probes show"));
@@ -3227,9 +3242,12 @@ fn everyday_workspace_is_the_default_and_experience_levels_reveal_more_tools() {
     let _ = fs::remove_file(&path);
     let app = GuiApp::load(path.clone()).unwrap();
     assert_eq!(app.experience, GuiExperience::Everyday);
-    assert!(
-        app.try_live_open,
-        "matcher test should be visible by default"
+    // A fresh launch shows the setup guide, which keeps the matcher test
+    // collapsed so the first-run actions stay visible; returning users get
+    // it expanded.
+    assert_eq!(
+        app.try_live_open, !app.onboarding_visible,
+        "matcher test should be visible by default once setup is out of the way"
     );
     fs::remove_file(path).unwrap();
 }
@@ -4384,7 +4402,7 @@ fn first_run_keeps_picker_shortcut_optional_and_collapsed() {
         "{unset}"
     );
     assert!(unset.contains("Prepare your desktop"), "{unset}");
-    assert!(unset.contains("Create a snippet"), "{unset}");
+    assert!(unset.contains("Add an example snippet"), "{unset}");
     assert!(unset.contains("Test it"), "{unset}");
     assert!(
         !unset.contains("Use Ctrl+Alt+Space")

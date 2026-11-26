@@ -19,8 +19,9 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use unicode_normalization::UnicodeNormalization;
 
-use crate::{Config, MatchMode};
+use crate::{AppFilter, Config, MatchMode};
 
 const USAGE_FILE: &str = "usage-stats.json";
 use crate::limits::MAX_USAGE_FILE_BYTES;
@@ -134,6 +135,14 @@ pub struct UsageStats {
     pub daily: BTreeMap<String, u64>,
 }
 
+/// Result of replacing the statistics file. A directory-sync failure occurs
+/// after the rename, so the replacement is visible but its crash durability
+/// is uncertain and must not be blindly retried as a failed write.
+pub struct UsageSaveOutcome {
+    pub serialized_bytes: u64,
+    pub directory_sync_error: Option<std::io::Error>,
+}
+
 /// Where usage statistics for `config_path` are kept.
 pub fn usage_stats_path(config_path: &Path) -> PathBuf {
     config_path
@@ -243,18 +252,32 @@ impl UsageStats {
             self.daily.pop_first();
         }
         if self.snippets.len() > MAX_SNIPPET_ENTRIES {
-            // Drop the least recently used entries first.
-            let mut by_age: Vec<(u64, String)> = self
-                .snippets
-                .iter()
-                .map(|(id, usage)| (usage.last_used, id.clone()))
-                .collect();
-            by_age.sort();
-            for (_, id) in by_age
-                .into_iter()
-                .take(self.snippets.len() - MAX_SNIPPET_ENTRIES)
-            {
-                self.snippets.remove(&id);
+            let excess = self.snippets.len() - MAX_SNIPPET_ENTRIES;
+            if excess == 1 {
+                // The common boundary case needs only one linear scan; avoid
+                // copying and sorting every ID just to evict a single entry.
+                if let Some(id) = self
+                    .snippets
+                    .iter()
+                    .min_by(|(left_id, left), (right_id, right)| {
+                        (left.last_used, *left_id).cmp(&(right.last_used, *right_id))
+                    })
+                    .map(|(id, _)| id.clone())
+                {
+                    self.snippets.remove(&id);
+                }
+            } else {
+                // Drop the least recently used entries first when a merge
+                // brings in a larger batch of excess entries.
+                let mut by_age: Vec<(u64, String)> = self
+                    .snippets
+                    .iter()
+                    .map(|(id, usage)| (usage.last_used, id.clone()))
+                    .collect();
+                by_age.sort();
+                for (_, id) in by_age.into_iter().take(excess) {
+                    self.snippets.remove(&id);
+                }
             }
         }
     }
@@ -262,12 +285,23 @@ impl UsageStats {
     /// Write atomically with mode 0600.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let _lock = UsageLock::acquire(path)?;
-        self.save_locked(path)
+        let outcome = self.save_locked(path)?;
+        outcome.directory_sync_error.map_or(Ok(()), Err)
     }
 
     /// Merge pending daemon counters with the current file under one lock, so
     /// concurrent `stats --clear` cannot race a load/merge/save cycle.
     pub fn merge_and_save(path: &Path, delta: &UsageStats) -> std::io::Result<()> {
+        let outcome = Self::merge_and_save_measured(path, delta)?;
+        outcome.directory_sync_error.map_or(Ok(()), Err)
+    }
+
+    /// Merge and save, returning the number of bytes serialized for this
+    /// atomic replacement so hosts can measure persistence write volume.
+    pub fn merge_and_save_measured(
+        path: &Path,
+        delta: &UsageStats,
+    ) -> std::io::Result<UsageSaveOutcome> {
         let _lock = UsageLock::acquire(path)?;
         let mut current = Self::load(path)?;
         current.merge(delta);
@@ -284,7 +318,7 @@ impl UsageStats {
         }
     }
 
-    fn save_locked(&self, path: &Path) -> std::io::Result<()> {
+    fn save_locked(&self, path: &Path) -> std::io::Result<UsageSaveOutcome> {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -292,6 +326,7 @@ impl UsageStats {
             .as_nanos();
         let temporary = parent.join(format!(".{USAGE_FILE}.{}.{nonce}.tmp", std::process::id()));
         let bytes = serde_json::to_vec(self).map_err(std::io::Error::other)?;
+        let serialized_bytes = bytes.len() as u64;
         {
             let mut file = fs::OpenOptions::new()
                 .write(true)
@@ -313,7 +348,13 @@ impl UsageStats {
             let _ = fs::remove_file(&temporary);
             return Err(error);
         }
-        Ok(())
+        let directory_sync_error = fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .err();
+        Ok(UsageSaveOutcome {
+            serialized_bytes,
+            directory_sync_error,
+        })
     }
 
     /// Summarize statistics against the current library.
@@ -365,6 +406,7 @@ impl UsageStats {
             top,
             unused_90_days: unused,
             trigger_risks: trigger_risks(config),
+            duplicate_content: duplicate_static_content(config),
         }
     }
 }
@@ -544,6 +586,33 @@ pub struct UsageReport {
     /// Enabled snippets never used, or not used in 90 days.
     pub unused_90_days: Vec<String>,
     pub trigger_risks: Vec<TriggerRisk>,
+    /// Enabled static snippets with identical replacement text. Templates and
+    /// command-backed snippets are excluded because their output is dynamic.
+    pub duplicate_content: Vec<Vec<String>>,
+}
+
+fn duplicate_static_content(config: &Config) -> Vec<Vec<String>> {
+    let mut by_content: std::collections::HashMap<&str, Vec<String>> =
+        std::collections::HashMap::new();
+    for expansion in config.expansion.iter().filter(|expansion| {
+        expansion.is_keyboard_matchable()
+            && expansion.command.is_none()
+            && !expansion.replacement.contains("{{")
+    }) {
+        by_content
+            .entry(&expansion.replacement)
+            .or_default()
+            .push(expansion.trigger.clone());
+    }
+    let mut duplicates: Vec<Vec<String>> = by_content
+        .into_values()
+        .filter(|triggers| triggers.len() > 1)
+        .collect();
+    for triggers in &mut duplicates {
+        triggers.sort();
+    }
+    duplicates.sort();
+    duplicates
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -559,14 +628,30 @@ pub fn trigger_risks(config: &Config) -> Vec<TriggerRisk> {
         .iter()
         .filter(|expansion| expansion.is_keyboard_matchable())
         .collect();
-    let mut all_triggers: Vec<String> = enabled
+    let mut all_triggers: Vec<(String, usize)> = enabled
         .iter()
-        .flat_map(|expansion| {
-            std::iter::once(expansion.trigger.clone()).chain(expansion.aliases.clone())
+        .enumerate()
+        .flat_map(|(index, expansion)| {
+            expansion
+                .effective_triggers()
+                .into_iter()
+                .map(move |trigger| (trigger.nfc().collect(), index))
         })
         .collect();
     all_triggers.sort_unstable();
+    all_triggers.dedup();
+    let app_scopes: Vec<Vec<AppFilter>> = enabled
+        .iter()
+        .map(|expansion| {
+            expansion
+                .app_filter
+                .iter()
+                .filter_map(|raw| AppFilter::parse(raw))
+                .collect()
+        })
+        .collect();
     let mut risks = Vec::new();
+    let mut emitted_prefix_risks = std::collections::HashSet::new();
     for expansion in &enabled {
         for trigger in std::iter::once(&expansion.trigger).chain(&expansion.aliases) {
             let plain_word = trigger.chars().all(char::is_alphabetic);
@@ -583,32 +668,115 @@ pub fn trigger_risks(config: &Config) -> Vec<TriggerRisk> {
                     reason: "very short: likely to collide with ordinary typing".into(),
                 });
             }
-            if expansion.match_mode == MatchMode::Immediate {
-                // Prefixes form a contiguous range in sorted lexicographic
-                // order. The first entry after `trigger` is enough to detect
-                // whether that range contains a longer trigger, reducing
-                // this check from O(T²) to O(T log T).
-                let next_index = all_triggers
-                    .partition_point(|candidate| candidate.as_str() <= trigger.as_str());
-                if let Some(longer) = all_triggers.get(next_index).filter(|candidate| {
-                    candidate.len() > trigger.len() && candidate.starts_with(trigger.as_str())
-                }) {
-                    risks.push(TriggerRisk {
-                        trigger: trigger.clone(),
-                        reason: format!(
-                            "is the start of {longer}, so it waits for the next key before expanding"
-                        ),
-                    });
-                }
+        }
+    }
+    for (short, short_index) in &all_triggers {
+        let expansion = enabled[*short_index];
+        if expansion.match_mode != MatchMode::Immediate {
+            continue;
+        }
+        let next_index = all_triggers.partition_point(|(candidate, _)| candidate <= short);
+        for (longer, longer_index) in &all_triggers[next_index..] {
+            if !longer.starts_with(short) {
+                break;
             }
+            if !app_scopes_may_overlap(&app_scopes[*short_index], &app_scopes[*longer_index]) {
+                continue;
+            }
+            let reason =
+                format!("is the start of {longer}, so it waits for the next key before expanding");
+            if emitted_prefix_risks.insert((short.clone(), reason.clone())) {
+                risks.push(TriggerRisk {
+                    trigger: short.clone(),
+                    reason,
+                });
+            }
+            break;
         }
     }
     risks
 }
 
+fn app_scopes_may_overlap(left: &[AppFilter], right: &[AppFilter]) -> bool {
+    if left.is_empty() || right.is_empty() {
+        return true;
+    }
+    left.iter().any(|left| {
+        right
+            .iter()
+            .any(|right| app_filters_may_overlap(left, right))
+    })
+}
+
+fn app_filters_may_overlap(left: &AppFilter, right: &AppFilter) -> bool {
+    use AppFilter::*;
+    match (left, right) {
+        (TitleContains(_), _) | (_, TitleContains(_)) => true,
+        (AppIdExact(left), AppIdExact(right)) => left == right,
+        (AppIdExact(app_id), AppIdGlob(pattern)) | (AppIdGlob(pattern), AppIdExact(app_id)) => {
+            !crate::is_reserved_process_app_id(app_id)
+                && crate::engine::matching::app_id_glob_matches(pattern, app_id)
+        }
+        (AppIdGlob(left), AppIdGlob(right)) => {
+            crate::engine::matching::app_id_globs_overlap(left, right)
+        }
+        (ProcessExecutableExact(left), ProcessExecutableExact(right)) => left == right,
+        (ProcessNameExact(left), ProcessNameExact(right)) => left == right,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trigger_prefix_risks_ignore_disjoint_exact_app_scopes() {
+        let disjoint = Config::parse(
+            "[[expansion]]\ntrigger = ':mail'\nreplacement = 'short'\napp_filter = ['app_id_exact:org.example.mail']\n\n\
+             [[expansion]]\ntrigger = ':mail-signature'\nreplacement = 'long'\napp_filter = ['app_id_exact:org.example.editor']\n",
+        )
+        .unwrap();
+        assert!(trigger_risks(&disjoint).is_empty());
+
+        let overlapping = Config::parse(
+            "[[expansion]]\ntrigger = ':mail'\nreplacement = 'short'\napp_filter = ['app_id_glob:org.example.*']\n\n\
+             [[expansion]]\ntrigger = ':mail-signature'\nreplacement = 'long'\napp_filter = ['app_id_exact:org.example.editor']\n",
+        )
+        .unwrap();
+        assert!(trigger_risks(&overlapping)
+            .iter()
+            .any(|risk| risk.trigger == ":mail" && risk.reason.contains(":mail-signature")));
+    }
+
+    #[test]
+    fn duplicate_content_reports_only_identical_static_enabled_snippets() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = ':one'\nreplacement = 'same text'\n\n\
+             [[expansion]]\ntrigger = ':two'\nreplacement = 'same text'\n\n\
+             [[expansion]]\ntrigger = ':dynamic'\nreplacement = 'same {{local_date}}'\n\n\
+             [[expansion]]\ntrigger = ':disabled'\nreplacement = 'same text'\nenabled = false\n\n\
+             [[expansion]]\ntrigger = ':command'\nreplacement = 'same text'\ncommand = { program = '/usr/bin/printf', args = ['dynamic'] }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            duplicate_static_content(&config),
+            vec![vec![":one".to_owned(), ":two".to_owned()]]
+        );
+    }
+
+    #[test]
+    fn trigger_prefix_risks_use_canonical_effective_triggers() {
+        let config = Config::parse(&format!(
+            "[[expansion]]\ntrigger = ':e{}'\nreplacement = 'short'\n\n\
+             [[expansion]]\ntrigger = ':éx'\nreplacement = 'long'\n",
+            '\u{301}'
+        ))
+        .unwrap();
+        assert!(trigger_risks(&config)
+            .iter()
+            .any(|risk| risk.trigger == ":é" && risk.reason.contains(":éx")));
+    }
 
     #[test]
     fn merging_usage_deltas_preserves_counters_and_last_use() {

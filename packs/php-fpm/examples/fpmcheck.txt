@@ -1,0 +1,1 @@
+systemctl status --no-pager -- 'php8.3-fpm.service'; journalctl -u 'php8.3-fpm.service' --since '30 minutes ago' -n '100' --no-pager
