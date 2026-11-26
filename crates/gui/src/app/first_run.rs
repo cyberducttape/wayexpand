@@ -240,7 +240,8 @@ impl GuiApp {
             .as_ref()
             .is_some_and(|record| record.outcome == crate::setup_record::SetupOutcome::Verified);
         if !verified {
-            let record = crate::setup_record::SetupRecord::skipped();
+            let mut record = crate::setup_record::SetupRecord::skipped();
+            record.inherit_application_checks(self.setup_record.as_ref());
             if crate::setup_record::save(&record).is_ok() {
                 self.setup_record = Some(record);
             }

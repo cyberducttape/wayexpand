@@ -422,6 +422,7 @@ impl GuiApp {
         // inventory so users do not have to interpret diagnostics first.
         let why_action = self.render_why_card(ui, palette);
         ui.add_space(8.0);
+        self.render_local_compatibility_report(ui, palette);
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(self.strings.runtime_dashboard())
@@ -1364,6 +1365,106 @@ impl GuiApp {
         }
     }
 
+    fn render_local_compatibility_report(&self, ui: &mut egui::Ui, palette: &Palette) {
+        egui::CollapsingHeader::new(self.strings.dg_local_compatibility_report())
+            .id_salt("local_compatibility_report")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(self.strings.dg_local_compatibility_report_note())
+                        .small()
+                        .color(palette.muted),
+                );
+                let route = self.current_route_label();
+                let route_instance = self.current_route_instance();
+                let desktop = crate::setup_record::current_desktop();
+                let session = crate::setup_record::current_session();
+                let build = crate::setup_record::current_build();
+                let config_revision = self.config_revision.fingerprint();
+                let scope = crate::setup_record::Scope {
+                    route: route.as_deref(),
+                    route_instance: route_instance.as_deref(),
+                    config_revision: Some(&config_revision),
+                    desktop: &desktop,
+                    session: session.as_deref(),
+                    build: &build,
+                };
+                let checks = self
+                    .setup_record
+                    .as_ref()
+                    .map(crate::setup_record::SetupRecord::all_application_checks)
+                    .unwrap_or_default();
+                egui::Grid::new("local_compatibility_report_grid")
+                    .num_columns(2)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(self.strings.dg_report_application());
+                        ui.label(self.strings.dg_report_result());
+                        ui.end_row();
+
+                        let mut applications = vec![
+                            "Kate".to_owned(),
+                            "Konsole".to_owned(),
+                            "Firefox".to_owned(),
+                            "VS Code".to_owned(),
+                        ];
+                        for check in &checks {
+                            if !applications
+                                .iter()
+                                .any(|name| name.eq_ignore_ascii_case(&check.application))
+                            {
+                                applications.push(check.application.clone());
+                            }
+                        }
+                        for application in applications {
+                            let check = checks
+                                .iter()
+                                .find(|check| check.application.eq_ignore_ascii_case(&application));
+                            let result = check.map_or_else(
+                                || self.strings.dg_report_not_checked(),
+                                |check| {
+                                    if crate::setup_record::SetupRecord::application_check_is_current(check, &scope) {
+                                        match check.result {
+                                            crate::setup_record::LocalTestResult::Passed => self.strings.dg_report_passed(),
+                                            crate::setup_record::LocalTestResult::NotConfirmed => self.strings.dg_report_not_confirmed(),
+                                        }
+                                    } else {
+                                        self.strings.dg_report_retest()
+                                    }
+                                },
+                            );
+                            ui.label(application);
+                            ui.label(result);
+                            ui.end_row();
+                        }
+
+                        let current_route_is_ibus = route.as_deref() == Some("ibus");
+                        let sensitive = (!current_route_is_ibus)
+                            .then(|| self.daemon_capabilities.as_ref()?.capture_sensitive_focus)
+                            .flatten();
+                        ui.label(self.strings.dg_report_password_fields());
+                        ui.label(match sensitive {
+                            Some(true) => self.strings.dg_report_signal_available(),
+                            Some(false) => self.strings.dg_report_signal_unavailable(),
+                            None => self.strings.dg_report_not_checked(),
+                        });
+                        ui.end_row();
+
+                        let layout_aware = (!current_route_is_ibus)
+                            .then(|| self.daemon_capabilities.as_ref()?.capture_layout_aware)
+                            .flatten();
+                        ui.label(self.strings.dg_report_international_layout());
+                        ui.label(match layout_aware {
+                            Some(true) => self.strings.dg_report_layout_available(),
+                            Some(false) => self.strings.dg_report_layout_unavailable(),
+                            None => self.strings.dg_report_not_checked(),
+                        });
+                        ui.end_row();
+                    });
+            });
+        ui.add_space(8.0);
+    }
+
     fn render_quick_actions(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         let matching =
             compact_status_value(&self.daemon_status, "matching_available") == Some("true");
@@ -1824,23 +1925,10 @@ impl GuiApp {
                 }
                 ui.horizontal(|ui| {
                     ui.label(self.strings.dg_application_type_for_the_test_report());
-                    egui::ComboBox::from_id_salt("desktop_test_application_type")
-                        .selected_text(&self.desktop_test_application_class)
-                        .show_ui(ui, |ui| {
-                            for application_type in [
-                                "Text editor",
-                                "Browser",
-                                "Terminal",
-                                "Office application",
-                                "Other",
-                            ] {
-                                ui.selectable_value(
-                                    &mut self.desktop_test_application_class,
-                                    application_type.to_owned(),
-                                    application_type,
-                                );
-                            }
-                        });
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.desktop_test_application_class)
+                            .hint_text("e.g. Kate, Konsole, Firefox"),
+                    );
                 });
                 ui.checkbox(
                     &mut self.desktop_test_target_acknowledged,
@@ -2035,12 +2123,13 @@ impl GuiApp {
             // staleness check establishes that it still matches current
             // route/config/session state; never retag an old result as a
             // verification of a newer route instance.
-            let record = crate::setup_record::SetupRecord::verified(
+            let mut record = crate::setup_record::SetupRecord::verified(
                 &application_class,
                 review_scope
                     .as_ref()
                     .expect("confirmed review has a captured scope"),
             );
+            record.inherit_application_checks(self.setup_record.as_ref());
             save_error = crate::setup_record::save(&record).err();
             self.setup_record_saved = save_error.is_none();
             self.setup_record = Some(record);
@@ -2057,6 +2146,20 @@ impl GuiApp {
         } else if rejected {
             self.desktop_test_verified = false;
             self.desktop_test_verified_application = None;
+            if let Some(scope) = review_scope.as_ref() {
+                let mut report_record = self
+                    .setup_record
+                    .clone()
+                    .unwrap_or_else(crate::setup_record::SetupRecord::skipped);
+                report_record.record_application_observation(
+                    &application_class,
+                    crate::setup_record::VerificationMethod::UserConfirmed,
+                    scope,
+                    crate::setup_record::LocalTestResult::NotConfirmed,
+                );
+                self.setup_record_saved = crate::setup_record::save(&report_record).is_ok();
+                self.setup_record = Some(report_record);
+            }
             self.status = Status::error(
                 self.strings
                     .dg_desktop_insertion_was_not_confirmed_inspect(),

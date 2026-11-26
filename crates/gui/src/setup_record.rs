@@ -69,6 +69,34 @@ pub(crate) struct SetupRecord {
     pub config_revision: Option<String>,
     #[serde(default)]
     pub verified_at_unix: Option<u64>,
+    /// Local application checks, retained across later checks. Older setup
+    /// records have no list; their single verified application is synthesized
+    /// when the report is read.
+    #[serde(default)]
+    pub application_checks: Vec<LocalApplicationCheck>,
+}
+
+/// A user-confirmed or controlled-client observation for one named app.
+/// This is local compatibility evidence, not official certification.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) struct LocalApplicationCheck {
+    pub application: String,
+    pub result: LocalTestResult,
+    pub verification_method: VerificationMethod,
+    pub route: Option<String>,
+    pub route_instance: Option<String>,
+    pub config_revision: Option<String>,
+    pub build: String,
+    pub desktop: String,
+    pub session: Option<String>,
+    pub checked_at_unix: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum LocalTestResult {
+    Passed,
+    NotConfirmed,
 }
 
 /// Why a saved verification no longer covers this environment.
@@ -117,7 +145,7 @@ impl SetupRecord {
         scope: &Scope<'_>,
         method: VerificationMethod,
     ) -> Self {
-        Self {
+        let mut record = Self {
             outcome: SetupOutcome::Verified,
             verification_method: Some(method),
             application: Some(application.to_owned()),
@@ -131,7 +159,10 @@ impl SetupRecord {
                 .duration_since(UNIX_EPOCH)
                 .ok()
                 .map(|elapsed| elapsed.as_secs()),
-        }
+            application_checks: Vec::new(),
+        };
+        record.record_current_application_check();
+        record
     }
 
     pub(crate) fn skipped() -> Self {
@@ -146,7 +177,147 @@ impl SetupRecord {
             route_instance: None,
             config_revision: None,
             verified_at_unix: None,
+            application_checks: Vec::new(),
         }
+    }
+
+    /// Carry forward local observations and replace the entry for this app
+    /// with the current scope. Keep the report bounded for long-lived installs.
+    pub(crate) fn inherit_application_checks(&mut self, previous: Option<&Self>) {
+        let Some(previous) = previous else { return };
+        self.application_checks = previous.application_checks.clone();
+        if self.application_checks.is_empty() && previous.outcome == SetupOutcome::Verified {
+            if let Some(application) = previous.application.as_deref() {
+                self.application_checks.push(LocalApplicationCheck {
+                    application: application.to_owned(),
+                    result: LocalTestResult::Passed,
+                    // Historical verified records predate evidence provenance
+                    // and have always meant that the user confirmed the result.
+                    verification_method: previous
+                        .verification_method
+                        .unwrap_or(VerificationMethod::UserConfirmed),
+                    route: previous.route.clone(),
+                    route_instance: previous.route_instance.clone(),
+                    config_revision: previous.config_revision.clone(),
+                    build: previous.build.clone().unwrap_or_default(),
+                    desktop: previous.desktop.clone().unwrap_or_default(),
+                    session: previous.session.clone(),
+                    checked_at_unix: previous.verified_at_unix,
+                });
+            }
+        }
+        self.record_current_application_check();
+    }
+
+    fn record_current_application_check(&mut self) {
+        if self.outcome != SetupOutcome::Verified {
+            return;
+        }
+        let (Some(application), Some(method), Some(build), Some(desktop)) = (
+            self.application.clone(),
+            self.verification_method,
+            self.build.clone(),
+            self.desktop.clone(),
+        ) else {
+            return;
+        };
+        let check = LocalApplicationCheck {
+            application,
+            result: LocalTestResult::Passed,
+            verification_method: method,
+            route: self.route.clone(),
+            route_instance: self.route_instance.clone(),
+            config_revision: self.config_revision.clone(),
+            build,
+            desktop,
+            session: self.session.clone(),
+            checked_at_unix: self.verified_at_unix,
+        };
+        self.application_checks
+            .retain(|old| !old.application.eq_ignore_ascii_case(&check.application));
+        self.application_checks.push(check);
+        if self.application_checks.len() > 64 {
+            self.application_checks.remove(0);
+        }
+    }
+
+    pub(crate) fn all_application_checks(&self) -> Vec<LocalApplicationCheck> {
+        if !self.application_checks.is_empty() {
+            return self.application_checks.clone();
+        }
+        if self.outcome == SetupOutcome::Verified {
+            if let (Some(application), Some(build), Some(desktop)) = (
+                self.application.clone(),
+                self.build.clone(),
+                self.desktop.clone(),
+            ) {
+                return vec![LocalApplicationCheck {
+                    application,
+                    result: LocalTestResult::Passed,
+                    verification_method: self
+                        .verification_method
+                        .unwrap_or(VerificationMethod::UserConfirmed),
+                    route: self.route.clone(),
+                    route_instance: self.route_instance.clone(),
+                    config_revision: self.config_revision.clone(),
+                    build,
+                    desktop,
+                    session: self.session.clone(),
+                    checked_at_unix: self.verified_at_unix,
+                }];
+            }
+        }
+        Vec::new()
+    }
+
+    pub(crate) fn record_application_observation(
+        &mut self,
+        application: &str,
+        method: VerificationMethod,
+        scope: &Scope<'_>,
+        result: LocalTestResult,
+    ) {
+        let check = LocalApplicationCheck {
+            application: application.to_owned(),
+            result,
+            verification_method: method,
+            route: scope.route.map(str::to_owned),
+            route_instance: scope.route_instance.map(str::to_owned),
+            config_revision: scope.config_revision.map(str::to_owned),
+            build: scope.build.to_owned(),
+            desktop: scope.desktop.to_owned(),
+            session: scope.session.map(str::to_owned),
+            checked_at_unix: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()
+                .map(|elapsed| elapsed.as_secs()),
+        };
+        self.application_checks
+            .retain(|old| !old.application.eq_ignore_ascii_case(application));
+        self.application_checks.push(check);
+        if self.application_checks.len() > 64 {
+            self.application_checks.remove(0);
+        }
+    }
+
+    pub(crate) fn application_check_is_current(
+        check: &LocalApplicationCheck,
+        scope: &Scope<'_>,
+    ) -> bool {
+        let record = Self {
+            outcome: SetupOutcome::Verified,
+            verification_method: Some(check.verification_method),
+            application: Some(check.application.clone()),
+            route: check.route.clone(),
+            route_instance: check.route_instance.clone(),
+            config_revision: check.config_revision.clone(),
+            build: Some(check.build.clone()),
+            desktop: Some(check.desktop.clone()),
+            session: check.session.clone(),
+            verified_at_unix: check.checked_at_unix,
+            application_checks: Vec::new(),
+        };
+        record.staleness(scope).is_none()
     }
 
     /// Why this verification does not cover `scope`, or `None` when it does.
@@ -294,7 +465,7 @@ pub(crate) fn save(record: &SetupRecord) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Scope, SetupOutcome, SetupRecord, Staleness};
+    use super::{LocalTestResult, Scope, SetupOutcome, SetupRecord, Staleness, VerificationMethod};
 
     fn verified(route: &str, desktop: &str) -> SetupRecord {
         SetupRecord {
@@ -308,6 +479,7 @@ mod tests {
             route_instance: Some("ibus:42:100".into()),
             config_revision: Some("sha256:test-config".into()),
             verified_at_unix: Some(1),
+            application_checks: Vec::new(),
         }
     }
 
@@ -440,5 +612,64 @@ mod tests {
         );
         let minimal: SetupRecord = toml_edit::de::from_str("outcome = \"skipped\"\n").unwrap();
         assert_eq!(minimal, SetupRecord::skipped());
+        let legacy: SetupRecord = toml_edit::de::from_str(
+            "outcome = \"verified\"\napplication = \"Kate\"\nroute = \"ibus\"\nbuild = \"1.3.6 (abc)\"\ndesktop = \"KDE · wayland\"\nsession = \"boot:1\"\nroute_instance = \"ibus:42:100\"\nconfig_revision = \"sha256:test-config\"\nverified_at_unix = 1\n",
+        )
+        .unwrap();
+        assert_eq!(legacy.all_application_checks().len(), 1);
+        assert_eq!(legacy.all_application_checks()[0].application, "Kate");
+        assert_eq!(
+            legacy.all_application_checks()[0].verification_method,
+            VerificationMethod::UserConfirmed
+        );
+    }
+
+    #[test]
+    fn application_checks_survive_updates_and_are_scoped_to_the_current_run() {
+        let current = scope(Some("ibus"), "KDE · wayland", Some("boot:1"));
+        let mut previous = verified("ibus", "KDE · wayland");
+        previous.application = Some("Kate".into());
+        let mut latest = SetupRecord::verified("Firefox", &current);
+        latest.inherit_application_checks(Some(&previous));
+        let checks = latest.all_application_checks();
+        assert_eq!(checks.len(), 2);
+        assert!(SetupRecord::application_check_is_current(
+            &checks[0], &current
+        ));
+
+        latest.record_application_observation(
+            "Firefox",
+            VerificationMethod::UserConfirmed,
+            &current,
+            LocalTestResult::NotConfirmed,
+        );
+        let firefox = latest
+            .all_application_checks()
+            .into_iter()
+            .find(|check| check.application == "Firefox")
+            .unwrap();
+        assert_eq!(firefox.result, LocalTestResult::NotConfirmed);
+        assert!(SetupRecord::application_check_is_current(
+            &firefox, &current
+        ));
+
+        let other_session = scope(Some("ibus"), "KDE · wayland", Some("boot:2"));
+        assert!(!SetupRecord::application_check_is_current(
+            &firefox,
+            &other_session
+        ));
+
+        let serialized = toml_edit::ser::to_string_pretty(&latest).unwrap();
+        let restored: SetupRecord = toml_edit::de::from_str(&serialized).unwrap();
+        assert_eq!(restored.all_application_checks().len(), 2);
+        assert_eq!(
+            restored
+                .all_application_checks()
+                .iter()
+                .find(|check| check.application == "Firefox")
+                .unwrap()
+                .result,
+            LocalTestResult::NotConfirmed
+        );
     }
 }

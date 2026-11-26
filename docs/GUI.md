@@ -299,6 +299,15 @@ partial or uncertain output, and a service that must restart after an
 update. The ☰ menu holds the remaining actions; the profile switcher appears in
 the toolbar once profiles exist.
 
+Diagnostics includes a collapsible **Local compatibility observations**
+report. The real-application test asks for the application name and persists
+confirmed checks in `gui-setup.toml`; the report marks checks from another
+route, session, build, or configuration as needing a retest. Common desktop
+applications remain listed as *Not checked* until the user tests them. The
+report also shows route-reported password-field and layout capabilities
+separately from application results. It stores no snippet trigger or
+replacement text and is local evidence, not official certification.
+
 The `Settings` window is the single place for preferences and has two tabs:
 
 - **Appearance** — theme (light/dark), interface language, font scale, and
