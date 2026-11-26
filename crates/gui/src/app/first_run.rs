@@ -672,7 +672,14 @@ impl GuiApp {
                             .strong()
                             .color(ui.visuals().strong_text_color()),
                     );
-                    ui.label(RichText::new(self.strings.welcome_intro()).color(palette.muted));
+                    ui.label(
+                        RichText::new(if test_snippet.is_some() {
+                            self.strings.welcome_intro()
+                        } else {
+                            self.strings.welcome_intro_needs_example()
+                        })
+                        .color(palette.muted),
+                    );
                 });
                 ui.add_space(14.0);
                 // Keep first run focused on the one next action: show only
