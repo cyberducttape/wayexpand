@@ -758,6 +758,9 @@ impl GuiApp {
                         // setting one is supported and none is configured.
                         // The Quick Picker copy path already works without it.
                         if self.diagnostics_checked_at.is_some()
+                            && (picker_copy_allowed
+                                || picker_readiness
+                                    == crate::picker::PickerReadiness::TypesDirectly)
                             && self.picker_shortcut.as_ref().is_some_and(|shortcut| {
                                 shortcut.supported && shortcut.keys.is_none()
                             })
