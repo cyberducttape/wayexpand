@@ -3242,9 +3242,12 @@ fn everyday_workspace_is_the_default_and_experience_levels_reveal_more_tools() {
     let _ = fs::remove_file(&path);
     let app = GuiApp::load(path.clone()).unwrap();
     assert_eq!(app.experience, GuiExperience::Everyday);
-    assert!(
-        app.try_live_open,
-        "matcher test should be visible by default"
+    // A fresh launch shows the setup guide, which keeps the matcher test
+    // collapsed so the first-run actions stay visible; returning users get
+    // it expanded.
+    assert_eq!(
+        app.try_live_open, !app.onboarding_visible,
+        "matcher test should be visible by default once setup is out of the way"
     );
     fs::remove_file(path).unwrap();
 }

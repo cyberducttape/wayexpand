@@ -173,9 +173,8 @@ impl GuiApp {
         {
             return;
         }
-        if !self.create_test_snippet() || self.failed_save.is_some() {
-            return;
-        }
+        // Failure is reported by create_test_snippet itself; nothing follows.
+        let _ = self.create_test_snippet();
     }
 
     /// Record the tutorial only after its config save has committed. The
