@@ -433,10 +433,10 @@ fn score(query: &str, trigger: &str, description: &str) -> Option<i64> {
 }
 
 fn score_normalized(query: &str, trigger: &str, description: &str) -> Option<i64> {
-    if let Some(position) = trigger.find(query) {
+    if let Some(position) = find_char_position(trigger, query) {
         return Some(3_000 - position as i64 + i64::from(trigger == query) * 1_000);
     }
-    if let Some(position) = description.find(query) {
+    if let Some(position) = find_char_position(description, query) {
         return Some(2_000 - position as i64);
     }
     let mut gaps = 0_i64;
@@ -463,6 +463,11 @@ fn score_normalized(query: &str, trigger: &str, description: &str) -> Option<i64
         last = Some(index);
     }
     Some(1_000 - gaps.min(999))
+}
+
+fn find_char_position(text: &str, query: &str) -> Option<usize> {
+    text.find(query)
+        .map(|byte_position| text[..byte_position].chars().count())
 }
 
 #[derive(Debug, Clone)]
@@ -688,6 +693,11 @@ pub(crate) struct PickerApp {
     search_index: Vec<SearchEntry>,
     cached_query: Option<String>,
     cached_revision: Option<ConfigRevision>,
+    cached_show_unavailable: Option<bool>,
+    /// All matching candidates for the cached query, not only the visible top
+    /// results. A longer query can safely filter this set because substring
+    /// and subsequence matches are both monotonic under query extension.
+    candidate_indices: Vec<usize>,
     preview_cache: HashMap<String, String>,
     last_preview_context_refresh: Instant,
     ranked_scratch: Vec<(i64, usize)>,
@@ -786,6 +796,8 @@ impl PickerApp {
             config_revision,
             cached_query: None,
             cached_revision: None,
+            cached_show_unavailable: None,
+            candidate_indices: Vec::new(),
             preview_cache: HashMap::new(),
             last_preview_context_refresh: Instant::now(),
             ranked_scratch: Vec::new(),
@@ -814,28 +826,57 @@ impl PickerApp {
     /// turned off are left out.
     fn refresh_results(&mut self) {
         let query = self.query.trim().to_lowercase();
-        if self.cached_query.as_deref() == Some(query.as_str())
-            && self.cached_revision.as_ref() == Some(&self.config_revision)
+        let same_revision = self.cached_revision.as_ref() == Some(&self.config_revision);
+        let same_visibility = self.cached_show_unavailable == Some(self.show_unavailable);
+        if self.cached_query.as_deref() == Some(query.as_str()) && same_revision && same_visibility
         {
             return;
         }
-        if self.cached_revision.as_ref() != Some(&self.config_revision) {
+        if !same_revision {
             self.preview_cache.clear();
         }
+        let incremental = same_revision
+            && same_visibility
+            && self.cached_query.as_ref().is_some_and(|previous| {
+                query.len() > previous.len() && query.starts_with(previous)
+            });
+        if !incremental {
+            self.candidate_indices.clear();
+        }
         self.ranked_scratch.clear();
-        for (index, entry) in self.search_index.iter().enumerate() {
-            if entry.availability == Availability::Hidden
-                || !self.show_unavailable && !entry.selectable()
-            {
-                continue;
-            }
-            if let Some(score) = score_normalized(&query, &entry.trigger, &entry.description) {
-                let score = if entry.selectable() {
-                    score
+        if incremental {
+            let search_index = &self.search_index;
+            let ranked_scratch = &mut self.ranked_scratch;
+            self.candidate_indices.retain(|index| {
+                let entry = &search_index[*index];
+                if let Some(score) = score_normalized(&query, &entry.trigger, &entry.description) {
+                    let score = if entry.selectable() {
+                        score
+                    } else {
+                        score - UNAVAILABLE_PENALTY
+                    };
+                    ranked_scratch.push((score, *index));
+                    true
                 } else {
-                    score - UNAVAILABLE_PENALTY
-                };
-                self.ranked_scratch.push((score, index));
+                    false
+                }
+            });
+        } else {
+            for (index, entry) in self.search_index.iter().enumerate() {
+                if entry.availability == Availability::Hidden
+                    || !self.show_unavailable && !entry.selectable()
+                {
+                    continue;
+                }
+                if let Some(score) = score_normalized(&query, &entry.trigger, &entry.description) {
+                    let score = if entry.selectable() {
+                        score
+                    } else {
+                        score - UNAVAILABLE_PENALTY
+                    };
+                    self.candidate_indices.push(index);
+                    self.ranked_scratch.push((score, index));
+                }
             }
         }
         top_ranked_into(
@@ -845,6 +886,7 @@ impl PickerApp {
         );
         self.cached_query = Some(query);
         self.cached_revision = Some(self.config_revision.clone());
+        self.cached_show_unavailable = Some(self.show_unavailable);
     }
 
     fn choose(&mut self, ctx: &egui::Context, expansion: &ExpansionConfig) {
@@ -2580,6 +2622,12 @@ mod tests {
     }
 
     #[test]
+    fn substring_position_uses_characters_for_ascii_and_multibyte_text() {
+        assert_eq!(score("a", "éa", ""), score("a", "xa", ""));
+        assert_eq!(score("a", "", "éa"), score("a", "", "xa"));
+    }
+
+    #[test]
     fn focus_target_parser_fails_closed_for_missing_or_empty_tokens() {
         assert_eq!(
             focus_target_from_response(
@@ -3381,6 +3429,24 @@ command = { program = "/usr/bin/systemctl", args = ["status", "nginx.service"] }
                     "{availability:?}"
                 );
             }
+        }
+
+        #[test]
+        fn extending_a_query_filters_cached_candidates_without_changing_results() {
+            let mut incremental = picker(LIBRARY, false);
+            incremental.query = ";s".into();
+            incremental.refresh_results();
+            let candidates_after_first_query = incremental.candidate_indices.len();
+            assert!(candidates_after_first_query > 1);
+
+            incremental.query = ";si".into();
+            incremental.refresh_results();
+            assert!(incremental.candidate_indices.len() < candidates_after_first_query);
+
+            let mut full_scan = picker(LIBRARY, false);
+            full_scan.query = ";si".into();
+            full_scan.refresh_results();
+            assert_eq!(incremental.result_indices, full_scan.result_indices);
         }
 
         #[test]
