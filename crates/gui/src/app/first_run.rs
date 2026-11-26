@@ -487,7 +487,7 @@ impl GuiApp {
                 .is_some_and(|(_, replacement)| self.playground.text.contains(replacement));
         // A pending or stale diagnostic is not yet a setup failure. Keep the
         // headline aligned with the connection step while it refreshes or
-        // reconnects, and reserve Setup incomplete for an observed blocker.
+        // reconnects, and reserve the attention state for an observed blocker.
         let setup_check_pending = checking
             || matches!(
                 self.current_next_step().map(|(problem, _)| problem),
@@ -747,44 +747,42 @@ impl GuiApp {
                                 }
                             }),
                         );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let shortcut = self
+                        let shortcut = self
+                            .picker_shortcut
+                            .as_ref()
+                            .and_then(|shortcut| shortcut.keys.as_ref());
+                        if shortcut.is_none()
+                            && !self
                                 .picker_shortcut
                                 .as_ref()
-                                .and_then(|shortcut| shortcut.keys.as_ref());
-                            if shortcut.is_none()
-                                && !self
-                                    .picker_shortcut
-                                    .as_ref()
-                                    .is_some_and(|shortcut| !shortcut.supported)
-                                && ui
-                                    .add_enabled(
-                                        self.setup_task.is_none(),
-                                        egui::Button::new(
-                                            self.strings.shortcut_use_keys(DEFAULT_PICKER_SHORTCUT),
-                                        ),
-                                    )
-                                    .clicked()
-                            {
-                                self.set_picker_shortcut();
-                            }
-                            if !self.config.expansion.is_empty()
-                                && ui.button(self.strings.open_quick_picker_copy()).clicked()
-                            {
-                                self.open_copy_only_picker();
-                            }
-                            if ui.small_button(self.strings.onboarding_defer()).clicked() {
-                                self.defer_onboarding();
-                            }
-                            // Someone who already uses WayExpand (an imported
-                            // library, another machine) can dismiss the guide
-                            // for good; this never marks anything verified.
-                            if has_user_library_snippets(&self.config)
-                                && ui.small_button(self.strings.onboarding_skip()).clicked()
-                            {
-                                self.skip_onboarding();
-                            }
-                        });
+                                .is_some_and(|shortcut| !shortcut.supported)
+                            && ui
+                                .add_enabled(
+                                    self.setup_task.is_none(),
+                                    egui::Button::new(
+                                        self.strings.shortcut_use_keys(DEFAULT_PICKER_SHORTCUT),
+                                    ),
+                                )
+                                .clicked()
+                        {
+                            self.set_picker_shortcut();
+                        }
+                        if !self.config.expansion.is_empty()
+                            && ui.button(self.strings.open_quick_picker_copy()).clicked()
+                        {
+                            self.open_copy_only_picker();
+                        }
+                        if ui.small_button(self.strings.onboarding_defer()).clicked() {
+                            self.defer_onboarding();
+                        }
+                        // Someone who already uses WayExpand (an imported
+                        // library, another machine) can dismiss the guide
+                        // for good; this never marks anything verified.
+                        if has_user_library_snippets(&self.config)
+                            && ui.small_button(self.strings.onboarding_skip()).clicked()
+                        {
+                            self.skip_onboarding();
+                        }
                     });
                     ui.add_space(10.0);
 
@@ -864,27 +862,6 @@ impl GuiApp {
                                         self.strings.problem_text(problem),
                                     );
                                     let help = match problem {
-                                        super::Problem::InstallationIncomplete
-                                            if !self
-                                                .installation_audit
-                                                .failed_components
-                                                .is_empty() =>
-                                        {
-                                            let components = self
-                                                .installation_audit
-                                                .failed_components
-                                                .iter()
-                                                .map(|component| {
-                                                    self.strings
-                                                        .dg_installation_component(component)
-                                                })
-                                                .collect::<Vec<_>>()
-                                                .join(", ");
-                                            Some(
-                                                self.strings
-                                                    .dg_installation_components(&components),
-                                            )
-                                        }
                                         super::Problem::InputSourceNotSetUp => {
                                             Some(self.strings.gnome_register_help().to_owned())
                                         }
@@ -1356,7 +1333,7 @@ mod guided_setup_tests {
         );
         assert_eq!(
             first_run_outcome_label(&strings, FirstRunOutcome::SetupIncomplete),
-            "Setup incomplete"
+            "Automatic expansion needs attention"
         );
     }
 

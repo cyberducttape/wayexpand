@@ -2611,7 +2611,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
             "Working in tested application",
             "Configured, awaiting test",
             "Automatic replacement unavailable · copy and paste",
-            "Setup incomplete",
+            "Automatic expansion needs attention",
         ]
         .iter()
         .any(|state| guide_semantics.contains(*state)),
