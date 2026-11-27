@@ -737,20 +737,20 @@ mod tests {
                 .standing
         };
         // No EIS socket and no same-client virtual-keyboard path (river).
-        let mut capabilities = capabilities(true, false, false);
-        capabilities.compositor = Compositor::River;
-        let plan = plan_routes(&capabilities, true, allow_all);
+        let mut river = capabilities(true, false, false);
+        river.compositor = Compositor::River;
+        let plan = plan_routes(&river, true, allow_all);
         assert_eq!(plan.recommended().map(RecommendedRoute::id), Some("ibus"));
-        assert_eq!(standing(&capabilities), RouteStanding::Unavailable);
+        assert_eq!(standing(&river), RouteStanding::Unavailable);
 
         // Sway and Hyprland pass keys through the input method's own
         // virtual keyboard, which needs that protocol.
         for compositor in [Compositor::Sway, Compositor::Hyprland] {
-            let mut capabilities = capabilities(true, false, false);
-            capabilities.compositor = compositor;
-            assert_ne!(standing(&capabilities), RouteStanding::Unavailable);
-            capabilities.has_virtual_keyboard = false;
-            assert_eq!(standing(&capabilities), RouteStanding::Unavailable);
+            let mut wlroots = capabilities(true, false, false);
+            wlroots.compositor = compositor;
+            assert_ne!(standing(&wlroots), RouteStanding::Unavailable);
+            wlroots.has_virtual_keyboard = false;
+            assert_eq!(standing(&wlroots), RouteStanding::Unavailable);
         }
     }
 

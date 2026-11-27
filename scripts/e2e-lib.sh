@@ -622,7 +622,13 @@ scenario_input_method_expansion() {
 trigger = "sig"
 replacement = "signature"
 EOF
-    start_sink e2e-a && start_daemon || return 2
+    if [ "${e2e_input_method_starts_first:-0}" = 1 ]; then
+        # As at login: the input method exists before the field is focused,
+        # so activation carries the field's surrounding text.
+        start_daemon && start_sink e2e-a || return 2
+    else
+        start_sink e2e-a && start_daemon || return 2
+    fi
     wait_until 50 sink_text_input_active e2e-a || return 2
     expand_in e2e-a "" "sig" || return 2
     wait_until 50 sink_text_is e2e-a "signature"
