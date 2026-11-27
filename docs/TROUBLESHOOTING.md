@@ -595,15 +595,6 @@ windows) or `hyprctl activewindow` (`class`) reports.
 
 river has no window tracking; app filters fail closed (never match) there.
 
-#### The first trigger after restarting WayExpand does not expand on Sway
-
-With the input-method route, Sway gives an input method that starts while a
-text field is already focused no copy of that field's text until the field
-changes. WayExpand will not replace a trigger it cannot see in the field, so
-that first trigger is left as typed (nothing is deleted). Type any character,
-or click away and back, and expansion works again. This only happens right
-after the WayExpand service starts or restarts.
-
 ### GNOME
 
 #### App_filter not supported

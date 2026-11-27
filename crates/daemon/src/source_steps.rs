@@ -255,8 +255,11 @@ impl Daemon {
                         self.reconnect_delay = Duration::from_millis(250);
                     }
                     Err(error) if error.retryable() => {
+                        // Input-method injector messages are protocol
+                        // states, never snippet or field text.
                         warn!(
                             outcome = error.diagnostic_category(),
+                            detail = %error.source,
                             trigger_chars = error.result.trigger.chars().count(),
                             insert_bytes = error.result.insert.len(),
                             "input-method output failed; current expansion is not replayed"

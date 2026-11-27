@@ -260,6 +260,11 @@ struct StateData {
     events: VecDeque<InputEvent>,
     keyboard_state: Option<State>,
     surrounding_text: Option<SurroundingText>,
+    /// Surrounding text of the batch in progress. The protocol applies a
+    /// batch on `done`, and compositors order its events differently
+    /// (wlroots sends surrounding text before the content type), so whether
+    /// the field is sensitive is known only at `done`.
+    pending_surrounding_text: Option<SurroundingText>,
     sensitive_content: bool,
     pending_sensitive: Option<bool>,
     /// Local XKB dead-key/Compose state. This is separate from compositor
@@ -292,6 +297,7 @@ impl StateData {
             events: VecDeque::new(),
             keyboard_state: None,
             surrounding_text: None,
+            pending_surrounding_text: None,
             sensitive_content: true,
             pending_sensitive: None,
             composition_active: false,
@@ -316,24 +322,35 @@ impl StateData {
 
     fn finish_protocol_batch(&mut self) {
         self.commit_serial = self.commit_serial.wrapping_add(1);
-        if let Some(sensitive) = self.pending_sensitive.take() {
+        let focus_change = self.pending_sensitive.take();
+        if let Some(sensitive) = focus_change {
             self.sensitive_content = sensitive;
-            if sensitive {
-                clear_surrounding_text(&mut self.surrounding_text);
-            }
+        }
+        if self.sensitive_content {
+            clear_surrounding_text(&mut self.pending_surrounding_text);
+            clear_surrounding_text(&mut self.surrounding_text);
+        } else if let Some(pending) = self.pending_surrounding_text.take() {
+            clear_surrounding_text(&mut self.surrounding_text);
+            self.surrounding_text = Some(pending);
+        }
+        if let Some(sensitive) = focus_change {
             self.queue_event(InputEvent::FocusChanged { sensitive });
         }
     }
 
     fn set_surrounding_text(&mut self, text: String, cursor: u32, anchor: u32) {
-        if self.pending_sensitive.unwrap_or(self.sensitive_content) {
+        if self.pending_sensitive == Some(true) {
             // The compositor text is wrapped immediately so even discarded
             // sensitive updates are wiped when this scope ends.
             drop(Zeroizing::new(text));
+            clear_surrounding_text(&mut self.pending_surrounding_text);
             clear_surrounding_text(&mut self.surrounding_text);
             return;
         }
-        self.surrounding_text = Some(SurroundingText {
+        // Held (wiped on drop) until `done` decides with the batch's final
+        // content type; never used for matching before then.
+        clear_surrounding_text(&mut self.pending_surrounding_text);
+        self.pending_surrounding_text = Some(SurroundingText {
             text: Zeroizing::new(text),
             cursor,
             anchor,
@@ -343,6 +360,7 @@ impl StateData {
     fn activate(&mut self) {
         self.keyboard_state = None;
         clear_surrounding_text(&mut self.surrounding_text);
+        clear_surrounding_text(&mut self.pending_surrounding_text);
         self.sensitive_content = true;
         self.pending_sensitive = None;
         reset_local_composition(self);
@@ -354,6 +372,7 @@ impl StateData {
     fn deactivate(&mut self) {
         self.keyboard_state = None;
         clear_surrounding_text(&mut self.surrounding_text);
+        clear_surrounding_text(&mut self.pending_surrounding_text);
         self.sensitive_content = true;
         self.pending_sensitive = None;
         reset_local_composition(self);

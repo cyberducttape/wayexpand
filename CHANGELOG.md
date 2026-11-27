@@ -33,6 +33,11 @@ All notable changes to WayExpand are documented here.
   Sway CI job now also runs the input-method scenarios
   (`E2E_INPUT_SOURCE=input-method`), including a new
   `input-method-pass-through` check.
+- The input-method source now applies surrounding text when the protocol
+  batch ends (`done`), as the protocol specifies, instead of on arrival.
+  wlroots compositors send surrounding text before the content type, so it
+  was discarded as possibly sensitive, and the first replacement in a field
+  was refused until the field had changed twice.
 - First-time setup is simpler. The first-run guide highlights one action at a
   time: *Use Quick Picker (copy & paste)* is the primary button only when the
   desktop has no automatic route to set up, so it no longer competes with

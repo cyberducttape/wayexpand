@@ -26,11 +26,6 @@ e2e_compatibility_mode=tracked-focus
 # compatibility output; production defaults remain limited to 8 characters.
 e2e_keystroke_max_chars=250
 e2e_input_source=${E2E_INPUT_SOURCE:-stdin}
-# Sway sends an input method that appears after a field was focused no
-# surrounding text until the field changes, so its first replacement there
-# is refused before deleting anything. Start the daemon first, as at login.
-# shellcheck disable=SC2034 # read by scripts/e2e-lib.sh
-e2e_input_method_starts_first=1
 
 # Focus the window whose app_id is $1 through Sway IPC.
 activate() {

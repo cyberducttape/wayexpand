@@ -1536,6 +1536,47 @@ fn sensitive_content_type_discards_surrounding_text() {
 }
 
 #[test]
+fn surrounding_text_before_the_content_type_is_applied_at_done() {
+    // wlroots compositors send a batch's surrounding text before its content
+    // type. The text must survive until `done` decides on sensitivity.
+    use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{
+        ContentHint, ContentPurpose,
+    };
+
+    let mut state = StateData::new();
+    state.activate();
+    state.set_surrounding_text("hello si".to_owned(), 8, 8);
+    assert!(
+        state.surrounding_text.is_none(),
+        "not usable before the batch is done"
+    );
+    state.set_content_type(
+        WEnum::Value(ContentHint::None),
+        WEnum::Value(ContentPurpose::Normal),
+    );
+    state.finish_protocol_batch();
+    assert_eq!(
+        state
+            .surrounding_text
+            .as_ref()
+            .map(|text| text.text.as_str()),
+        Some("hello si")
+    );
+
+    // The same order with a password field discards it.
+    let mut state = StateData::new();
+    state.activate();
+    state.set_surrounding_text("secret".to_owned(), 6, 6);
+    state.set_content_type(
+        WEnum::Value(ContentHint::None),
+        WEnum::Value(ContentPurpose::Password),
+    );
+    state.finish_protocol_batch();
+    assert!(state.surrounding_text.is_none());
+    assert!(state.pending_surrounding_text.is_none());
+}
+
+#[test]
 fn pass_through_queue_is_bounded_and_overflow_is_reported() {
     let mut state = StateData::new();
     for i in 0..MAX_PENDING_KEY_PASS_THROUGH {
