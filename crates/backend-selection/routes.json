@@ -1,5 +1,5 @@
 {
-  "recommended_description": "Recommended mode configures the highest-ranked route that is available and allowed by policy: certified routes first, then input-method-v2 (when libei key pass-through is available), then IBus; it never automatically selects evdev or another globally observing path.",
+  "recommended_description": "Recommended mode configures the highest-ranked route that is available and allowed by policy: certified routes first, then input-method-v2 (when key pass-through is available: libei, or the input method's own virtual keyboard on Sway and Hyprland), then IBus; it never automatically selects evdev or another globally observing path.",
   "desktop_profiles": [
     {
       "id": "gnome-wayland",

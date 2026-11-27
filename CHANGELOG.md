@@ -21,6 +21,18 @@ All notable changes to WayExpand are documented here.
   `compositor_ipc_window_tracker` probe, and `wayexpand debug` reports
   `WX-WINDOW-ENV-001` when the systemd user service cannot see the socket
   variable.
+- Input-method-v2 capture now works on Sway and Hyprland. It used to start
+  only with libei key pass-through, which neither compositor offers, so the
+  route was unavailable there. The input method now passes unsupported keys
+  (arrows, Escape, shortcuts) through a `zwp_virtual_keyboard_v1` on its own
+  Wayland connection, which both compositors exempt from its keyboard grab,
+  mirroring the grab's keymap and modifiers. The source refuses to register
+  without that keyboard, so a grab never lacks a delivery path. Organization
+  policy gates it as the `wlroots` backend. The route planner, `setup` and
+  the GUI offer input-method-v2 on these desktops again, and the headless
+  Sway CI job now also runs the input-method scenarios
+  (`E2E_INPUT_SOURCE=input-method`), including a new
+  `input-method-pass-through` check.
 - First-time setup is simpler. The first-run guide highlights one action at a
   time: *Use Quick Picker (copy & paste)* is the primary button only when the
   desktop has no automatic route to set up, so it no longer competes with

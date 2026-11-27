@@ -22,6 +22,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for StateData {
             state.manager = Some(registry.bind(name, version.min(1), qh, ()));
         } else if interface == "wl_seat" && state.seat.is_none() {
             state.seat = Some(registry.bind(name, version.min(7), qh, ()));
+        } else if interface == "zwp_virtual_keyboard_manager_v1"
+            && state.virtual_keyboard_manager.is_none()
+        {
+            state.virtual_keyboard_manager = Some(registry.bind(name, version.min(1), qh, ()));
         }
     }
 }
@@ -46,6 +50,30 @@ impl Dispatch<ZwpInputMethodManagerV2, ()> for StateData {
         _: &mut Self,
         _: &ZwpInputMethodManagerV2,
         _: wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_manager_v2::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpVirtualKeyboardManagerV1, ()> for StateData {
+    fn event(
+        _: &mut Self,
+        _: &ZwpVirtualKeyboardManagerV1,
+        _: wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpVirtualKeyboardV1, ()> for StateData {
+    fn event(
+        _: &mut Self,
+        _: &ZwpVirtualKeyboardV1,
+        _: wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
@@ -138,9 +166,17 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                     return;
                 }
                 match decode_keymap(fd, size) {
-                    Ok(keymap) => {
+                    Ok((keymap, text)) => {
                         reset_local_composition(state);
                         state.keyboard_state = Some(State::new(keymap));
+                        if let Some(keyboard) = state.virtual_keyboard.as_ref() {
+                            match send_virtual_keyboard_keymap(keyboard, &text) {
+                                Ok(()) => state
+                                    .virtual_keyboard_keymap_ready
+                                    .store(true, Ordering::Release),
+                                Err(error) => state.error = Some(error),
+                            }
+                        }
                     }
                     Err(error) => state.error = Some(error),
                 }
@@ -161,6 +197,13 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                         0,
                         group as usize,
                     );
+                }
+                // Keep the pass-through keyboard's modifier and layout-group
+                // state equal to the physical keyboard's.
+                if let Some(keyboard) = state.virtual_keyboard.as_ref() {
+                    if state.virtual_keyboard_keymap_ready.load(Ordering::Acquire) {
+                        keyboard.modifiers(mods_depressed, mods_latched, mods_locked, group);
+                    }
                 }
             }
             Event::Key {

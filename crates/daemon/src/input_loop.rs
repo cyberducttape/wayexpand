@@ -194,6 +194,9 @@ pub fn connect_input_method_session(
     policy: &OrganizationPolicy,
 ) -> Result<InputMethodSource, InputMethodError> {
     check_input_method_policy(policy)?;
+    if uses_virtual_keyboard_pass_through() {
+        return connect_virtual_keyboard_input_method(control, config_path, config_healthy);
+    }
     // Establish pass-through before creating the input-method source. This
     // ordering is the keyboard-safety boundary: once the source exists, the
     // compositor is allowed to grant it an exclusive keyboard grab.
@@ -204,9 +207,61 @@ pub fn connect_input_method_session(
     attach_key_pass_through(control, config_path, config_healthy, key_injector)
 }
 
-/// Refuse input-method capture when policy prohibits its mandatory libei key
-/// pass-through.
+/// Sway and Hyprland have no libei/EIS server. There the input method
+/// passes unsupported keys through a virtual keyboard on its own Wayland
+/// connection, which both compositors exempt from the input method's grab.
+/// An explicitly configured EIS socket keeps the libei path.
+pub fn uses_virtual_keyboard_pass_through() -> bool {
+    wayexpand_backend_selection::input_method_uses_virtual_keyboard_pass_through(
+        wayexpand_backend_selection::Compositor::detect(),
+        std::env::var_os("LIBEI_SOCKET").is_some(),
+    )
+}
+
+/// Connect input-method-v2 with same-client virtual-keyboard pass-through.
+/// The source refuses to register the input method unless the compositor
+/// offers the virtual keyboard first, so no grab can lack a delivery path.
+pub fn connect_virtual_keyboard_input_method(
+    control: &control::ControlServer,
+    config_path: &Path,
+    config_healthy: bool,
+) -> Result<InputMethodSource, InputMethodError> {
+    let source = InputMethodSource::connect_with_virtual_keyboard_pass_through()?;
+    let backend_mode = source
+        .key_pass_through_status_detail()
+        .unwrap_or("virtual-keyboard pass-through");
+    status::set_daemon_status_with_mode(
+        control,
+        "input-method",
+        "input-method-v2",
+        "connected",
+        config_path,
+        config_healthy,
+        backend_mode,
+        CommandMetrics::default(),
+    );
+    Ok(source)
+}
+
+/// Refuse input-method capture when policy prohibits its mandatory key
+/// pass-through backend (libei, or the wlroots virtual keyboard on Sway and
+/// Hyprland).
 pub fn check_input_method_policy(policy: &OrganizationPolicy) -> Result<(), InputMethodError> {
+    if uses_virtual_keyboard_pass_through() {
+        if policy.safe_mode && !policy.backend_allowed("wlroots") {
+            let violation = format!(
+                "backend 'wlroots' is not in allowed list: {:?}",
+                policy.allowed_backends
+            );
+            crate::policy::log_violation(policy, &violation);
+            return Err(InputMethodError::Protocol(
+                "organization policy prohibits input-method-v2 because its virtual-keyboard "
+                    .to_owned()
+                    + "key pass-through is mandatory for safe keyboard capture",
+            ));
+        }
+        return Ok(());
+    }
     if !policy.backend_allowed("libei") {
         let violation = format!(
             "backend 'libei' is not in allowed list: {:?}",

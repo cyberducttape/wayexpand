@@ -236,9 +236,12 @@ Findings from Sway 1.11 that this harness surfaced:
 - Sway delivers none of a virtual keyboard's keys if its client disconnects
   immediately after sending them; the one-shot test typist lingers briefly.
   The daemon's keyboard lives as long as the daemon.
-- Input-method-v2 capture cannot run on Sway: the daemon starts it only with
-  libei key pass-through (see [Input-method source](#input-method-source)),
-  and Sway offers no libei/EIS server.
+- Sway has no libei/EIS server, so input-method-v2 passes unsupported keys
+  through a virtual keyboard on its own Wayland connection, which Sway
+  exempts from the input method's grab. `E2E_INPUT_SOURCE=input-method
+  scripts/test-sway-e2e.sh` runs the input-method scenarios, including
+  `input-method-pass-through` (Left reaches the client, expansion still
+  works).
 
 ## Real ibus-daemon engine test
 

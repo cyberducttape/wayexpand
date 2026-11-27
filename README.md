@@ -286,7 +286,8 @@ written as `{{{{ … }}}}`. See [Templates](docs/TEMPLATES.md).
   keystroke routes keep typed expansions off until you allow them with
   `compatibility_mode`. Recommended mode configures the highest-ranked route
   that is available and allowed by policy: certified routes first, then
-  input-method-v2 (when libei key pass-through is available), then IBus; it
+  input-method-v2 (when key pass-through is available: libei, or the input
+  method's own virtual keyboard on Sway and Hyprland), then IBus; it
   never automatically selects evdev or another globally observing path. See
   [Insertion guarantees](SECURITY.md#insertion-guarantees).
 

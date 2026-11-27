@@ -704,7 +704,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq sway libwayland-dev libxkbcommon-dev pkg-config wl-clipboard
       - name: Test production wlroots output under Sway
         run: bash scripts/test-sway-e2e.sh --keep
+      - name: Run headless Sway input-method tests
+        if: ${{ !cancelled() }}
+        run: E2E_INPUT_SOURCE=input-method bash scripts/test-sway-e2e.sh --keep
       - name: Lifecycle soak against wlroots output (1 min)
+        if: ${{ !cancelled() }}
         run: |
           # Sway has no EIS relay, so the soak skips output revocation.
           E2E_SOAK_SECONDS=60 bash scripts/test-sway-e2e.sh --keep lifecycle-soak

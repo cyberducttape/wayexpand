@@ -419,12 +419,22 @@ fn route_availability(
     ibus_available: bool,
 ) -> Result<(), &'static str> {
     let libei_reachable = capabilities.has_direct_libei_socket;
+    let virtual_keyboard_pass_through = crate::input_method_uses_virtual_keyboard_pass_through(
+        capabilities.compositor,
+        capabilities.has_direct_libei_socket,
+    );
     match route.id.as_str() {
         "ibus" if ibus_available => Ok(()),
         "ibus" => Err("the WayExpand IBus engine is not installed or IBus is unavailable"),
         "input-method-v2" if !capabilities.has_input_method_v2 => {
             Err("the compositor does not offer zwp_input_method_manager_v2")
         }
+        "input-method-v2"
+            if virtual_keyboard_pass_through && !capabilities.has_virtual_keyboard =>
+        {
+            Err("the compositor does not offer the virtual keyboard used for key pass-through")
+        }
+        "input-method-v2" if virtual_keyboard_pass_through => Ok(()),
         "input-method-v2"
             if !libei_reachable
                 && !matches!(
@@ -474,7 +484,7 @@ pub fn plan_routes(
                     ),
                     Ok(()) if contract.requires_raw_input() => (
                         RouteStanding::RequiresConsent,
-                        if uses_libei_passthrough(contract)
+                        if uses_libei_passthrough(contract, capabilities)
                             && !capabilities.has_direct_libei_socket
                         {
                             "portal authorization has not been requested; desktop name is only a provider candidate"
@@ -483,7 +493,7 @@ pub fn plan_routes(
                         },
                     ),
                     Ok(())
-                        if uses_libei_passthrough(contract)
+                        if uses_libei_passthrough(contract, capabilities)
                             && !capabilities.has_direct_libei_socket
                             && matches!(capabilities.compositor, Compositor::KdePlasma | Compositor::Gnome) =>
                     {
@@ -564,6 +574,15 @@ fn assess_route(
     } else if input_method {
         if !capabilities.has_input_method_v2 {
             AssessmentEvidence::No
+        } else if crate::input_method_uses_virtual_keyboard_pass_through(
+            capabilities.compositor,
+            capabilities.has_direct_libei_socket,
+        ) {
+            if capabilities.has_virtual_keyboard {
+                AssessmentEvidence::Yes
+            } else {
+                AssessmentEvidence::No
+            }
         } else if capabilities.has_direct_libei_socket {
             AssessmentEvidence::Yes
         } else if portal_candidate {
@@ -584,7 +603,7 @@ fn assess_route(
     } else {
         AssessmentEvidence::Unknown
     };
-    let uses_libei = uses_libei_passthrough(contract);
+    let uses_libei = uses_libei_passthrough(contract, capabilities);
     let portal = uses_libei.then_some(PortalProgress {
         provider_candidate: portal_candidate,
         implementation_discovered: AssessmentEvidence::Unknown,
@@ -640,8 +659,13 @@ fn assess_route(
     }
 }
 
-fn uses_libei_passthrough(contract: &RouteContract) -> bool {
-    contract.injection == "libei" || contract.id == "input-method-v2"
+fn uses_libei_passthrough(contract: &RouteContract, capabilities: &Capabilities) -> bool {
+    contract.injection == "libei"
+        || (contract.id == "input-method-v2"
+            && !crate::input_method_uses_virtual_keyboard_pass_through(
+                capabilities.compositor,
+                capabilities.has_direct_libei_socket,
+            ))
 }
 
 pub fn setup_backend_allowed(policy: &wayexpand_core::OrganizationPolicy, backend: &str) -> bool {

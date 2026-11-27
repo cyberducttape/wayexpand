@@ -1508,8 +1508,31 @@ fn setup_modes_do_not_promote_unavailable_paths() {
         "input-method"
     );
 
+    // Sway and Hyprland have no EIS server; the input method passes keys
+    // through its own virtual keyboard instead, so it needs that protocol.
+    for compositor in [
+        wayexpand_backend_selection::Compositor::Sway,
+        wayexpand_backend_selection::Compositor::Hyprland,
+    ] {
+        let wlroots = wayexpand_backend_selection::Capabilities {
+            compositor,
+            ..experimental
+        };
+        assert_eq!(
+            setup_backend_for_mode("experimental", &wlroots, &policy).unwrap(),
+            "input-method"
+        );
+        let without_virtual_keyboard = wayexpand_backend_selection::Capabilities {
+            has_virtual_keyboard: false,
+            ..wlroots
+        };
+        assert!(
+            setup_backend_for_mode("experimental", &without_virtual_keyboard, &policy).is_err()
+        );
+    }
+
     let unsupported_compositor = wayexpand_backend_selection::Capabilities {
-        compositor: wayexpand_backend_selection::Compositor::Sway,
+        compositor: wayexpand_backend_selection::Compositor::River,
         ..experimental
     };
     assert!(setup_backend_for_mode("experimental", &unsupported_compositor, &policy).is_err());

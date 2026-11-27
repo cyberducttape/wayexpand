@@ -263,6 +263,17 @@ impl Compositor {
     }
 }
 
+/// Whether input-method-v2 passes unsupported keys through a virtual keyboard
+/// on its own Wayland connection instead of libei. Sway and Hyprland have no
+/// libei/EIS server but exempt an input method's own virtual keyboard from
+/// its grab; an explicitly configured EIS socket keeps the libei path.
+pub fn input_method_uses_virtual_keyboard_pass_through(
+    compositor: Compositor,
+    has_direct_libei_socket: bool,
+) -> bool {
+    matches!(compositor, Compositor::Sway | Compositor::Hyprland) && !has_direct_libei_socket
+}
+
 /// Probe for actual capabilities available in the session.
 pub fn probe_capabilities() -> Capabilities {
     let is_wayland =
@@ -513,7 +524,7 @@ impl BackendSelection {
             ResolvedBackendPair::InputMethod => {
                 writeln!(
                     output,
-                    "  experimental opt-in only: libei key pass-through exists but still requires compositor certification"
+                    "  experimental opt-in only: key pass-through (libei, or the input method's own virtual keyboard on Sway and Hyprland) exists but still requires compositor certification"
                 )
                 .unwrap();
                 writeln!(
