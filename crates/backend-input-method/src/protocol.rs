@@ -159,6 +159,19 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
         use wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_keyboard_grab_v2::Event;
         match event {
             Event::Keymap { format, fd, size } => {
+                // A seat without a keyboard yet (headless sessions, or before
+                // the first device appears) announces "no keymap"; a real one
+                // follows when a keyboard becomes active. Until then no key
+                // can be decoded or passed through.
+                if format == WEnum::Value(wl_keyboard::KeymapFormat::NoKeymap) {
+                    drop(fd);
+                    reset_local_composition(state);
+                    state.keyboard_state = None;
+                    state
+                        .virtual_keyboard_keymap_ready
+                        .store(false, Ordering::Release);
+                    return;
+                }
                 if format != WEnum::Value(wl_keyboard::KeymapFormat::XkbV1) {
                     state.error = Some(InputMethodError::Keymap(format!(
                         "unsupported keymap format {format:?}"
