@@ -727,17 +727,31 @@ mod tests {
     }
 
     #[test]
-    fn input_method_needs_libei_pass_through() {
+    fn input_method_needs_a_key_pass_through_path() {
+        let standing = |capabilities: &Capabilities| {
+            plan_routes(capabilities, true, allow_all)
+                .routes
+                .iter()
+                .find(|route| route.contract.id == "input-method-v2")
+                .unwrap()
+                .standing
+        };
+        // No EIS socket and no same-client virtual-keyboard path (river).
         let mut capabilities = capabilities(true, false, false);
-        capabilities.compositor = Compositor::Sway;
+        capabilities.compositor = Compositor::River;
         let plan = plan_routes(&capabilities, true, allow_all);
         assert_eq!(plan.recommended().map(RecommendedRoute::id), Some("ibus"));
-        let input_method = plan
-            .routes
-            .iter()
-            .find(|route| route.contract.id == "input-method-v2")
-            .unwrap();
-        assert_eq!(input_method.standing, RouteStanding::Unavailable);
+        assert_eq!(standing(&capabilities), RouteStanding::Unavailable);
+
+        // Sway and Hyprland pass keys through the input method's own
+        // virtual keyboard, which needs that protocol.
+        for compositor in [Compositor::Sway, Compositor::Hyprland] {
+            let mut capabilities = capabilities(true, false, false);
+            capabilities.compositor = compositor;
+            assert_ne!(standing(&capabilities), RouteStanding::Unavailable);
+            capabilities.has_virtual_keyboard = false;
+            assert_eq!(standing(&capabilities), RouteStanding::Unavailable);
+        }
     }
 
     #[test]
