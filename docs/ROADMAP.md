@@ -328,9 +328,11 @@ Still open:
       Shell extension on GNOME 45+ (`crates/backend-gnome-window`), and
       compositor IPC adapters for Sway and Hyprland
       (`crates/backend-ipc-window`; Sway runs in the headless CI session,
-      Hyprland only against a protocol double). Open: other wlroots
-      compositors (river) through `wlr-foreign-toplevel-management`, and a
-      headless Hyprland CI gate. Missing identity must keep failing closed.
+      Hyprland in the developer-run nested `scripts/test-hyprland-e2e.sh`).
+      Open: other wlroots compositors (river) through
+      `wlr-foreign-toplevel-management`, and a Hyprland CI gate (Hyprland
+      needs a DRM device to run headless). Missing identity must keep
+      failing closed.
 - [x] Publish a canonical `route_id` in daemon status (schema 11); the GUI
       resolves route contracts from that ID instead of reconstructing routes
       from `source`/`backend`.

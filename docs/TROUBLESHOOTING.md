@@ -595,6 +595,15 @@ windows) or `hyprctl activewindow` (`class`) reports.
 
 river has no window tracking; app filters fail closed (never match) there.
 
+#### Hyprland: the focused field stops expanding after WayExpand restarts
+
+Hyprland connects an input method to a text field only when the field turns
+text input on, which happens when it gains focus. After the WayExpand
+input-method service starts or restarts, the field that already had focus
+is not connected, so typing there is not seen. Click another window and
+back (or another field), and expansion works again. Logging in starts the
+service before any field has focus, so this does not happen at login.
+
 ### GNOME
 
 #### App_filter not supported

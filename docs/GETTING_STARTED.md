@@ -299,7 +299,7 @@ IPC socket, so `app_filter` works there; river has no window tracking yet.
   `systemctl --user import-environment SWAYSOCK` (or
   `HYPRLAND_INSTANCE_SIGNATURE`) from the compositor's startup config.
   Tracking is experimental: Sway's is exercised by a headless CI session,
-  Hyprland's only against a protocol test double.
+  Hyprland's by a nested developer-run session (`scripts/test-hyprland-e2e.sh`).
 - ⏳ river: no window tracking; app filters fail closed
 - ⚠️ Password field detection requires input-method-v2
 

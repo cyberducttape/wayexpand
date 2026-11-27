@@ -75,7 +75,7 @@
       "certification_status": "not-certified",
       "certification_evidence": null,
       "application_filter": "implemented",
-      "window_tracker": "Hyprland IPC event socket (protocol-tested; no runtime gate)"
+      "window_tracker": "Hyprland IPC event socket (nested runtime gate: Hyprland e2e, developer-run)"
     }
   ],
   "required_scenarios": [

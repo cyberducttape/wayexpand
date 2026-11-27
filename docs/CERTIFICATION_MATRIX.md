@@ -32,7 +32,7 @@ availability claims, and no target is certified without reviewed evidence.
 | `kde` | KDE Plasma / KWin (wayland) | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
 | `gnome` | GNOME Shell / Mutter (wayland) | ibus, evdev+libei | WayExpand GNOME Shell extension (headless runtime gates: GNOME 46, 48, 50, 51) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
 | `sway` | Sway / wlroots (wayland) | evdev+wlroots, input-method-v2 | Sway IPC window events (headless runtime gate: Sway e2e) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
-| `hyprland` | Hyprland / wlroots (wayland) | evdev+wlroots, input-method-v2 | Hyprland IPC event socket (protocol-tested; no runtime gate) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
+| `hyprland` | Hyprland / wlroots (wayland) | evdev+wlroots, input-method-v2 | Hyprland IPC event socket (nested runtime gate: Hyprland e2e, developer-run) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
 
 ## Release certification record — revision 2026-11-19.1
@@ -493,8 +493,11 @@ expansions fail closed. See the generated route table and
 
 Focused-window tracking reads Hyprland's event socket
 (`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`) and
-resolves each focus change with `j/activewindow`. It is tested against a
-protocol test double only; no headless Hyprland runs in CI. Without
+resolves each focus change with `j/activewindow`. Hyprland cannot run
+headless without a GPU, so CI has no Hyprland job; the developer-run
+`scripts/test-hyprland-e2e.sh` runs a private Hyprland nested in a Wayland
+session, where tracked focus, app filters and input-method-v2 with
+virtual-keyboard pass-through pass on Hyprland 0.53.3. Without
 `HYPRLAND_INSTANCE_SIGNATURE` in the service environment, `app_filter`-scoped
 expansions fail closed.
 

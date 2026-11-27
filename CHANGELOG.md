@@ -15,8 +15,11 @@ All notable changes to WayExpand are documented here.
   expansion (`focus_checked_with_compatibility_consent`), as on KDE. The
   headless Sway CI session runs in `tracked-focus` mode with the
   `app-filter-follows-focus`, `focus-change-during-expansion` and
-  `target-closes-during-expansion` scenarios; Hyprland is tested against a
-  protocol double only. Sway sessions that leave `XDG_CURRENT_DESKTOP`
+  `target-closes-during-expansion` scenarios. Hyprland, which cannot run
+  headless without a GPU, gets `scripts/test-hyprland-e2e.sh`: a private
+  Hyprland nested in the developer's Wayland session (it runs from an
+  unpacked package too, via `HYPRLAND=`). On Hyprland 0.53.3 all 15
+  tracked-focus scenarios and all 3 input-method scenarios pass. Sway sessions that leave `XDG_CURRENT_DESKTOP`
   unset are now recognized by `SWAYSOCK`. `doctor --json` adds a
   `compositor_ipc_window_tracker` probe, and `wayexpand debug` reports
   `WX-WINDOW-ENV-001` when the systemd user service cannot see the socket
@@ -38,6 +41,10 @@ All notable changes to WayExpand are documented here.
   wlroots compositors send surrounding text before the content type, so it
   was discarded as possibly sensitive, and the first replacement in a field
   was refused until the field had changed twice.
+- Hyprland activates an input method only when a text field enables text
+  input, so after the WayExpand input-method service restarts, the field
+  that already has focus is not served until it is focused again.
+  Troubleshooting describes this.
 - First-time setup is simpler. The first-run guide highlights one action at a
   time: *Use Quick Picker (copy & paste)* is the primary button only when the
   desktop has no automatic route to set up, so it no longer competes with
