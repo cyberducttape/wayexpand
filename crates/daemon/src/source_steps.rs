@@ -3,7 +3,8 @@
 //! and output recovery run before it in `main`.
 
 use crate::input_loop::{
-    attach_key_pass_through, check_input_method_policy, key_pass_through_failure,
+    attach_key_pass_through, check_input_method_policy, connect_virtual_keyboard_input_method,
+    key_pass_through_failure, uses_virtual_keyboard_pass_through,
 };
 use crate::output_connect::{BackgroundConnect, ConnectRequest};
 use crate::status_publisher::set_daemon_status_with_config_state;
@@ -100,6 +101,48 @@ impl Daemon {
         self.reconnect_delay = next_retry_delay(self.reconnect_delay);
     }
 
+    /// Install a freshly connected input-method source, or schedule the
+    /// next attempt. A permanent failure stops the daemon.
+    fn connect_input_method_result(
+        &mut self,
+        connected: Result<
+            wayexpand_backend_input_method::InputMethodSource,
+            wayexpand_backend_input_method::InputMethodError,
+        >,
+    ) -> Result<()> {
+        match connected {
+            Ok(source) => {
+                let mut source = source;
+                source.set_wake_fd(Some(self.waker.fd()));
+                self.input_method = Some(source);
+                self.reconnect_delay = Duration::from_millis(250);
+                self.connection_state = "connected";
+                set_daemon_status_with_config_state(
+                    &mut self.status_publisher,
+                    &self.control,
+                    self.active_source,
+                    self.active_backend,
+                    self.connection_state,
+                    self.config.path(),
+                    self.config.status_state(),
+                );
+                crate::counters::note_input_reconnect();
+                info!("input-method source reconnected");
+            }
+            Err(error) if error.is_retryable() => {
+                crate::counters::note_input_connection_failure();
+                warn!(%error, "input-method unavailable; retrying");
+                self.schedule_input_retry();
+            }
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "input-method reconnect failed permanently: {error}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Reconnect the input-method source if needed, then wait for and process one event.
     pub(crate) fn input_method_step(&mut self, poll_interval: Duration) -> Result<Step> {
         if self.input_method.is_none() {
@@ -130,6 +173,16 @@ impl Daemon {
                     ));
                 }
                 crate::counters::note_input_reconnecting();
+                if uses_virtual_keyboard_pass_through() {
+                    // Wayland-only and bounded; no portal to wait for.
+                    let healthy = self.config.healthy();
+                    self.connect_input_method_result(connect_virtual_keyboard_input_method(
+                        &self.control,
+                        &self.path,
+                        healthy,
+                    ))?;
+                    return Ok(Step::Next);
+                }
                 self.input_connect = Some(BackgroundConnect::start(
                     ConnectRequest {
                         backend: "libei",
@@ -141,36 +194,7 @@ impl Daemon {
                 ));
                 return Ok(Step::Next);
             };
-            match connected {
-                Ok(source) => {
-                    let mut source = source;
-                    source.set_wake_fd(Some(self.waker.fd()));
-                    self.input_method = Some(source);
-                    self.reconnect_delay = Duration::from_millis(250);
-                    self.connection_state = "connected";
-                    set_daemon_status_with_config_state(
-                        &mut self.status_publisher,
-                        &self.control,
-                        self.active_source,
-                        self.active_backend,
-                        self.connection_state,
-                        self.config.path(),
-                        self.config.status_state(),
-                    );
-                    crate::counters::note_input_reconnect();
-                    info!("input-method source reconnected");
-                }
-                Err(error) if error.is_retryable() => {
-                    crate::counters::note_input_connection_failure();
-                    warn!(%error, "input-method unavailable; retrying");
-                    self.schedule_input_retry();
-                }
-                Err(error) => {
-                    return Err(anyhow::anyhow!(
-                        "input-method reconnect failed permanently: {error}"
-                    ));
-                }
-            }
+            self.connect_input_method_result(connected)?;
             return Ok(Step::Next);
         }
         let Some(source) = self.input_method.as_mut() else {
@@ -231,8 +255,11 @@ impl Daemon {
                         self.reconnect_delay = Duration::from_millis(250);
                     }
                     Err(error) if error.retryable() => {
+                        // Input-method injector messages are protocol
+                        // states, never snippet or field text.
                         warn!(
                             outcome = error.diagnostic_category(),
+                            detail = %error.source,
                             trigger_chars = error.result.trigger.chars().count(),
                             insert_bytes = error.result.insert.len(),
                             "input-method output failed; current expansion is not replayed"

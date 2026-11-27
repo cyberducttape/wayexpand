@@ -513,8 +513,9 @@ fn main() -> Result<()> {
     let evdev_mode = source_name == "evdev";
     if input_method_mode {
         info!(
-            "input-method-v2 backend selected; libei key pass-through is mandatory for \
-            unsupported keys (Escape, arrows, F-keys, shortcuts, etc.) to be re-injected"
+            "input-method-v2 backend selected; key pass-through (libei, or the input \
+            method's own virtual keyboard on Sway and Hyprland) is mandatory for unsupported \
+            keys (Escape, arrows, F-keys, shortcuts, etc.) to be re-injected"
         );
     }
     let active_source = source_name;

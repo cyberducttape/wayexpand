@@ -22,8 +22,13 @@ use composition::{ComposeUpdate, LocalCompose};
 use std::{
     collections::VecDeque,
     fs::File,
+    io::Write,
     io::{Read, Seek, SeekFrom},
     os::fd::{AsFd, BorrowedFd},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use thiserror::Error;
@@ -39,6 +44,10 @@ use wayland_client::{
 use wayland_protocols_misc::zwp_input_method_v2::client::{
     zwp_input_method_keyboard_grab_v2::ZwpInputMethodKeyboardGrabV2,
     zwp_input_method_manager_v2::ZwpInputMethodManagerV2, zwp_input_method_v2::ZwpInputMethodV2,
+};
+use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
+    zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
+    zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
 };
 use xkbcommon_rs::xkb_state::{KeyDirection, StateComponent};
 use xkbcommon_rs::{keysym::keysym_get_name, Context, Keymap, KeymapFormat, State};
@@ -243,9 +252,19 @@ struct StateData {
     seat: Option<WlSeat>,
     input_method: Option<ZwpInputMethodV2>,
     keyboard: Option<ZwpInputMethodKeyboardGrabV2>,
+    virtual_keyboard_manager: Option<ZwpVirtualKeyboardManagerV1>,
+    /// Same-client virtual keyboard for pass-through on compositors without
+    /// libei (Sway, Hyprland). It mirrors the grab's keymap and modifiers.
+    virtual_keyboard: Option<ZwpVirtualKeyboardV1>,
+    virtual_keyboard_keymap_ready: Arc<AtomicBool>,
     events: VecDeque<InputEvent>,
     keyboard_state: Option<State>,
     surrounding_text: Option<SurroundingText>,
+    /// Surrounding text of the batch in progress. The protocol applies a
+    /// batch on `done`, and compositors order its events differently
+    /// (wlroots sends surrounding text before the content type), so whether
+    /// the field is sensitive is known only at `done`.
+    pending_surrounding_text: Option<SurroundingText>,
     sensitive_content: bool,
     pending_sensitive: Option<bool>,
     /// Local XKB dead-key/Compose state. This is separate from compositor
@@ -272,9 +291,13 @@ impl StateData {
             seat: None,
             input_method: None,
             keyboard: None,
+            virtual_keyboard_manager: None,
+            virtual_keyboard: None,
+            virtual_keyboard_keymap_ready: Arc::new(AtomicBool::new(false)),
             events: VecDeque::new(),
             keyboard_state: None,
             surrounding_text: None,
+            pending_surrounding_text: None,
             sensitive_content: true,
             pending_sensitive: None,
             composition_active: false,
@@ -299,24 +322,35 @@ impl StateData {
 
     fn finish_protocol_batch(&mut self) {
         self.commit_serial = self.commit_serial.wrapping_add(1);
-        if let Some(sensitive) = self.pending_sensitive.take() {
+        let focus_change = self.pending_sensitive.take();
+        if let Some(sensitive) = focus_change {
             self.sensitive_content = sensitive;
-            if sensitive {
-                clear_surrounding_text(&mut self.surrounding_text);
-            }
+        }
+        if self.sensitive_content {
+            clear_surrounding_text(&mut self.pending_surrounding_text);
+            clear_surrounding_text(&mut self.surrounding_text);
+        } else if let Some(pending) = self.pending_surrounding_text.take() {
+            clear_surrounding_text(&mut self.surrounding_text);
+            self.surrounding_text = Some(pending);
+        }
+        if let Some(sensitive) = focus_change {
             self.queue_event(InputEvent::FocusChanged { sensitive });
         }
     }
 
     fn set_surrounding_text(&mut self, text: String, cursor: u32, anchor: u32) {
-        if self.pending_sensitive.unwrap_or(self.sensitive_content) {
+        if self.pending_sensitive == Some(true) {
             // The compositor text is wrapped immediately so even discarded
             // sensitive updates are wiped when this scope ends.
             drop(Zeroizing::new(text));
+            clear_surrounding_text(&mut self.pending_surrounding_text);
             clear_surrounding_text(&mut self.surrounding_text);
             return;
         }
-        self.surrounding_text = Some(SurroundingText {
+        // Held (wiped on drop) until `done` decides with the batch's final
+        // content type; never used for matching before then.
+        clear_surrounding_text(&mut self.pending_surrounding_text);
+        self.pending_surrounding_text = Some(SurroundingText {
             text: Zeroizing::new(text),
             cursor,
             anchor,
@@ -326,6 +360,7 @@ impl StateData {
     fn activate(&mut self) {
         self.keyboard_state = None;
         clear_surrounding_text(&mut self.surrounding_text);
+        clear_surrounding_text(&mut self.pending_surrounding_text);
         self.sensitive_content = true;
         self.pending_sensitive = None;
         reset_local_composition(self);
@@ -337,6 +372,7 @@ impl StateData {
     fn deactivate(&mut self) {
         self.keyboard_state = None;
         clear_surrounding_text(&mut self.surrounding_text);
+        clear_surrounding_text(&mut self.pending_surrounding_text);
         self.sensitive_content = true;
         self.pending_sensitive = None;
         reset_local_composition(self);
@@ -699,7 +735,10 @@ fn deactivation_event() -> InputEvent {
     InputEvent::FocusChanged { sensitive: true }
 }
 
-fn decode_keymap(fd: std::os::fd::OwnedFd, size: u32) -> Result<Keymap, InputMethodError> {
+fn decode_keymap(
+    fd: std::os::fd::OwnedFd,
+    size: u32,
+) -> Result<(Keymap, String), InputMethodError> {
     if size == 0 || size > MAX_KEYMAP_BYTES {
         return Err(InputMethodError::Keymap(format!(
             "invalid keymap size {size} bytes"
@@ -716,13 +755,127 @@ fn decode_keymap(fd: std::os::fd::OwnedFd, size: u32) -> Result<Keymap, InputMet
     }
     let text =
         String::from_utf8(bytes).map_err(|error| InputMethodError::Keymap(error.to_string()))?;
-    Keymap::new_from_string(
+    let keymap = Keymap::new_from_string(
         Context::new(0).map_err(|error| InputMethodError::Keymap(error.to_string()))?,
         &text,
         KeymapFormat::TextV1,
         0,
     )
-    .map_err(|error| InputMethodError::Keymap(error.to_string()))
+    .map_err(|error| InputMethodError::Keymap(error.to_string()))?;
+    Ok((keymap, text))
+}
+
+/// Give the pass-through virtual keyboard the grab's own keymap, so a
+/// passed-through keycode means exactly what the physical key meant.
+fn send_virtual_keyboard_keymap(
+    keyboard: &ZwpVirtualKeyboardV1,
+    text: &str,
+) -> Result<(), InputMethodError> {
+    let fd = rustix::fs::memfd_create(
+        "wayexpand-pass-through-keymap",
+        rustix::fs::MemfdFlags::CLOEXEC,
+    )
+    .map_err(|error| InputMethodError::Keymap(error.to_string()))?;
+    let mut file = File::from(fd);
+    file.write_all(text.as_bytes())
+        .and_then(|()| file.write_all(&[0]))
+        .and_then(|()| file.flush())
+        .map_err(|error| InputMethodError::Keymap(error.to_string()))?;
+    let size = u32::try_from(text.len() + 1)
+        .map_err(|_| InputMethodError::Keymap("keymap too large".into()))?;
+    keyboard.keymap(wl_keyboard::KeymapFormat::XkbV1.into(), file.as_fd(), size);
+    Ok(())
+}
+
+/// Key pass-through through a `zwp_virtual_keyboard_v1` created on the
+/// input method's own Wayland connection. Compositors exempt an input
+/// method's own virtual keyboard from its keyboard grab (Sway, Hyprland), so
+/// passed-through keys reach the application instead of looping back. Used
+/// where no libei/EIS server exists.
+struct VirtualKeyboardPassThrough {
+    keyboard: ZwpVirtualKeyboardV1,
+    connection: Connection,
+    keymap_ready: Arc<AtomicBool>,
+    epoch: Instant,
+}
+
+const VIRTUAL_KEYBOARD_PASS_THROUGH: &str = "input-method-virtual-keyboard";
+
+impl VirtualKeyboardPassThrough {
+    fn unsupported(&self) -> InjectorError {
+        InjectorError {
+            backend: VIRTUAL_KEYBOARD_PASS_THROUGH,
+            message: "the pass-through keyboard only forwards key events".into(),
+            retryable: false,
+        }
+    }
+}
+
+impl TextInjector for VirtualKeyboardPassThrough {
+    fn name(&self) -> &'static str {
+        VIRTUAL_KEYBOARD_PASS_THROUGH
+    }
+
+    fn capabilities(&self) -> InjectorCapabilities {
+        InjectorCapabilities {
+            insertion_mode: "same-client wlroots virtual-keyboard key pass-through",
+            key_passthrough: true,
+            ..InjectorCapabilities::default()
+        }
+    }
+
+    fn status_detail(&self) -> &'static str {
+        "virtual-keyboard pass-through"
+    }
+
+    fn erase(&mut self, _trigger: &str) -> Result<(), InjectorError> {
+        Err(self.unsupported())
+    }
+
+    fn insert(&mut self, _text: &str) -> Result<(), InjectorError> {
+        Err(self.unsupported())
+    }
+
+    fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
+        self.inject_key_event(keycode, Modifiers::default(), KeyEventState::Pressed)?;
+        self.inject_key_event(keycode, Modifiers::default(), KeyEventState::Released)
+    }
+
+    fn inject_key_event(
+        &mut self,
+        keycode: u32,
+        _modifiers: Modifiers,
+        state: KeyEventState,
+    ) -> Result<(), InjectorError> {
+        // Modifier state travels with the mirrored keymap and the grab's
+        // modifier events; the compositor also derives it from the keys.
+        if !self.keymap_ready.load(Ordering::Acquire) {
+            return Err(InjectorError {
+                backend: VIRTUAL_KEYBOARD_PASS_THROUGH,
+                message: "the keyboard grab has not provided a keymap yet".into(),
+                retryable: true,
+            });
+        }
+        let time = u32::try_from(self.epoch.elapsed().as_millis() % u128::from(u32::MAX))
+            .unwrap_or_default();
+        let wire_state = match state {
+            KeyEventState::Pressed => wl_keyboard::KeyState::Pressed,
+            KeyEventState::Released => wl_keyboard::KeyState::Released,
+        };
+        self.keyboard.key(time, keycode, wire_state.into());
+        self.connection.flush().map_err(|error| InjectorError {
+            backend: VIRTUAL_KEYBOARD_PASS_THROUGH,
+            message: error.to_string(),
+            retryable: true,
+        })
+    }
+}
+
+impl Drop for VirtualKeyboardPassThrough {
+    fn drop(&mut self) {
+        self.keyboard.destroy();
+        let _ = self.connection.flush();
+    }
 }
 
 trait WaylandEventTransport: Send {
@@ -800,6 +953,49 @@ impl InputMethodSource {
     pub fn connect_with_key_pass_through(
         key_pass_through: Box<dyn TextInjector>,
     ) -> Result<Self, InputMethodError> {
+        Self::connect(Some(key_pass_through))
+    }
+
+    /// Connect with key pass-through through a virtual keyboard on this
+    /// same Wayland connection, for compositors that have no libei/EIS
+    /// server but exempt an input method's own virtual keyboard from its
+    /// grab (Sway, Hyprland). Fails before registering the input method if
+    /// the compositor lacks `zwp_virtual_keyboard_manager_v1`, so an active
+    /// source always has a delivery path for unsupported keys.
+    pub fn connect_with_virtual_keyboard_pass_through() -> Result<Self, InputMethodError> {
+        Self::connect(None)
+    }
+
+    /// Whether this session offers what
+    /// [`Self::connect_with_virtual_keyboard_pass_through`] needs, without
+    /// registering an input method.
+    pub fn probe_virtual_keyboard_pass_through() -> Result<(), InputMethodError> {
+        let connection = Connection::connect_to_env()?;
+        let mut event_queue = connection.new_event_queue();
+        let qh = event_queue.handle();
+        let mut state = StateData::new();
+        connection.display().get_registry(&qh, ());
+        roundtrip_with_timeout(
+            &connection,
+            &mut event_queue,
+            &mut state,
+            INITIAL_ROUNDTRIP_TIMEOUT,
+        )?;
+        state.manager.ok_or(InputMethodError::MissingGlobal(
+            "zwp_input_method_manager_v2",
+        ))?;
+        state
+            .virtual_keyboard_manager
+            .ok_or(InputMethodError::MissingGlobal(
+                "zwp_virtual_keyboard_manager_v1",
+            ))?;
+        state
+            .seat
+            .ok_or(InputMethodError::MissingGlobal("wl_seat"))?;
+        Ok(())
+    }
+
+    fn connect(key_pass_through: Option<Box<dyn TextInjector>>) -> Result<Self, InputMethodError> {
         let connection = Connection::connect_to_env()?;
         let mut event_queue = connection.new_event_queue();
         let qh = event_queue.handle();
@@ -821,6 +1017,24 @@ impl InputMethodSource {
             .seat
             .clone()
             .ok_or(InputMethodError::MissingGlobal("wl_seat"))?;
+        // The pass-through keyboard must exist before the input method, so
+        // no grab can be granted without a delivery path.
+        let key_pass_through = match key_pass_through {
+            Some(injector) => injector,
+            None => {
+                let virtual_keyboard_manager = state.virtual_keyboard_manager.clone().ok_or(
+                    InputMethodError::MissingGlobal("zwp_virtual_keyboard_manager_v1"),
+                )?;
+                let keyboard = virtual_keyboard_manager.create_virtual_keyboard(&seat, &qh, ());
+                state.virtual_keyboard = Some(keyboard.clone());
+                Box::new(VirtualKeyboardPassThrough {
+                    keyboard,
+                    connection: connection.clone(),
+                    keymap_ready: Arc::clone(&state.virtual_keyboard_keymap_ready),
+                    epoch: Instant::now(),
+                })
+            }
+        };
         state.input_method = Some(manager.get_input_method(&seat, &qh, ()));
         connection
             .flush()

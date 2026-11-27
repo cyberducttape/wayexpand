@@ -325,9 +325,13 @@ Still open:
       identity so app-filtered snippets,
       Quick Picker direct insertion, and form return-to-origin work on every
       desktop. Shipped: KWin scripting on KDE Plasma and the bundled GNOME
-      Shell extension on GNOME 45+ (`crates/backend-gnome-window`). Open:
-      `wlr-foreign-toplevel-management` where available, with compositor IPC
-      adapters (Sway, Hyprland) as fallbacks. Missing identity must keep
+      Shell extension on GNOME 45+ (`crates/backend-gnome-window`), and
+      compositor IPC adapters for Sway and Hyprland
+      (`crates/backend-ipc-window`; Sway runs in the headless CI session,
+      Hyprland in the developer-run nested `scripts/test-hyprland-e2e.sh`).
+      Open: other wlroots compositors (river) through
+      `wlr-foreign-toplevel-management`, and a Hyprland CI gate (Hyprland
+      needs a DRM device to run headless). Missing identity must keep
       failing closed.
 - [x] Publish a canonical `route_id` in daemon status (schema 11); the GUI
       resolves route contracts from that ID instead of reconstructing routes

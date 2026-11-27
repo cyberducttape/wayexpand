@@ -954,6 +954,7 @@ impl GuiApp {
             // but a slow session bus can still consume several
             // seconds. The receiver is polled below on every frame.
             use wayexpand_backend_gnome_window::GnomeWindowTracker;
+            use wayexpand_backend_ipc_window::{HyprlandWindowTracker, SwayWindowTracker};
             use wayexpand_backend_kwin_window::KwinWindowTracker;
             use wayexpand_backend_selection::WindowTrackerKind;
             use wayexpand_core::WindowTracker;
@@ -988,7 +989,8 @@ impl GuiApp {
             let spawned = thread::Builder::new()
                 .name("wayexpand-app-detection".into())
                 .spawn(move || {
-                    // KWin on Plasma, the WayExpand extension on GNOME.
+                    // KWin on Plasma, the WayExpand extension on GNOME, and the
+                    // compositor's IPC socket on Sway and Hyprland.
                     let detection = match WindowTrackerKind::for_session() {
                         Some(WindowTrackerKind::Kwin) => detect_with(
                             KwinWindowTracker::new_cancellable(Some(&worker_cancel)),
@@ -996,6 +998,14 @@ impl GuiApp {
                         ),
                         Some(WindowTrackerKind::GnomeShell) => detect_with(
                             GnomeWindowTracker::new_cancellable(Some(&worker_cancel)),
+                            &worker_cancel,
+                        ),
+                        Some(WindowTrackerKind::Sway) => detect_with(
+                            SwayWindowTracker::new_cancellable(Some(&worker_cancel)),
+                            &worker_cancel,
+                        ),
+                        Some(WindowTrackerKind::Hyprland) => detect_with(
+                            HyprlandWindowTracker::new_cancellable(Some(&worker_cancel)),
                             &worker_cancel,
                         ),
                         None => AppDetection::Unavailable,

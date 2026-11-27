@@ -31,8 +31,8 @@ availability claims, and no target is certified without reviewed evidence.
 | --- | --- | --- | --- | --- | --- | --- |
 | `kde` | KDE Plasma / KWin (wayland) | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
 | `gnome` | GNOME Shell / Mutter (wayland) | ibus, evdev+libei | WayExpand GNOME Shell extension (headless runtime gates: GNOME 46, 48, 50, 51) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
-| `sway` | Sway / wlroots (wayland) | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
-| `hyprland` | Hyprland / wlroots (wayland) | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
+| `sway` | Sway / wlroots (wayland) | evdev+wlroots, input-method-v2 | Sway IPC window events (headless runtime gate: Sway e2e) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
+| `hyprland` | Hyprland / wlroots (wayland) | evdev+wlroots, input-method-v2 | Hyprland IPC event socket (nested runtime gate: Hyprland e2e, developer-run) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
 
 ## Release certification record — revision 2026-11-19.1
@@ -301,7 +301,7 @@ each route so a missing guarantee has a concrete explanation.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `ibus` (IBus) | ibus | ibus | surrounding_text_matches_trigger | separate_delete_and_commit | unobservable | no / not verified | no / not verified | no | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
 | `kde-evdev-libei` (Maximum compatibility) | evdev | libei | focus_checked_with_compatibility_consent | separate_delete_and_key_events | unobservable | yes / not verified | yes / not verified | no | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
-| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | none | separate_delete_and_key_events | unobservable | no / not verified | yes / not verified | no | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | focus_checked_with_compatibility_consent | separate_delete_and_key_events | unobservable | yes / not verified | yes / not verified | no | available | not implemented | none | unavailable | not certified | no | sway-ipc, hyprland-ipc | experimental |
 | `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | surrounding_text_matches_trigger | atomic_protocol_batch | unobservable | yes / not verified | no / not verified | no | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
@@ -475,13 +475,15 @@ expansions fail closed. See the generated route table and
 - Compositor: Sway 0.20.x
 - Capture: evdev
 - Injection: wlroots virtual keyboard (experimental)
-- Window Tracking: unavailable (not shipped)
+- Window Tracking: Sway IPC window events (experimental; headless CI gate)
 
 **Known Limitations:**
 - **Untested at scale:** Limited real-world usage feedback
 - **Manual setup required:** Backend selection not automatic; requires explicit configuration
 - **Portal reconnection edge cases:** libei socket reconnection not fully tested
-- **No window tracking:** `app_filter`-scoped expansions fail closed on Sway.
+- **Window tracking needs `SWAYSOCK`:** the WayExpand service reads focus
+  from Sway's IPC socket; without that variable in its environment,
+  `app_filter`-scoped expansions fail closed.
 
 **Recommendation:** ⚠️ Experimental. Likely compatible based on architecture, but limited validation. Contributions and testing welcome.
 
@@ -489,9 +491,15 @@ expansions fail closed. See the generated route table and
 
 **Same as Sway 0.20.x**
 
-In particular, focused-window tracking is not shipped on Hyprland, so
-`app_filter`-scoped expansions fail closed rather than using the
-`wlr-foreign-toplevel-management` protocol.
+Focused-window tracking reads Hyprland's event socket
+(`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`) and
+resolves each focus change with `j/activewindow`. Hyprland cannot run
+headless without a GPU, so CI has no Hyprland job; the developer-run
+`scripts/test-hyprland-e2e.sh` runs a private Hyprland nested in a Wayland
+session, where tracked focus, app filters and input-method-v2 with
+virtual-keyboard pass-through pass on Hyprland 0.53.3. Without
+`HYPRLAND_INSTANCE_SIGNATURE` in the service environment, `app_filter`-scoped
+expansions fail closed.
 
 ### ❌ X11 - UNSUPPORTED
 

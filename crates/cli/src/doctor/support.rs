@@ -645,6 +645,7 @@ pub(crate) fn summarize_reports(
         "input_method_v2",
         "wlroots_virtual_keyboard",
         "kwin_window_tracker",
+        "compositor_ipc_window_tracker",
     ]
     .into_iter()
     .filter_map(|name| {

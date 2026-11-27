@@ -616,16 +616,59 @@ refusal_is_reported() {
     esac
 }
 
+# Start the field and the daemon for an input-method case. Hyprland
+# activates an input method only when a field (re)enables text input, so
+# there the daemon starts first, as it does at login.
+start_input_method_case() {
+    if [ "${e2e_input_method_starts_first:-0}" = 1 ]; then
+        start_daemon && "$1" e2e-a
+    else
+        "$1" e2e-a && start_daemon
+    fi
+}
+
 scenario_input_method_expansion() {
     write_config <<'EOF'
 [[expansion]]
 trigger = "sig"
 replacement = "signature"
 EOF
-    start_sink e2e-a && start_daemon || return 2
+    start_input_method_case start_sink || return 2
     wait_until 50 sink_text_input_active e2e-a || return 2
     expand_in e2e-a "" "sig" || return 2
     wait_until 50 sink_text_is e2e-a "signature"
+    result=$?
+    describe e2e-a
+    return "$result"
+}
+
+scenario_input_method_pass_through() {
+    # Keys the input method does not handle (here Left) must reach the
+    # application through the route's key pass-through, and expansion must
+    # still work afterwards.
+    write_config <<'EOF'
+[[expansion]]
+trigger = "sig"
+replacement = "signature"
+EOF
+    start_input_method_case start_sink || return 2
+    wait_until 50 sink_text_input_active e2e-a || return 2
+    user_types e2e-a "abc" "abc" || return 2
+    wait_until 50 sink_text_is e2e-a "abc" || {
+        printf 'typed text was not committed: '
+        describe e2e-a
+        return 1
+    }
+    "$bin/wx-e2e-type" key Left 2 >>"$case_dir/type.log" 2>&1 || return 2
+    if ! wait_until 50 sink_cursor_is e2e-a 1; then
+        printf 'Left was not passed through: '
+        describe e2e-a
+        return 1
+    fi
+    "$bin/wx-e2e-type" key Left 1 >>"$case_dir/type.log" 2>&1 || return 2
+    wait_until 50 sink_cursor_is e2e-a 0 || return 1
+    expand_in e2e-a "" "sig" || return 2
+    wait_until 50 sink_text_is e2e-a "signatureabc"
     result=$?
     describe e2e-a
     return "$result"
@@ -637,7 +680,7 @@ scenario_input_method_password_field() {
 trigger = "sig"
 replacement = "signature"
 EOF
-    start_password_sink e2e-a && start_daemon || return 2
+    start_input_method_case start_password_sink || return 2
     wait_until 50 sink_text_input_active e2e-a || return 2
     expand_in e2e-a "" "sig" || return 2
     wait_until 50 sink_text_is e2e-a "sig"

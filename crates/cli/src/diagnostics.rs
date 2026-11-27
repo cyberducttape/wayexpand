@@ -184,6 +184,12 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
     let services = crate::services::ServiceInventory::probe();
 
     let mut findings = Vec::new();
+    if let Some(finding) = ipc_window_tracker_environment_finding(
+        capabilities.compositor,
+        crate::setup_ibus::command_output("systemctl", &["--user", "show-environment"]).as_deref(),
+    ) {
+        findings.push(finding);
+    }
     for check in &checks {
         if check.status == "fail" && check.component != "configuration" {
             let (id, component) = match check.component {
@@ -506,6 +512,52 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
     })
 }
 
+/// Sway and Hyprland focus tracking reads the compositor's IPC socket, which
+/// the WayExpand user service finds only through a variable the session must
+/// export to systemd. A missing variable silently turns every `app_filter`
+/// snippet off (they fail closed), so say so.
+fn ipc_window_tracker_environment_finding(
+    compositor: wayexpand_backend_selection::Compositor,
+    manager_environment: Option<&str>,
+) -> Option<DiagnosticFinding> {
+    use wayexpand_backend_selection::Compositor;
+    let (variable, desktop, config_line) = match compositor {
+        Compositor::Sway => (
+            "SWAYSOCK",
+            "Sway",
+            "exec systemctl --user import-environment SWAYSOCK WAYLAND_DISPLAY XDG_CURRENT_DESKTOP",
+        ),
+        Compositor::Hyprland => (
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "Hyprland",
+            "exec-once = systemctl --user import-environment HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY XDG_CURRENT_DESKTOP",
+        ),
+        _ => return None,
+    };
+    // Unknown (no systemd user manager answer) is not evidence of a problem.
+    let environment = manager_environment?;
+    let prefix = format!("{variable}=");
+    if environment
+        .lines()
+        .any(|line| line.len() > prefix.len() && line.starts_with(&prefix))
+    {
+        return None;
+    }
+    Some(finding(
+        "WX-WINDOW-ENV-001",
+        Severity::Warning,
+        Component::Service,
+        format!(
+            "The WayExpand service cannot see {variable}, so it cannot follow the focused {desktop} window and app-filtered snippets never expand"
+        ),
+        [format!("{variable} is missing from `systemctl --user show-environment`")],
+        [
+            format!("Add this line to your {desktop} config and log in again: {config_line}"),
+            "Then run `systemctl --user restart wayexpand`.".to_owned(),
+        ],
+    ))
+}
+
 fn kwin_bridge_finding(
     check: &wayexpand_backend_ibus::chain::IbusCheck,
 ) -> Option<DiagnosticFinding> {
@@ -640,7 +692,10 @@ pub(crate) fn print(report: &serde_json::Value, json: bool) -> anyhow::Result<()
 
 #[cfg(test)]
 mod tests {
-    use super::{focused_scope_finding, kwin_bridge_finding, Component, Severity};
+    use super::{
+        focused_scope_finding, ipc_window_tracker_environment_finding, kwin_bridge_finding,
+        Component, Severity,
+    };
     use wayexpand_backend_ibus::chain::{IbusCheck, IbusCheckState};
 
     fn check(problem_id: &'static str) -> IbusCheck {
@@ -664,6 +719,29 @@ mod tests {
             assert_eq!(finding.evidence, ["sanitized bridge diagnostic"]);
             assert_eq!(finding.suggested_actions, ["specific repair and retest"]);
         }
+    }
+
+    #[test]
+    fn sway_and_hyprland_warn_when_the_service_cannot_find_the_ipc_socket() {
+        use wayexpand_backend_selection::Compositor;
+        let missing = ipc_window_tracker_environment_finding(
+            Compositor::Sway,
+            Some("WAYLAND_DISPLAY=wayland-1\nSWAYSOCK=\n"),
+        )
+        .expect("an empty SWAYSOCK is missing");
+        assert_eq!(missing.id, "WX-WINDOW-ENV-001");
+        assert!(missing.suggested_actions[0].contains("import-environment SWAYSOCK"));
+        assert!(ipc_window_tracker_environment_finding(
+            Compositor::Sway,
+            Some("SWAYSOCK=/run/user/1000/sway-ipc.1000.42.sock\n"),
+        )
+        .is_none());
+        let hyprland =
+            ipc_window_tracker_environment_finding(Compositor::Hyprland, Some("PATH=/usr/bin\n"))
+                .expect("Hyprland without its signature");
+        assert!(hyprland.suggested_actions[0].contains("HYPRLAND_INSTANCE_SIGNATURE"));
+        assert!(ipc_window_tracker_environment_finding(Compositor::Hyprland, None).is_none());
+        assert!(ipc_window_tracker_environment_finding(Compositor::KdePlasma, Some("")).is_none());
     }
 
     #[test]

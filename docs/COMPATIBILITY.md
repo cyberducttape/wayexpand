@@ -481,7 +481,8 @@ Diagnostic output suitable for health checks and monitoring systems.
   "protocol_probes": {
     "input_method_v2": {"status": "unavailable", "detail": "input-method-v2 manager and Wayland seat probe"},
     "wlroots_virtual_keyboard": {"status": "available", "detail": "zwp_virtual_keyboard_manager_v1 probe"},
-    "kwin_window_tracker": {"status": "available", "detail": "KWin scripting D-Bus probe"}
+    "kwin_window_tracker": {"status": "available", "detail": "KWin scripting D-Bus probe"},
+    "compositor_ipc_window_tracker": {"status": "not_applicable", "detail": "Sway or Hyprland IPC socket probe"}
   },
   "automatic_selection": {
     "source": "stdin",

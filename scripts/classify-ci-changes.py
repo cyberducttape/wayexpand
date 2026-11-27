@@ -56,13 +56,21 @@ def classify(paths: Iterable[str], full: bool = False) -> dict[str, bool]:
         for path in changed
     )
     sway = any(
-        under(path, *shared_desktop, "crates/backend-evdev", "crates/backend-input-method", "crates/backend-wlroots")
+        under(
+            path,
+            *shared_desktop,
+            "crates/backend-evdev",
+            "crates/backend-input-method",
+            "crates/backend-ipc-window",
+            "crates/backend-wlroots",
+        )
         or under(path, "tests/certification")
         or path.startswith("scripts/test-sway")
+        or path.startswith("scripts/sway-e2e")
         for path in changed
     )
     ibus = any(
-        under(path, *shared_desktop, "crates/backend-ibus", "crates/backend-gnome-window", "crates/cli", "crates/gui", "gnome-extension")
+        under(path, *shared_desktop, "crates/backend-ibus", "crates/backend-gnome-window", "crates/backend-ipc-window", "crates/cli", "crates/gui", "gnome-extension")
         or under(path, "tests/certification")
         or path == "desktop/wayexpand-ibus.xml"
         or path.startswith("scripts/test-ibus")

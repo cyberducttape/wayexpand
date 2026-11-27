@@ -236,9 +236,37 @@ Findings from Sway 1.11 that this harness surfaced:
 - Sway delivers none of a virtual keyboard's keys if its client disconnects
   immediately after sending them; the one-shot test typist lingers briefly.
   The daemon's keyboard lives as long as the daemon.
-- Input-method-v2 capture cannot run on Sway: the daemon starts it only with
-  libei key pass-through (see [Input-method source](#input-method-source)),
-  and Sway offers no libei/EIS server.
+- Sway has no libei/EIS server, so input-method-v2 passes unsupported keys
+  through a virtual keyboard on its own Wayland connection, which Sway
+  exempts from the input method's grab. `E2E_INPUT_SOURCE=input-method
+  scripts/test-sway-e2e.sh` runs the input-method scenarios, including
+  `input-method-pass-through` (Left reaches the client, expansion still
+  works).
+
+## Nested Hyprland test
+
+```sh
+scripts/test-hyprland-e2e.sh [--keep] [SCENARIO...]
+E2E_INPUT_SOURCE=input-method scripts/test-hyprland-e2e.sh [--keep]
+```
+
+Hyprland needs a DRM device to run headless, so this harness runs a private
+Hyprland *nested* in your Wayland session (one window appears) with its own
+runtime directory, home and configuration; nothing else in the session is
+touched. It runs the same scenarios as the Sway harness, with focus from the
+Hyprland IPC tracker. To use Hyprland without installing it, unpack the
+distribution packages (`apt-get download hyprland` and its missing
+libraries, then `dpkg-deb -x`) and point the harness at them:
+
+```sh
+HYPRLAND=/path/to/root/usr/bin/Hyprland \
+LD_LIBRARY_PATH=/path/to/root/usr/lib/x86_64-linux-gnu \
+    scripts/test-hyprland-e2e.sh
+```
+
+Hyprland activates an input method only when a field enables text input,
+so its input-method cases start the daemon before the window, as at login.
+CI does not run this harness (no GPU, no parent compositor).
 
 ## Real ibus-daemon engine test
 

@@ -6,8 +6,10 @@
 //! - `libei` (the default, for KWin) connects through `LIBEI_SOCKET` (the
 //!   e2e EIS relay), never the RemoteDesktop portal;
 //! - `wlroots` (for Sway) creates its own virtual keyboard on
-//!   `WAYLAND_DISPLAY`, separate from the daemon's. Only `text` is
-//!   supported there, because that injector has no named-key output.
+//!   `WAYLAND_DISPLAY`, separate from the daemon's. It types `text` and
+//!   `keys` the same way (each character as its own keysym, which an input
+//!   method's keyboard grab decodes too) and supports only `key Left`, the
+//!   one named key that injector can send.
 //!
 //! With several layouts configured, the libei typist refuses (as the
 //! product does) unless `WX_E2E_ACTIVE_LAYOUT=GROUP:LAYOUTS:VARIANTS`
@@ -128,6 +130,27 @@ fn main() -> Result<()> {
     let mut injector = connect()?;
     let result: Result<(), String> = match arguments.as_slice() {
         [mode, text] if mode == "text" => injector.insert(text).map_err(|error| error.message),
+        // Its per-output keymap already sends real key events, which an
+        // input method's grab receives like a physical keyboard's.
+        [mode, text] if mode == "keys" && injector.name() == "wlroots-virtual-keyboard" => {
+            injector.insert(text).map_err(|error| error.message)
+        }
+        [mode, name, rest @ ..]
+            if mode == "key"
+                && name == "Left"
+                && rest.len() <= 1
+                && injector.name() == "wlroots-virtual-keyboard" =>
+        {
+            let count: usize = match rest.first() {
+                Some(count) => count
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("COUNT must be a number"))?,
+                None => 1,
+            };
+            injector
+                .move_cursor_left(count)
+                .map_err(|error| error.message)
+        }
         [mode, text] if mode == "keys" => text.chars().try_for_each(|character| {
             let code = ascii_key_code(character)
                 .ok_or_else(|| format!("unsupported test key {character:?}"))?;

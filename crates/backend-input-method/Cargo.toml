@@ -19,7 +19,7 @@ wayland-protocols-misc.workspace = true
 xkbcommon-rs = { workspace = true, features = ["server"] }
 xkbcommon.workspace = true
 xkeysym = "0.2.1"
-rustix = { version = "1", features = ["event"] }
+rustix = { version = "1", features = ["event", "fs"] }
 unicode-segmentation.workspace = true
 zeroize.workspace = true
 wayexpand-core = { path = "../core" }

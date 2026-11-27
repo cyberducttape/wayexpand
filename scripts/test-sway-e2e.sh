@@ -2,6 +2,7 @@
 # Headless Sway end-to-end tests.
 #
 #   scripts/test-sway-e2e.sh [--keep] [SCENARIO...]
+#   E2E_INPUT_SOURCE=input-method scripts/test-sway-e2e.sh [--keep]
 #
 # Starts a private headless Sway (wlroots headless backend, software
 # rendering, no input devices) with its own runtime directory, home and
@@ -12,8 +13,12 @@
 #
 # What this does and does not show: output is typed into real Wayland
 # windows by the real wlroots backend, but keyboard capture is simulated
-# (the daemon reads stdin), WayExpand has no Sway window tracker (focus is
-# untracked), and the session is headless. Results are evidence for the
+# (the daemon reads stdin) and the session is headless. Focus comes from
+# the production Sway IPC window tracker. With
+# E2E_INPUT_SOURCE=input-method, the daemon instead captures through the
+# production input-method-v2 source (keys from a separate virtual keyboard
+# play the user) and passes unsupported keys through its own virtual
+# keyboard. Results are evidence for the
 # output path on this Sway version, not compositor certification.
 #
 # --keep leaves the work directory (logs, sink states) for inspection.
@@ -143,6 +148,7 @@ env -i "${session_env[@]}" \
     E2E_WORK="$work" \
     E2E_RESULTS="$results" \
     E2E_SCENARIOS="$*" \
+    E2E_INPUT_SOURCE="${E2E_INPUT_SOURCE:-stdin}" \
     E2E_SOAK_SECONDS="${E2E_SOAK_SECONDS:-90}" \
     E2E_SOAK_RESTART_EVERY="${E2E_SOAK_RESTART_EVERY:-1}" \
     E2E_SOAK_MAX_RSS_GROWTH_KIB="${E2E_SOAK_MAX_RSS_GROWTH_KIB:-65536}" \
@@ -177,6 +183,10 @@ if [ -s "$work/runtime-status" ]; then
     printf 'route insertion-mode %s\n' "$(status_field inject_insertion_mode)"
     printf 'route focus-mode %s\n' "$(status_field compatibility_mode)"
 fi
-printf '\n%s passed, %s failed, %s unverified (Sway %s, headless, capture simulated, focus untracked)\n' \
-    "$pass" "$fail" "$unverified" "$(sway --version 2>/dev/null | awk '{print $3}')"
+case "${E2E_INPUT_SOURCE:-stdin}" in
+    input-method) capture_label='input-method-v2 capture' ;;
+    *) capture_label='capture simulated' ;;
+esac
+printf '\n%s passed, %s failed, %s unverified (Sway %s, headless, %s, focus tracked over IPC)\n' \
+    "$pass" "$fail" "$unverified" "$(sway --version 2>/dev/null | awk '{print $3}')" "$capture_label"
 [ "$fail" -eq 0 ] && [ "$unverified" -eq 0 ]

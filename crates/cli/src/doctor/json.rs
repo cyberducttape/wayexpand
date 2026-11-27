@@ -366,14 +366,26 @@ pub(crate) fn protocol_probe_report(
             "unavailable"
         }
     };
-    let window_tracker = if !wayland {
+    let window_tracker = if !wayland
+        || capabilities.compositor != wayexpand_backend_selection::Compositor::KdePlasma
+    {
         "not_applicable"
     } else if capabilities.has_window_tracker {
         "available"
-    } else if capabilities.compositor == wayexpand_backend_selection::Compositor::KdePlasma {
-        "unavailable"
     } else {
+        "unavailable"
+    };
+    let ipc_desktop = matches!(
+        capabilities.compositor,
+        wayexpand_backend_selection::Compositor::Sway
+            | wayexpand_backend_selection::Compositor::Hyprland
+    );
+    let ipc_window_tracker = if !wayland || !ipc_desktop {
         "not_applicable"
+    } else if capabilities.has_window_tracker {
+        "available"
+    } else {
+        "unavailable"
     };
     serde_json::json!({
         "input_method_v2": {
@@ -387,6 +399,10 @@ pub(crate) fn protocol_probe_report(
         "kwin_window_tracker": {
             "status": window_tracker,
             "detail": "KWin scripting D-Bus probe",
+        },
+        "compositor_ipc_window_tracker": {
+            "status": ipc_window_tracker,
+            "detail": "Sway or Hyprland IPC socket probe",
         },
     })
 }

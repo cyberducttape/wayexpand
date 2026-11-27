@@ -57,8 +57,8 @@
       "production_certification_required": false,
       "certification_status": "not-certified",
       "certification_evidence": null,
-      "application_filter": "unavailable",
-      "window_tracker": "none"
+      "application_filter": "implemented",
+      "window_tracker": "Sway IPC window events (headless runtime gate: Sway e2e)"
     },
     {
       "id": "hyprland",
@@ -74,8 +74,8 @@
       "production_certification_required": false,
       "certification_status": "not-certified",
       "certification_evidence": null,
-      "application_filter": "unavailable",
-      "window_tracker": "none"
+      "application_filter": "implemented",
+      "window_tracker": "Hyprland IPC event socket (nested runtime gate: Hyprland e2e, developer-run)"
     }
   ],
   "required_scenarios": [

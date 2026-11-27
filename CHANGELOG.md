@@ -4,6 +4,47 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Sway and Hyprland now follow the focused window, so `app_filter` snippets
+  work there instead of always failing closed. The new
+  `wayexpand-backend-ipc-window` crate reads window and workspace events
+  from Sway's i3-compatible IPC socket (`$SWAYSOCK`) and Hyprland's event
+  socket (resolving each focus change with `j/activewindow`). Titles are
+  read only when a `title_contains` filter needs them. The daemon, the
+  IBus engine and the GUI's *Detect app* button use it; the evdev +
+  wlroots route now also refuses output when focus moves during an
+  expansion (`focus_checked_with_compatibility_consent`), as on KDE. The
+  headless Sway CI session runs in `tracked-focus` mode with the
+  `app-filter-follows-focus`, `focus-change-during-expansion` and
+  `target-closes-during-expansion` scenarios. Hyprland, which cannot run
+  headless without a GPU, gets `scripts/test-hyprland-e2e.sh`: a private
+  Hyprland nested in the developer's Wayland session (it runs from an
+  unpacked package too, via `HYPRLAND=`). On Hyprland 0.53.3 all 15
+  tracked-focus scenarios and all 3 input-method scenarios pass. Sway sessions that leave `XDG_CURRENT_DESKTOP`
+  unset are now recognized by `SWAYSOCK`. `doctor --json` adds a
+  `compositor_ipc_window_tracker` probe, and `wayexpand debug` reports
+  `WX-WINDOW-ENV-001` when the systemd user service cannot see the socket
+  variable.
+- Input-method-v2 capture now works on Sway and Hyprland. It used to start
+  only with libei key pass-through, which neither compositor offers, so the
+  route was unavailable there. The input method now passes unsupported keys
+  (arrows, Escape, shortcuts) through a `zwp_virtual_keyboard_v1` on its own
+  Wayland connection, which both compositors exempt from its keyboard grab,
+  mirroring the grab's keymap and modifiers. The source refuses to register
+  without that keyboard, so a grab never lacks a delivery path. Organization
+  policy gates it as the `wlroots` backend. The route planner, `setup` and
+  the GUI offer input-method-v2 on these desktops again, and the headless
+  Sway CI job now also runs the input-method scenarios
+  (`E2E_INPUT_SOURCE=input-method`), including a new
+  `input-method-pass-through` check.
+- The input-method source now applies surrounding text when the protocol
+  batch ends (`done`), as the protocol specifies, instead of on arrival.
+  wlroots compositors send surrounding text before the content type, so it
+  was discarded as possibly sensitive, and the first replacement in a field
+  was refused until the field had changed twice.
+- Hyprland activates an input method only when a text field enables text
+  input, so after the WayExpand input-method service restarts, the field
+  that already has focus is not served until it is focused again.
+  Troubleshooting describes this.
 - First-time setup is simpler. The first-run guide highlights one action at a
   time: *Use Quick Picker (copy & paste)* is the primary button only when the
   desktop has no automatic route to set up, so it no longer competes with

@@ -121,6 +121,35 @@ fn doctor_protocol_probe_report_distinguishes_available_and_missing_globals() {
         "not_applicable"
     );
     assert_eq!(probes["kwin_window_tracker"]["status"], "not_applicable");
+
+    for compositor in [
+        wayexpand_backend_selection::Compositor::Sway,
+        wayexpand_backend_selection::Compositor::Hyprland,
+    ] {
+        let tracked = wayexpand_backend_selection::Capabilities {
+            has_window_tracker: true,
+            compositor,
+            ..Default::default()
+        };
+        let probes = protocol_probe_report(&tracked, true);
+        assert_eq!(
+            probes["compositor_ipc_window_tracker"]["status"],
+            "available"
+        );
+        assert_eq!(
+            probes["kwin_window_tracker"]["status"], "not_applicable",
+            "a Sway or Hyprland tracker is not the KWin bridge"
+        );
+        let untracked = wayexpand_backend_selection::Capabilities {
+            compositor,
+            ..Default::default()
+        };
+        let probes = protocol_probe_report(&untracked, true);
+        assert_eq!(
+            probes["compositor_ipc_window_tracker"]["status"],
+            "unavailable"
+        );
+    }
 }
 
 #[test]
@@ -1479,8 +1508,31 @@ fn setup_modes_do_not_promote_unavailable_paths() {
         "input-method"
     );
 
+    // Sway and Hyprland have no EIS server; the input method passes keys
+    // through its own virtual keyboard instead, so it needs that protocol.
+    for compositor in [
+        wayexpand_backend_selection::Compositor::Sway,
+        wayexpand_backend_selection::Compositor::Hyprland,
+    ] {
+        let wlroots = wayexpand_backend_selection::Capabilities {
+            compositor,
+            ..experimental
+        };
+        assert_eq!(
+            setup_backend_for_mode("experimental", &wlroots, &policy).unwrap(),
+            "input-method"
+        );
+        let without_virtual_keyboard = wayexpand_backend_selection::Capabilities {
+            has_virtual_keyboard: false,
+            ..wlroots
+        };
+        assert!(
+            setup_backend_for_mode("experimental", &without_virtual_keyboard, &policy).is_err()
+        );
+    }
+
     let unsupported_compositor = wayexpand_backend_selection::Capabilities {
-        compositor: wayexpand_backend_selection::Compositor::Sway,
+        compositor: wayexpand_backend_selection::Compositor::River,
         ..experimental
     };
     assert!(setup_backend_for_mode("experimental", &unsupported_compositor, &policy).is_err());

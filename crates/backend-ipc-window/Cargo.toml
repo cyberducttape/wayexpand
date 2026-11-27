@@ -1,0 +1,17 @@
+[package]
+name = "wayexpand-backend-ipc-window"
+description = "Sway and Hyprland IPC focused-window trackers for WayExpand (app_filter support on wlroots desktops)"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+wayexpand-core = { path = "../core" }
+serde_json.workspace = true
+thiserror.workspace = true
