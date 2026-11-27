@@ -4,6 +4,23 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Sway and Hyprland now follow the focused window, so `app_filter` snippets
+  work there instead of always failing closed. The new
+  `wayexpand-backend-ipc-window` crate reads window and workspace events
+  from Sway's i3-compatible IPC socket (`$SWAYSOCK`) and Hyprland's event
+  socket (resolving each focus change with `j/activewindow`). Titles are
+  read only when a `title_contains` filter needs them. The daemon, the
+  IBus engine and the GUI's *Detect app* button use it; the evdev +
+  wlroots route now also refuses output when focus moves during an
+  expansion (`focus_checked_with_compatibility_consent`), as on KDE. The
+  headless Sway CI session runs in `tracked-focus` mode with the
+  `app-filter-follows-focus`, `focus-change-during-expansion` and
+  `target-closes-during-expansion` scenarios; Hyprland is tested against a
+  protocol double only. Sway sessions that leave `XDG_CURRENT_DESKTOP`
+  unset are now recognized by `SWAYSOCK`. `doctor --json` adds a
+  `compositor_ipc_window_tracker` probe, and `wayexpand debug` reports
+  `WX-WINDOW-ENV-001` when the systemd user service cannot see the socket
+  variable.
 - First-time setup is simpler. The first-run guide highlights one action at a
   time: *Use Quick Picker (copy & paste)* is the primary button only when the
   desktop has no automatic route to set up, so it no longer competes with

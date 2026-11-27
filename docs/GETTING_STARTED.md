@@ -285,13 +285,22 @@ unavailable. See [SECURITY.md](../SECURITY.md) before selecting it.
 
 ### Sway / Hyprland / river — experimental
 
-Wlroots-based compositor support has active development in progress. Window
-tracking is not currently shipped.
+Wlroots-based compositor support has active development in progress. On Sway
+and Hyprland, WayExpand follows the focused window over the compositor's own
+IPC socket, so `app_filter` works there; river has no window tracking yet.
 
 **Current status:**
 - Text capture and injection paths are implemented (via input-method-v2 or
   evdev), but have not been certified on these compositors
-- ⏳ Window tracking (app_filter) is not shipped on wlroots; the integration remains future experimental work
+- ✅ Window tracking (app_filter) on Sway (`$SWAYSOCK`) and Hyprland
+  (`$HYPRLAND_INSTANCE_SIGNATURE`). The WayExpand service must see that
+  variable: Sway's packaged `config.d/50-systemd-user.conf` and Hyprland's
+  systemd integration (for example uwsm) export it. Otherwise run
+  `systemctl --user import-environment SWAYSOCK` (or
+  `HYPRLAND_INSTANCE_SIGNATURE`) from the compositor's startup config.
+  Tracking is experimental: Sway's is exercised by a headless CI session,
+  Hyprland's only against a protocol test double.
+- ⏳ river: no window tracking; app filters fail closed
 - ⚠️ Password field detection requires input-method-v2
 
 **Getting started:** Open the GUI and review the route it recommends. Do not

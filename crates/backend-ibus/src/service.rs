@@ -14,6 +14,7 @@ use std::{
 };
 use tracing::{info, warn};
 use wayexpand_backend_gnome_window::GnomeWindowTracker;
+use wayexpand_backend_ipc_window::{HyprlandWindowTracker, SwayWindowTracker};
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_core::{
     default_config_path, Config, ConfigStore, OrganizationPolicy, ValidatedConfig, WindowContext,
@@ -85,10 +86,24 @@ fn spawn_session_focus_tracker(
     Ok(())
 }
 
-/// Select a compositor bridge by probing its real D-Bus endpoint. The KWin
-/// probe is side-effect free; `new()` is called only after it succeeds. Both
-/// trackers authenticate the compositor as the source of focus updates.
+/// Select a compositor bridge by probing its real endpoint. Sway and
+/// Hyprland are recognized by the IPC socket they hand their own clients;
+/// otherwise the KWin probe (side-effect free) decides between KWin and the
+/// GNOME Shell extension. `new()` is called only after a probe succeeds.
 fn connect_session_window_tracker() -> Result<Box<dyn WindowTracker>, String> {
+    let set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+    if set("HYPRLAND_INSTANCE_SIGNATURE") {
+        return HyprlandWindowTracker::probe()
+            .and_then(|()| HyprlandWindowTracker::new())
+            .map(|tracker| Box::new(tracker) as Box<dyn WindowTracker>)
+            .map_err(|error| error.to_string());
+    }
+    if set("SWAYSOCK") {
+        return SwayWindowTracker::probe()
+            .and_then(|()| SwayWindowTracker::new())
+            .map(|tracker| Box::new(tracker) as Box<dyn WindowTracker>)
+            .map_err(|error| error.to_string());
+    }
     if KwinWindowTracker::probe().is_ok() {
         return KwinWindowTracker::new()
             .map(|tracker| Box::new(tracker) as Box<dyn WindowTracker>)

@@ -254,6 +254,7 @@ fn help_command(mut args: Args) -> Result<()> {
                 "WX-INPUT-001" => ("The active capture route cannot currently match text.", "Run `wayexpand debug` and inspect layout, capture, policy, and service findings.", "docs/TROUBLESHOOTING.md#wx-input-001"),
                 "WX-OUTPUT-001" => ("The output route is unavailable or stalled.", "Inspect `wayexpand status`; do not retry an insertion with an uncertain result.", "docs/TROUBLESHOOTING.md#wx-output-001"),
                 "WX-SERVICE-001" | "WX-SERVICE-002" => ("A required user service is missing or not responding.", "Run `wayexpand install-check` and `wayexpand setup --check`; restart only the selected installed unit.", "docs/OPERATIONS.md#operational-health-and-setup-deadlines"),
+                "WX-WINDOW-ENV-001" => ("The WayExpand service cannot find the Sway or Hyprland IPC socket, so app-filtered snippets never expand.", "Export SWAYSOCK (Sway) or HYPRLAND_INSTANCE_SIGNATURE (Hyprland) to systemd with `systemctl --user import-environment` from the compositor config, log in again, then run `systemctl --user restart wayexpand`.", "docs/TROUBLESHOOTING.md#app_filter-never-matches-on-sway-or-hyprland"),
                 "WX-VERSION-001" => ("The CLI and running daemon versions differ.", "Run `wayexpand upgrade --check`; apply only after reviewing configuration validity.", "docs/OPERATIONS.md#operational-health-and-setup-deadlines"),
                 _ => bail!("unknown diagnostic finding ID {id:?}; see `wayexpand debug --json` for current findings"),
             };

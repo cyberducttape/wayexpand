@@ -16,6 +16,7 @@ use std::{
 };
 use tracing::{info, warn};
 use wayexpand_backend_gnome_window::GnomeWindowTracker;
+use wayexpand_backend_ipc_window::{HyprlandWindowTracker, SwayWindowTracker};
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_selection::WindowTrackerKind;
 use wayexpand_core::{
@@ -278,7 +279,8 @@ impl ReconnectBackoff {
 /// Spawn a supervised background window tracker.
 ///
 /// The returned receiver exists even when the desktop's bridge (KWin's
-/// scripting interface, or the WayExpand GNOME Shell extension) is initially
+/// scripting interface, the WayExpand GNOME Shell extension, or the Sway or
+/// Hyprland IPC socket) is initially
 /// unavailable; the supervisor keeps probing and reconnects with bounded
 /// exponential backoff. Until it sends a fresh focused-window snapshot,
 /// app-filtered expansions remain fail-closed. Desktops without a bridge get
@@ -305,7 +307,8 @@ pub fn spawn_window_tracker(
         .store(TRACKER_STATE_STARTING, Ordering::Release);
     let supervisor_diagnostics = Arc::clone(&diagnostics);
     let requirements = TrackerRequirements {
-        title_matching: (kind == WindowTrackerKind::GnomeShell)
+        // Every bridge except KWin's reads titles only on request.
+        title_matching: (kind != WindowTrackerKind::Kwin)
             .then(|| Arc::new(AtomicBool::new(requires_titles))),
         process_identity: (kind == WindowTrackerKind::Kwin)
             .then(|| Arc::new(AtomicBool::new(requires_process_identity))),
@@ -342,6 +345,30 @@ pub fn spawn_window_tracker(
                 kind.label(),
                 GnomeWindowTracker::probe,
                 GnomeWindowTracker::new_with_titles,
+                supervisor_requirements,
+                TrackerConnectionState {
+                    connected: supervisor_connected,
+                    diagnostics: supervisor_diagnostics,
+                },
+            ),
+            WindowTrackerKind::Sway => supervise_window_tracker(
+                sender,
+                supervisor_stop,
+                kind.label(),
+                SwayWindowTracker::probe,
+                SwayWindowTracker::new_with_titles,
+                supervisor_requirements,
+                TrackerConnectionState {
+                    connected: supervisor_connected,
+                    diagnostics: supervisor_diagnostics,
+                },
+            ),
+            WindowTrackerKind::Hyprland => supervise_window_tracker(
+                sender,
+                supervisor_stop,
+                kind.label(),
+                HyprlandWindowTracker::probe,
+                HyprlandWindowTracker::new_with_titles,
                 supervisor_requirements,
                 TrackerConnectionState {
                     connected: supervisor_connected,

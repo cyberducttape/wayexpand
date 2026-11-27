@@ -121,6 +121,35 @@ fn doctor_protocol_probe_report_distinguishes_available_and_missing_globals() {
         "not_applicable"
     );
     assert_eq!(probes["kwin_window_tracker"]["status"], "not_applicable");
+
+    for compositor in [
+        wayexpand_backend_selection::Compositor::Sway,
+        wayexpand_backend_selection::Compositor::Hyprland,
+    ] {
+        let tracked = wayexpand_backend_selection::Capabilities {
+            has_window_tracker: true,
+            compositor,
+            ..Default::default()
+        };
+        let probes = protocol_probe_report(&tracked, true);
+        assert_eq!(
+            probes["compositor_ipc_window_tracker"]["status"],
+            "available"
+        );
+        assert_eq!(
+            probes["kwin_window_tracker"]["status"], "not_applicable",
+            "a Sway or Hyprland tracker is not the KWin bridge"
+        );
+        let untracked = wayexpand_backend_selection::Capabilities {
+            compositor,
+            ..Default::default()
+        };
+        let probes = protocol_probe_report(&untracked, true);
+        assert_eq!(
+            probes["compositor_ipc_window_tracker"]["status"],
+            "unavailable"
+        );
+    }
 }
 
 #[test]

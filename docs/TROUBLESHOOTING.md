@@ -155,7 +155,7 @@ proof of insertion by themselves.
 
 Finding IDs such as `WX-CONFIG-001`, `WX-GNOME-IM-001`, `WX-IBUS-002`,
 `WX-IBUS-RELOAD-001`, `WX-INPUT-001`, `WX-OUTPUT-001`, `WX-POLICY-001`,
-`WX-SERVICE-002`, and `WX-VERSION-001` are stable references
+`WX-SERVICE-002`, `WX-VERSION-001`, and `WX-WINDOW-ENV-001` are stable references
 for support reports and automation.
 
 ### Browser text fields do not expand
@@ -569,13 +569,31 @@ ls "$XDG_RUNTIME_DIR"/wayexpand-window-tracker-*.js 2>/dev/null || echo "None fo
 
 ### Wlroots Compositors (Sway, Hyprland, river)
 
-#### App_filter not supported yet
+#### App_filter never matches on Sway or Hyprland
 
-**Status:** Window tracking is not yet implemented for wlroots compositors
+**Why:** WayExpand reads the focused window from the compositor's IPC socket,
+found through `SWAYSOCK` (Sway) or `HYPRLAND_INSTANCE_SIGNATURE` (Hyprland).
+A systemd user service only sees those variables if the session exported
+them. Check with `wayexpand doctor`, or:
 
-**Planned:** Standard `wlr-foreign-toplevel-management` protocol will enable app_filter on Sway, Hyprland, and other wlroots-based compositors
+```sh
+systemctl --user show-environment | grep -E 'SWAYSOCK|HYPRLAND_INSTANCE_SIGNATURE'
+```
 
-**Workaround:** Use global expansions instead of app filters. App filters fail closed (never match) if window tracking is unavailable, so they're safe to enable — they just won't provide filtering.
+**Fix:** add one line to the compositor config, then log in again:
+
+```sh
+# Sway (~/.config/sway/config); many distributions ship this already
+exec systemctl --user import-environment SWAYSOCK WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+# Hyprland (~/.config/hypr/hyprland.conf)
+exec-once = systemctl --user import-environment HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+```
+
+Then `systemctl --user restart wayexpand`. Use the app ID that
+`swaymsg -t get_tree` (`app_id`, or `window_properties.class` for Xwayland
+windows) or `hyprctl activewindow` (`class`) reports.
+
+river has no window tracking; app filters fail closed (never match) there.
 
 ### GNOME
 
@@ -914,8 +932,11 @@ Test the unfiltered snippet first. Then check the current support boundary:
 
 - KDE/KWin: run `wayexpand doctor`; window tracking is implemented but still
   best-effort and awaiting broader independent certification.
-- Sway, Hyprland, and river: window tracking is not shipped; filters fail
-  closed and therefore do not match.
+- Sway and Hyprland: window tracking reads the compositor IPC socket and
+  needs `SWAYSOCK` or `HYPRLAND_INSTANCE_SIGNATURE` in the service
+  environment (see "App_filter never matches on Sway or Hyprland").
+- river: window tracking is not shipped; filters fail closed and therefore
+  do not match.
 - GNOME/Mutter: the WayExpand Shell extension provides focus tracking to the
   IBus service, but this path has no accepted physical-session certification.
   If tracking is unavailable or disconnected, app-filtered snippets fail

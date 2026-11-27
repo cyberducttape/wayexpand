@@ -68,7 +68,8 @@
       ],
       "known_limitations": [
         "Sway evdev does not report the effective keyboard XKB layout",
-        "Input-method-v2 application behavior is not certified"
+        "Input-method-v2 application behavior is not certified",
+        "app_filter and focus checks need SWAYSOCK in the daemon's environment"
       ],
       "verified_applications": [],
       "last_certification_result": "Not certified; no accepted Sway physical-desktop evidence"
@@ -92,7 +93,8 @@
       ],
       "known_limitations": [
         "Input-method-v2 application behavior is not certified",
-        "evdev fallback does not detect sensitive fields"
+        "evdev fallback does not detect sensitive fields",
+        "app_filter and focus checks need HYPRLAND_INSTANCE_SIGNATURE in the daemon's environment"
       ],
       "verified_applications": [],
       "last_certification_result": "Not certified; no accepted Hyprland physical-desktop evidence"
@@ -177,8 +179,8 @@
         "certified": false
       },
       "atomic_replace": false,
-      "app_identity": "none",
-      "focus_tracking": false,
+      "app_identity": "sway-ipc, hyprland-ipc",
+      "focus_tracking": true,
       "status": "experimental",
       "setup_backend": "evdev",
       "certification_targets": [
@@ -186,10 +188,10 @@
         "hyprland"
       ],
       "setup_detail": "explicit evdev compatibility fallback with wlroots virtual-keyboard output; observes global keyboard input and has no password-field awareness",
-      "trigger_precondition": "none",
+      "trigger_precondition": "focus_checked_with_compatibility_consent",
       "output_transaction": "separate_delete_and_key_events",
       "application_result": "unobservable",
-      "destination_identity_available": false,
+      "destination_identity_available": true,
       "destination_identity_verified": false,
       "physical_input_interruption_observable": true,
       "physical_input_interruption_verified": false,

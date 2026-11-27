@@ -91,12 +91,13 @@ impl Capabilities {
                 exclusive_capture: false,
                 wayland: true,
                 x11: false,
-                // Window tracking is not shipped for wlroots compositors.
+                // The output backend tracks no windows itself; Sway and
+                // Hyprland get app_filter from their own IPC sockets.
                 app_filter_native: false,
                 max_replacement_size: crate::limits::MAX_REPLACEMENT_BYTES,
-                feature_summary: "UTF-8 direct insertion, multiline, wlr-virtual-keyboard output; no native window tracker",
+                feature_summary: "UTF-8 direct insertion, multiline, wlr-virtual-keyboard output",
                 limitations: &[
-                    "no native app_filter window tracker is shipped",
+                    "app_filter needs the desktop's window tracker (Sway or Hyprland IPC); other wlroots compositors have none",
                     "requires a compositor exposing zwp_virtual_keyboard_v1",
                     "password-field awareness depends on the capture source",
                 ],
@@ -132,7 +133,7 @@ impl Capabilities {
                 limitations: &[
                     "cannot identify password fields",
                     "global keyboard visibility requires explicit input permissions",
-                    "app_filter is unavailable without a native window tracker",
+                    "app_filter needs a desktop window tracker (KWin, GNOME Shell extension, Sway or Hyprland IPC)",
                 ],
             }),
             "input-method-v2" => Some(Capabilities {

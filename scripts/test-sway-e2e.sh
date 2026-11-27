@@ -12,8 +12,8 @@
 #
 # What this does and does not show: output is typed into real Wayland
 # windows by the real wlroots backend, but keyboard capture is simulated
-# (the daemon reads stdin), WayExpand has no Sway window tracker (focus is
-# untracked), and the session is headless. Results are evidence for the
+# (the daemon reads stdin) and the session is headless. Focus comes from
+# the production Sway IPC window tracker. Results are evidence for the
 # output path on this Sway version, not compositor certification.
 #
 # --keep leaves the work directory (logs, sink states) for inspection.
@@ -177,6 +177,6 @@ if [ -s "$work/runtime-status" ]; then
     printf 'route insertion-mode %s\n' "$(status_field inject_insertion_mode)"
     printf 'route focus-mode %s\n' "$(status_field compatibility_mode)"
 fi
-printf '\n%s passed, %s failed, %s unverified (Sway %s, headless, capture simulated, focus untracked)\n' \
+printf '\n%s passed, %s failed, %s unverified (Sway %s, headless, capture simulated, focus tracked over IPC)\n' \
     "$pass" "$fail" "$unverified" "$(sway --version 2>/dev/null | awk '{print $3}')"
 [ "$fail" -eq 0 ] && [ "$unverified" -eq 0 ]

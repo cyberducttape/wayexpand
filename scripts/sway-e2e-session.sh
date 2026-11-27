@@ -7,9 +7,8 @@
 #   - capture: --source=stdin (the harness feeds what the "user" typed;
 #     real keyboard capture needs /dev/input and is not exercised here),
 #   - output: the production wlroots virtual-keyboard backend,
-#   - focus: none -- WayExpand has no Sway window tracker, so the route
-#     runs with compatibility_mode = "untracked-focus" and app_filter
-#     snippets must fail closed.
+#   - focus: the production Sway IPC window tracker on this session's
+#     SWAYSOCK, with compatibility_mode = "tracked-focus".
 # The "user" types into the focused sink with wx-e2e-type through its own
 # wlroots virtual keyboard, separate from the daemon's.
 #
@@ -22,7 +21,7 @@ set -u
 
 export WX_E2E_TYPIST=wlroots
 e2e_output_backend=wlroots
-e2e_compatibility_mode=untracked-focus
+e2e_compatibility_mode=tracked-focus
 # This private harness deliberately exercises explicitly enabled paced
 # compatibility output; production defaults remain limited to 8 characters.
 e2e_keystroke_max_chars=250
@@ -34,6 +33,11 @@ activate() {
 }
 
 route_ready() {
+    # Focus checks need the Sway tracker.
+    case "$1" in
+        *"window_tracker_connected=true"*) ;;
+        *) return 1 ;;
+    esac
     if [ "${e2e_expect_blocked_route:-0}" = 1 ]; then
         case "$1" in
             *"source=stdin"*"backend=wlroots-virtual-keyboard"*"insertion_assurance=blocked"*)
@@ -62,6 +66,7 @@ trap end_case EXIT
 trap 'exit 1' INT TERM
 
 run_scenarios "expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
-multiline-replacement unicode-insertion app-filter-fails-closed
-command-expansion-completes config-reload daemon-restart clipboard-variable
+multiline-replacement unicode-insertion app-filter-follows-focus app-filter-fails-closed
+command-expansion-completes focus-change-during-expansion target-closes-during-expansion
+config-reload daemon-restart clipboard-variable
 clipboard-empty-fails-closed keystroke-route-refuses-without-consent"

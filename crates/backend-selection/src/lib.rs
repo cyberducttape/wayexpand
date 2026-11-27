@@ -10,6 +10,7 @@ use tracing::{debug, warn};
 use wayexpand_backend_evdev::readable_keyboard_available;
 use wayexpand_backend_gnome_window::GnomeWindowTracker;
 use wayexpand_backend_input_method::InputMethodSource;
+use wayexpand_backend_ipc_window::{HyprlandWindowTracker, SwayWindowTracker};
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_wlroots::WlrootsInjector;
 
@@ -150,6 +151,10 @@ pub enum WindowTrackerKind {
     Kwin,
     /// GNOME: the WayExpand GNOME Shell extension.
     GnomeShell,
+    /// Sway: window events on the i3-compatible IPC socket (`$SWAYSOCK`).
+    Sway,
+    /// Hyprland: the event socket under `$XDG_RUNTIME_DIR/hypr`.
+    Hyprland,
 }
 
 impl WindowTrackerKind {
@@ -158,6 +163,8 @@ impl WindowTrackerKind {
         match Compositor::detect() {
             Compositor::KdePlasma => Some(Self::Kwin),
             Compositor::Gnome => Some(Self::GnomeShell),
+            Compositor::Sway => Some(Self::Sway),
+            Compositor::Hyprland => Some(Self::Hyprland),
             _ => None,
         }
     }
@@ -166,6 +173,8 @@ impl WindowTrackerKind {
         match self {
             Self::Kwin => "KWin scripting bridge",
             Self::GnomeShell => "GNOME Shell extension",
+            Self::Sway => "Sway IPC",
+            Self::Hyprland => "Hyprland IPC",
         }
     }
 
@@ -174,6 +183,8 @@ impl WindowTrackerKind {
         match self {
             Self::Kwin => KwinWindowTracker::probe().map_err(|error| error.to_string()),
             Self::GnomeShell => GnomeWindowTracker::probe().map_err(|error| error.to_string()),
+            Self::Sway => SwayWindowTracker::probe().map_err(|error| error.to_string()),
+            Self::Hyprland => HyprlandWindowTracker::probe().map_err(|error| error.to_string()),
         }
     }
 }
@@ -223,6 +234,16 @@ impl Compositor {
             }
         }
 
+        // Sway and Hyprland set these for their own clients (Sway often
+        // leaves XDG_CURRENT_DESKTOP unset). Each names a live IPC socket of
+        // that exact compositor, so it is direct evidence, not a guess.
+        if env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some_and(|value| !value.is_empty()) {
+            return Self::Hyprland;
+        }
+        if env::var_os("SWAYSOCK").is_some_and(|value| !value.is_empty()) {
+            return Self::Sway;
+        }
+
         // Check for Wayland before X11. Modern Wayland sessions often have
         // both WAYLAND_DISPLAY and DISPLAY set (XWayland), so checking DISPLAY
         // first would incorrectly label Wayland+XWayland as pure X11.
@@ -255,7 +276,7 @@ pub fn probe_capabilities() -> Capabilities {
     let has_direct_libei_socket = env::var_os("LIBEI_SOCKET").is_some();
     // Focused-window tracking needs a desktop-specific bridge: KWin's
     // scripting interface on Plasma, the WayExpand GNOME Shell extension on
-    // GNOME. Both probes are bounded and side-effect free, so the CLI and
+    // GNOME, the compositor IPC socket on Sway and Hyprland. All probes are bounded and side-effect free, so the CLI and
     // the daemon report the same capability.
     let has_window_tracker =
         WindowTrackerKind::for_session().is_some_and(|kind| kind.probe().is_ok());
