@@ -856,46 +856,17 @@ fn load_for_mode(
 }
 
 fn standard_fleet_signature() -> u64 {
-    match FleetConfig::standard_source_files() {
-        Ok(paths) => fleet_signature_for(paths),
-        Err(error) => {
-            let mut hasher = DefaultHasher::new();
-            error.to_string().hash(&mut hasher);
-            hasher.finish()
-        }
-    }
+    FleetConfig::standard_source_signature()
 }
 
+// This probe runs on the keyboard reactor when a filesystem event arrives and
+// during periodic integrity checks, so it hashes metadata only: reading every
+// layer here could pull a large library through the input path. The
+// background loader still reads and validates the complete contents before it
+// can promote a new engine.
+#[cfg(test)]
 fn fleet_signature_for(paths: impl IntoIterator<Item = PathBuf>) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    let mut paths: Vec<_> = paths.into_iter().collect();
-    paths.sort();
-    for path in paths {
-        path.hash(&mut hasher);
-        // This probe runs on the keyboard reactor when a filesystem event
-        // arrives and during periodic integrity checks. Hash metadata only:
-        // reading every layer here can synchronously pull gigabytes through
-        // the input path for a large library or slow home filesystem. The
-        // background loader still reads and validates the complete contents
-        // before it can promote a new engine.
-        match fs::metadata(&path) {
-            Ok(metadata) => {
-                b"present".hash(&mut hasher);
-                metadata.file_type().is_file().hash(&mut hasher);
-                metadata.len().hash(&mut hasher);
-                metadata.modified().ok().hash(&mut hasher);
-                metadata.ino().hash(&mut hasher);
-                metadata.dev().hash(&mut hasher);
-                metadata.ctime().hash(&mut hasher);
-                metadata.ctime_nsec().hash(&mut hasher);
-            }
-            Err(error) => {
-                b"unreadable".hash(&mut hasher);
-                error.kind().hash(&mut hasher);
-            }
-        }
-    }
-    hasher.finish()
+    FleetConfig::source_metadata_signature(paths)
 }
 
 /// Exact content signature for the background fleet load consistency check.

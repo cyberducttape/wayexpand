@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The IBus engine now serves the same snippet library as the daemon. It
+  used to read only the primary configuration file, so snippets in
+  `snippets.d/`, organization layers in `/etc/wayexpand/snippets.d/` and
+  installed packs expanded in terminals (through the daemon) but not in
+  applications on the IBus route. Like the daemon, it merges these layers
+  only for the default configuration, watches them, and serves an edited,
+  added or removed layer without a restart; a broken layer keeps the
+  previous library. The IBus end-to-end test now covers a `snippets.d`
+  snippet and a layer added while the engine runs.
 - Sway and Hyprland now follow the focused window, so `app_filter` snippets
   work there instead of always failing closed. The new
   `wayexpand-backend-ipc-window` crate reads window and workspace events

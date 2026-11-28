@@ -74,6 +74,14 @@ trigger = ";e2e"
 replacement = "expanded"
 EOF
 chmod 0600 "$work/config/wayexpand/expansions.toml"
+# A user snippet layer: the engine must serve it like the daemon does.
+mkdir -m 0700 "$work/config/wayexpand/snippets.d"
+cat >"$work/config/wayexpand/snippets.d/layer.toml" <<'EOF'
+[[expansion]]
+trigger = ";lyr"
+replacement = "layered"
+EOF
+chmod 0600 "$work/config/wayexpand/snippets.d/layer.toml"
 sed "s|<exec>wayexpand-ibus</exec>|<exec>$bin_dir/wayexpand-ibus</exec>|" \
     "$project_dir/desktop/wayexpand-ibus.xml" >"$work/component/wayexpand.xml"
 
@@ -129,7 +137,8 @@ if [ "$registered" -ne 1 ]; then
     exit 1
 fi
 status=0
-"$E2E_BIN_DIR/wx-e2e-ibus" "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" || status=$?
+"$E2E_BIN_DIR/wx-e2e-ibus" "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" \
+    --layer-dir "$XDG_CONFIG_HOME/wayexpand/snippets.d" || status=$?
 if [ "$status" -eq 0 ]; then
     # Exercise a toolkit joining an already-selected global engine, as GNOME
     # does after changing its input source. This catches tests that only pass

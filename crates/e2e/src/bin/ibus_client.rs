@@ -8,6 +8,11 @@
 //! WayExpand engine and the real daemon fail here instead of on a desktop.
 //!
 //! Usage: wx-e2e-ibus <status-file> [--expect-active] [--single-expansion]
+//!        [--layer-dir DIR]
+//!
+//! With `--layer-dir`, DIR is the user's `snippets.d`: it must already hold a
+//! layer defining `;lyr`, and the client adds a second layer while the engine
+//! runs to check that layer edits are picked up.
 //!        (IBUS_ADDRESS must be set)
 //! Prints one "pass|fail <scenario> <detail>" line per scenario and exits
 //! non-zero if any scenario failed.
@@ -39,6 +44,10 @@ const PURPOSE_PASSWORD: u32 = 8;
 const RELEASE_MASK: u32 = 1 << 30;
 const TRIGGER: &str = ";e2e";
 const REPLACEMENT: &str = "expanded";
+const LAYER_TRIGGER: &str = ";lyr";
+const LAYER_REPLACEMENT: &str = "layered";
+const ADDED_LAYER_TRIGGER: &str = ";lyz";
+const ADDED_LAYER_REPLACEMENT: &str = "added";
 
 enum Event {
     Commit(String),
@@ -329,19 +338,68 @@ fn wait_for_content_type(
     }
 }
 
+const USAGE: &str =
+    "usage: wx-e2e-ibus <status-file> [--expect-active] [--single-expansion] [--layer-dir DIR]";
+
+/// Snippets from `snippets.d` expand like primary ones, and a layer added
+/// while the engine runs is served without a restart.
+fn check_snippet_layers(
+    results: &mut Results,
+    editor: &mut Field<'_>,
+    layer_dir: &Path,
+) -> Result<()> {
+    editor.clear()?;
+    editor.type_text(LAYER_TRIGGER)?;
+    results.check(
+        "snippet-layer",
+        editor.contents() == LAYER_REPLACEMENT,
+        format!(
+            "text after typing a snippets.d trigger: {:?}",
+            editor.contents()
+        ),
+    );
+
+    let added = layer_dir.join("added.toml");
+    let staged = layer_dir.join(".added.toml.tmp");
+    std::fs::write(
+        &staged,
+        format!("[[expansion]]\ntrigger = \"{ADDED_LAYER_TRIGGER}\"\nreplacement = \"{ADDED_LAYER_REPLACEMENT}\"\n"),
+    )?;
+    std::fs::set_permissions(&staged, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+    std::fs::rename(&staged, &added)?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut contents = String::new();
+    while Instant::now() < deadline {
+        editor.clear()?;
+        editor.type_text(ADDED_LAYER_TRIGGER)?;
+        contents = editor.contents();
+        if contents == ADDED_LAYER_REPLACEMENT {
+            break;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    results.check(
+        "snippet-layer-added",
+        contents == ADDED_LAYER_REPLACEMENT,
+        format!("text after adding a layer while running: {contents:?}"),
+    );
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let mut arguments = env::args_os().skip(1);
-    let status_file: PathBuf = arguments
-        .next()
-        .map(PathBuf::from)
-        .context("usage: wx-e2e-ibus <status-file> [--expect-active]")?;
+    let status_file: PathBuf = arguments.next().map(PathBuf::from).context(USAGE)?;
     let mut expect_active = false;
     let mut single_expansion = false;
-    for argument in arguments {
+    let mut layer_dir: Option<PathBuf> = None;
+    while let Some(argument) = arguments.next() {
         match argument.to_str() {
             Some("--expect-active") if !expect_active => expect_active = true,
             Some("--single-expansion") if !single_expansion => single_expansion = true,
-            _ => bail!("usage: wx-e2e-ibus <status-file> [--expect-active] [--single-expansion]"),
+            Some("--layer-dir") if layer_dir.is_none() => {
+                layer_dir = Some(arguments.next().map(PathBuf::from).context(USAGE)?);
+            }
+            _ => bail!(USAGE),
         }
     }
     let address = env::var("IBUS_ADDRESS").context("IBUS_ADDRESS is not set")?;
@@ -519,6 +577,9 @@ fn main() -> Result<()> {
             editor.contents()
         ),
     );
+    if let Some(layer_dir) = &layer_dir {
+        check_snippet_layers(&mut results, &mut editor, layer_dir)?;
+    }
     editor.call("FocusOut", &())?;
 
     // A terminal-like client: it never reports the text before the cursor.
