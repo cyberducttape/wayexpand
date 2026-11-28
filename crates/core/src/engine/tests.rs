@@ -5360,8 +5360,11 @@ fn dropping_async_runtime_discards_queued_commands() {
         std::env::temp_dir().join(format!("wayexpand-shutdown-first-{}", std::process::id()));
     let second_marker =
         std::env::temp_dir().join(format!("wayexpand-shutdown-second-{}", std::process::id()));
+    let release =
+        std::env::temp_dir().join(format!("wayexpand-shutdown-release-{}", std::process::id()));
     let _ = std::fs::remove_file(&first_marker);
     let _ = std::fs::remove_file(&second_marker);
+    let _ = std::fs::remove_file(&release);
     let config = Config::parse(&format!(
         r#"
         [[expansion]]
@@ -5369,7 +5372,7 @@ fn dropping_async_runtime_discards_queued_commands() {
         replacement = ""
         [expansion.command]
         program = "/bin/sh"
-        args = ["-c", "sleep 0.4; printf first > '{}'"]
+        args = ["-c", "while [ ! -e '{}' ]; do sleep 0.01; done; printf first > '{}'"]
         timeout_ms = 2000
 
         [[expansion]]
@@ -5377,10 +5380,12 @@ fn dropping_async_runtime_discards_queued_commands() {
         replacement = ""
         [expansion.command]
         program = "/bin/sh"
-        args = ["-c", "printf second > '{}'"]
+        args = ["-c", "while [ ! -e '{}' ]; do sleep 0.01; done; printf second > '{}'"]
         timeout_ms = 2000
         "#,
+        release.display(),
         first_marker.display(),
+        release.display(),
         second_marker.display()
     ))
     .unwrap();
@@ -5429,6 +5434,10 @@ fn dropping_async_runtime_discards_queued_commands() {
     );
 
     drop(engine);
+    // Release a command that escaped cancellation only after shutdown returns.
+    // This makes the assertion independent of scheduler timing.
+    std::fs::write(&release, b"release").unwrap();
+    thread::sleep(Duration::from_millis(50));
     assert!(
         !first_marker.exists(),
         "in-flight command must be cancelled during shutdown"
@@ -5439,6 +5448,7 @@ fn dropping_async_runtime_discards_queued_commands() {
     );
     let _ = std::fs::remove_file(first_marker);
     let _ = std::fs::remove_file(second_marker);
+    let _ = std::fs::remove_file(release);
 }
 
 #[test]

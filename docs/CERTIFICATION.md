@@ -488,7 +488,7 @@ the engine to reload. When the session ends, including on Ctrl-C, it restores
 the exact original file, or removes only the marked block if the file was
 edited meanwhile.
 
-`scripts/kde-live-certification-driver.sh` then runs through the standard
+`scripts/live-certification-driver.sh` then runs through the standard
 runner. For each cell a person can perform, it opens a GTK 3 `TextView`, a
 Qt 6 `QPlainTextEdit` or a GTK 3 password-purpose `Entry` (the clients in the
 table above), prints what to type on the physical keyboard, and decides the
@@ -509,11 +509,37 @@ The output is a compatibility-scope evidence file from
 it before copying it into `docs/evidence/`. IBus on KDE remains ineligible
 for production certification (no atomic replacement, exact window identity
 or composition awareness), and this run does not change that.
-`scripts/test-kde-live-certification.sh` checks the driver's outcome rules
+`scripts/test-live-certification.sh` checks the driver's outcome rules
 and the configuration restore with scripted stand-in clients.
 
-Each driver invocation is capped at 120 seconds and the complete matrix has a
-60-minute deadline. A timed-out cell and every cell remaining after the overall
+### Live Sway and Hyprland session driver
+
+`scripts/wlroots-live-certification.sh` runs the same driver on the
+input-method-v2 route in a real Sway or Hyprland session, which is the
+evidence those targets still lack (their CI and nested runs use a test
+virtual keyboard, not a physical one). Install the commit being certified,
+start the daemon on the input-method-v2 route (`wayexpand setup`), and run:
+
+```sh
+scripts/wlroots-live-certification.sh --reviewed-by "NAME" --physical-keyboard "MODEL"
+```
+
+It detects the compositor from `HYPRLAND_INSTANCE_SIGNATURE` or `SWAYSOCK`
+and refuses to start unless the checkout is clean, the installed CLI and the
+running daemon both report the checkout's commit, the daemon is on the
+`input-method` + `input-method-v2` route, and the compositor's window tracker
+is connected. It adds and restores the same marked test snippets in the
+daemon's active configuration and waits for the daemon to reload them. The
+live cells and their outcome rules are the KDE driver's; focus changes and
+closes inside an expansion stay `UNVERIFIED` because input-method-v2 also
+commits a replacement in one protocol call. Input-method-v2 is the only
+route eligible for production certification, so `scripts/certify-compositor.sh`
+also checks the daemon's full capability contract. A single live run leaves
+most of the matrix `UNVERIFIED` and therefore records incomplete evidence; it
+is a reviewed step toward certification, not certification by itself.
+
+Each driver invocation is capped at 200 seconds and the complete matrix has a
+120-minute deadline. A timed-out cell and every cell remaining after the overall
 deadline are recorded as `UNVERIFIED`; the collector therefore cannot turn a
 hung driver into a pass or lose the evidence for cells that were not run.
 

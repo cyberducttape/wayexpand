@@ -1,12 +1,12 @@
 #!/bin/sh
-# Check the live KDE certification driver and its configuration editor
+# Check the live certification driver and its configuration editor
 # without a desktop: scripted stand-ins for the readback clients write the
 # state a real client would, so the outcome rules, unverified reasons and
 # configuration restore are tested exactly as the live session uses them.
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-driver="$project_dir/scripts/kde-live-certification-driver.sh"
+driver="$project_dir/scripts/live-certification-driver.sh"
 editor="$project_dir/scripts/live-certification-config.py"
 test_dir=$(mktemp -d)
 trap 'rm -rf -- "$test_dir"' EXIT INT TERM
@@ -57,6 +57,7 @@ run_cell 2 printable-press-release browser-firefox
 run_cell 2 keyboard-hotplug gtk3-textview
 run_cell 2 focus-change-during-expansion gtk3-textview
 run_cell 2 backspace password-field
+run_cell 2 printable-press-release gtk3-textview evdev+wlroots
 
 # The outcome is the exact text the client received.
 FAKE_TEXT=alpha run_cell 0 printable-press-release gtk3-textview
@@ -72,6 +73,12 @@ FAKE_TEXT="$long${long}alpha" run_cell 0 second-trigger-during-nonatomic-replace
 FAKE_TEXT="$long${long}lpha" run_cell 1 second-trigger-during-nonatomic-replacement gtk3-textview
 FAKE_TEXT="$long${long}Z" run_cell 0 modifier-during-nonatomic-replacement qt6-plaintextedit
 
+# The input-method-v2 route (Sway, Hyprland) uses the same outcome rules.
+FAKE_TEXT=alpha run_cell 0 printable-press-release gtk3-textview input-method-v2
+FAKE_TEXT=';wxa' run_cell 0 printable-press-release password-field input-method-v2
+FAKE_TEXT=alpha run_cell 1 printable-press-release password-field input-method-v2
+run_cell 2 focus-change-during-expansion qt6-plaintextedit input-method-v2
+
 # The configuration editor restores exact bytes, or removes only its block.
 config="$test_dir/expansions.toml"
 block='# BEGIN wayexpand-live-certification (temporary)
@@ -85,7 +92,7 @@ trigger   = ":mine"
 replacement = "kept"
 '
 printf '%s' "$original" >"$config"
-chmod 0600 "$config"
+chmod 0640 "$config"
 out="$test_dir/run1"
 mkdir -m 0700 "$out"
 python3 "$editor" add "$config" "$out" "$block"
@@ -93,6 +100,28 @@ grep -F ';wxa' "$config" >/dev/null
 [ "$(stat -c %a "$config")" = 600 ]
 python3 "$editor" restore "$config" "$out" "$block" >/dev/null
 [ "$(cat "$config")" = "$(printf '%s' "$original")" ] || { echo 'error: restore was not exact' >&2; exit 1; }
+[ "$(stat -c %a "$config")" = 640 ] || { echo 'error: restore did not preserve config permissions' >&2; exit 1; }
+
+# Never replace a symlink instead of the active configuration it references.
+symlink_target="$test_dir/symlink-target.toml"
+cp "$config" "$symlink_target"
+ln -s "$symlink_target" "$test_dir/symlink-config.toml"
+out="$test_dir/symlink-run"
+mkdir -m 0700 "$out"
+if python3 "$editor" add "$test_dir/symlink-config.toml" "$out" "$block" 2>/dev/null; then
+    echo 'error: configuration editor accepted a symlink' >&2
+    exit 1
+fi
+[ -L "$test_dir/symlink-config.toml" ] || { echo 'error: symlink was replaced' >&2; exit 1; }
+[ "$(cat "$symlink_target")" = "$(printf '%s' "$original")" ] || { echo 'error: symlink target changed' >&2; exit 1; }
+
+# Cleanup after an interrupted add that saved its backup but had not touched
+# the live configuration must be a harmless no-op.
+out="$test_dir/interrupted-add"
+mkdir -m 0700 "$out"
+cp "$config" "$out/original-configuration.toml"
+python3 "$editor" restore "$config" "$out" "$block" >/dev/null
+[ "$(cat "$config")" = "$(printf '%s' "$original")" ] || { echo 'error: interrupted add changed the configuration' >&2; exit 1; }
 
 out="$test_dir/run2"
 mkdir -m 0700 "$out"
@@ -103,4 +132,4 @@ if grep -F ';wxa' "$config" >/dev/null; then echo 'error: test block left behind
 grep -F ':during' "$config" >/dev/null || { echo 'error: concurrent edit lost' >&2; exit 1; }
 grep -F ':mine' "$config" >/dev/null || { echo 'error: user snippet lost' >&2; exit 1; }
 
-printf '%s\n' 'live KDE certification driver test passed'
+printf '%s\n' 'live certification driver test passed'
