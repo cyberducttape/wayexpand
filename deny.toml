@@ -44,6 +44,8 @@ exceptions = [
     # an OSI-approved, non-copyleft license. Pin allowances to locked versions.
     { name = "clipboard-win", version = "5.4.3", allow = ["BSL-1.0"] },
     { name = "error-code", version = "3.4.0", allow = ["BSL-1.0"] },
+    # notify 9 hashes file contents with xxhash-rust (BSL-1.0, same terms).
+    { name = "xxhash-rust", version = "0.8.21", allow = ["BSL-1.0"] },
 ]
 
 [[licenses.clarify]]
