@@ -92,7 +92,7 @@ trigger   = ":mine"
 replacement = "kept"
 '
 printf '%s' "$original" >"$config"
-chmod 0600 "$config"
+chmod 0640 "$config"
 out="$test_dir/run1"
 mkdir -m 0700 "$out"
 python3 "$editor" add "$config" "$out" "$block"
@@ -100,6 +100,28 @@ grep -F ';wxa' "$config" >/dev/null
 [ "$(stat -c %a "$config")" = 600 ]
 python3 "$editor" restore "$config" "$out" "$block" >/dev/null
 [ "$(cat "$config")" = "$(printf '%s' "$original")" ] || { echo 'error: restore was not exact' >&2; exit 1; }
+[ "$(stat -c %a "$config")" = 640 ] || { echo 'error: restore did not preserve config permissions' >&2; exit 1; }
+
+# Never replace a symlink instead of the active configuration it references.
+symlink_target="$test_dir/symlink-target.toml"
+cp "$config" "$symlink_target"
+ln -s "$symlink_target" "$test_dir/symlink-config.toml"
+out="$test_dir/symlink-run"
+mkdir -m 0700 "$out"
+if python3 "$editor" add "$test_dir/symlink-config.toml" "$out" "$block" 2>/dev/null; then
+    echo 'error: configuration editor accepted a symlink' >&2
+    exit 1
+fi
+[ -L "$test_dir/symlink-config.toml" ] || { echo 'error: symlink was replaced' >&2; exit 1; }
+[ "$(cat "$symlink_target")" = "$(printf '%s' "$original")" ] || { echo 'error: symlink target changed' >&2; exit 1; }
+
+# Cleanup after an interrupted add that saved its backup but had not touched
+# the live configuration must be a harmless no-op.
+out="$test_dir/interrupted-add"
+mkdir -m 0700 "$out"
+cp "$config" "$out/original-configuration.toml"
+python3 "$editor" restore "$config" "$out" "$block" >/dev/null
+[ "$(cat "$config")" = "$(printf '%s' "$original")" ] || { echo 'error: interrupted add changed the configuration' >&2; exit 1; }
 
 out="$test_dir/run2"
 mkdir -m 0700 "$out"

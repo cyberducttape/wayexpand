@@ -18,6 +18,7 @@
 # its reason. The result is an evidence file from
 # scripts/certify-compositor.sh; review it before submitting it.
 set -eu
+umask 077
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 reviewed_by=
@@ -85,8 +86,13 @@ python3 -c 'import PyQt6.QtWidgets' 2>/dev/null ||
 if [ -z "$output_dir" ]; then
     output_dir="$project_dir/target/live-certification-$compositor-$commit-$(date -u +%Y%m%dT%H%M%SZ)"
 fi
-mkdir -p "$output_dir"
-chmod 0700 "$output_dir"
+if [ -L "$output_dir" ]; then
+    fail 'the output directory must not be a symlink'
+elif [ -e "$output_dir" ]; then
+    [ -d "$output_dir" ] || fail 'the output path is not a directory'
+else
+    mkdir -p "$output_dir"
+fi
 config=$(printf '%s' "$status_json" | jq -r '.config_active_path // empty')
 [ -n "$config" ] && [ -f "$config" ] || fail "the daemon reports no readable configuration (${config:-none})"
 
@@ -116,9 +122,10 @@ EOF
 edit_config() {
     python3 "$project_dir/scripts/live-certification-config.py" "$1" "$config" "$output_dir" "$snippets"
 }
-edit_config add || fail 'could not add the test snippets'
 trap 'edit_config restore' EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT
+trap 'exit 143' TERM
+edit_config add || fail 'could not add the test snippets'
 "$cli" config validate "$config" >/dev/null 2>&1 ||
     fail 'the configuration is invalid with the test snippets (a trigger may collide with ;wxa, ;wxu or ;wxl)'
 deadline=$(( $(date +%s) + 20 ))

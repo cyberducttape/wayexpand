@@ -538,8 +538,8 @@ also checks the daemon's full capability contract. A single live run leaves
 most of the matrix `UNVERIFIED` and therefore records incomplete evidence; it
 is a reviewed step toward certification, not certification by itself.
 
-Each driver invocation is capped at 120 seconds and the complete matrix has a
-60-minute deadline. A timed-out cell and every cell remaining after the overall
+Each driver invocation is capped at 200 seconds and the complete matrix has a
+120-minute deadline. A timed-out cell and every cell remaining after the overall
 deadline are recorded as `UNVERIFIED`; the collector therefore cannot turn a
 hung driver into a pass or lose the evidence for cells that were not run.
 
