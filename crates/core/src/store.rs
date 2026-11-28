@@ -30,6 +30,10 @@ pub struct ConfigStore {
 pub struct ConfigSnapshot {
     pub config: Arc<Config>,
     pub generation: u64,
+    /// The exact TOML the configuration was parsed from, when it came from the
+    /// file. Fleet merging reads it to tell which settings the user set
+    /// explicitly. `None` after [`ConfigStore::atomically_replace`].
+    pub source: Option<Arc<str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +86,7 @@ impl ConfigStore {
                     retry_state: Mutex::new(RetryState::default()),
                     path,
                     snapshot: RwLock::new(ConfigSnapshot {
+                        source: Some(Arc::clone(&loaded.source)),
                         config: Arc::new(loaded.config),
                         generation: 0,
                     }),
@@ -152,11 +157,16 @@ impl ConfigStore {
         receiver
     }
     pub fn atomically_replace(&self, config: Config) -> u64 {
+        self.replace(config, None)
+    }
+
+    fn replace(&self, config: Config, source: Option<Arc<str>>) -> u64 {
         let mut snapshot = self
             .snapshot
             .write()
             .unwrap_or_else(PoisonError::into_inner);
         snapshot.config = Arc::new(config);
+        snapshot.source = source;
         snapshot.generation = snapshot.generation.wrapping_add(1);
         let value = snapshot.generation;
         // Keep replacements and their bounded notifications ordered together.
@@ -261,7 +271,7 @@ impl ConfigStore {
             if before == after && verified {
                 *observed_stamp = after;
                 *retry_state = RetryState::default();
-                self.atomically_replace(loaded.config);
+                self.replace(loaded.config, Some(loaded.source));
                 *self
                     .reload_error
                     .lock()
@@ -386,9 +396,13 @@ mod tests {
         fs::rename(temporary, path).unwrap();
     }
     fn path() -> PathBuf {
+        // Parallel tests can read the same clock value; the counter keeps
+        // their files apart.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         std::env::temp_dir().join(format!(
-            "wayexpand-store-{}-{}.toml",
+            "wayexpand-store-{}-{}-{}.toml",
             std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -411,6 +425,22 @@ mod tests {
         assert!(store.reload_if_changed().unwrap());
         assert_eq!(receiver.recv().unwrap(), 1);
         assert_eq!(store.snapshot().config.expansion[0].replacement, "new");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn snapshots_keep_the_source_they_were_parsed_from() {
+        let path = path();
+        let first = "[settings]\nmax_buffer_chars = 64\n";
+        write_private(&path, first);
+        let store = ConfigStore::load(&path).unwrap();
+        assert_eq!(store.snapshot().source.as_deref(), Some(first));
+        let second = "[settings]\nmax_buffer_chars = 128\n";
+        write_private(&path, second);
+        assert!(store.reload_if_changed().unwrap());
+        assert_eq!(store.snapshot().source.as_deref(), Some(second));
+        store.atomically_replace(Config::parse("").unwrap());
+        assert_eq!(store.snapshot().source, None);
         let _ = fs::remove_file(path);
     }
 

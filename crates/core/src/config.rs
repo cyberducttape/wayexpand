@@ -125,7 +125,7 @@ impl ConfigRevision {
 pub struct LoadedConfig {
     pub config: Config,
     pub revision: ConfigRevision,
-    source: Arc<str>,
+    pub(crate) source: Arc<str>,
 }
 
 impl LoadedConfig {

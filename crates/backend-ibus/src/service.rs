@@ -4,8 +4,9 @@ use super::{
 };
 use notify::{RecursiveMode, Watcher};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc, Arc, Mutex,
@@ -17,8 +18,8 @@ use wayexpand_backend_gnome_window::GnomeWindowTracker;
 use wayexpand_backend_ipc_window::{HyprlandWindowTracker, SwayWindowTracker};
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_core::{
-    default_config_path, Config, ConfigStore, OrganizationPolicy, ValidatedConfig, WindowContext,
-    WindowTracker,
+    default_config_path, Config, ConfigSnapshot, ConfigStore, FleetConfig, OrganizationPolicy,
+    ValidatedConfig, WindowContext, WindowTracker,
 };
 use zbus::{
     blocking::{connection::Builder, Connection},
@@ -44,6 +45,8 @@ pub enum IbusServiceError {
     Thread(String),
     #[error("organization policy is invalid: {0}")]
     Policy(String),
+    #[error("could not load snippet layers: {0}")]
+    Fleet(String),
 }
 
 /// Feed only authenticated GNOME Shell focus updates to IBus engines. A
@@ -342,6 +345,62 @@ fn validate_config_for_policy(
     Ok(Arc::new(effective.validate_snapshot()?))
 }
 
+/// The daemon merges the standard snippet layers (`snippets.d` next to the
+/// configuration, `/etc/wayexpand/snippets.d` and installed packs) only for
+/// the default configuration; an explicit path is served alone. The engine
+/// follows the same rule so both serve the same library.
+fn uses_fleet_layers(explicit_path: Option<&Path>) -> bool {
+    explicit_path.is_none() && env::var_os("WAYEXPAND_CONFIG").is_none()
+}
+
+const FLEET_CONSISTENCY_ATTEMPTS: usize = 3;
+
+/// The configuration the engine serves, the fleet-source signature it was
+/// built from (zero without layers), and a content-free error summary.
+type EffectiveConfig = Result<(Arc<ValidatedConfig>, u64), String>;
+
+/// Build the served configuration: the primary file, with the standard snippet
+/// layers merged on top when `fleet` is set, then administrator policy. A
+/// layer that changes during the merge is retried rather than served as a
+/// mixed snapshot.
+fn build_effective_config(
+    snapshot: &ConfigSnapshot,
+    fleet: bool,
+    policy: &OrganizationPolicy,
+) -> EffectiveConfig {
+    if !fleet {
+        return validate_config_for_policy(&snapshot.config, policy)
+            .map(|validated| (validated, 0))
+            .map_err(|error| error.safe_summary());
+    }
+    for _ in 0..FLEET_CONSISTENCY_ATTEMPTS {
+        let before = FleetConfig::standard_source_signature();
+        let base = (*snapshot.config).clone();
+        let merged = match snapshot.source.as_deref() {
+            Some(source) => {
+                FleetConfig::load_standard_with_base_source_and_policy(base, source, policy)
+            }
+            None => FleetConfig::load_standard_with_base_and_policy(base, policy),
+        }
+        .map_err(|error| error.safe_summary())?;
+        let after = FleetConfig::standard_source_signature();
+        if before != after {
+            continue;
+        }
+        for violation in &merged.policy_violations {
+            warn!(
+                audit_prefix = %policy.audit_prefix,
+                violation = %violation,
+                "IBus snippet layer excluded by organization policy"
+            );
+        }
+        return validate_config_for_policy(&merged.config, policy)
+            .map(|validated| (validated, after))
+            .map_err(|error| error.safe_summary());
+    }
+    Err("snippet layers kept changing while being loaded".into())
+}
+
 fn engine_path(id: u64) -> OwnedObjectPath {
     OwnedObjectPath::try_from(format!("{ENGINE_PATH}/{id}"))
         .expect("generated IBus engine path must be valid")
@@ -633,6 +692,30 @@ impl EngineObject {
     }
 }
 
+/// Watch each standard snippet-layer root that exists and is not yet watched.
+/// Roots can appear after startup (a first pack install, a new `snippets.d`),
+/// so this runs on every wakeup; the 30 s wait bounds how late that is noticed.
+fn watch_new_layer_dirs(watcher: &mut impl Watcher, watched: &mut HashSet<PathBuf>) {
+    for directory in FleetConfig::standard_source_directories() {
+        if watched.contains(&directory) || !directory.is_dir() {
+            continue;
+        }
+        match watcher.watch(&directory, RecursiveMode::Recursive) {
+            Ok(()) => {
+                watched.insert(directory);
+            }
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    path = %directory.display(),
+                    "could not watch snippet layer directory; checking it every 30 s"
+                );
+                watched.insert(directory);
+            }
+        }
+    }
+}
+
 /// Build and run the IBus engine process. The process owns a private bus name,
 /// registers a factory, and creates one isolated engine object per request
 /// while zbus dispatches method calls on its internal async-io executor.
@@ -640,20 +723,29 @@ impl EngineObject {
 /// service. Managed Action Broker expansions remain available when the broker
 /// is configured and healthy; they fail closed when it is unavailable.
 pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusServiceError> {
+    let fleet = uses_fleet_layers(config_path.as_deref());
     let path = config_path.unwrap_or_else(default_config_path);
     let store = ConfigStore::load(&path)?;
     let policy =
         Arc::new(wayexpand_core::load_organization_policy().map_err(IbusServiceError::Policy)?);
     let initial_snapshot = store.snapshot();
     let initial_status = store.status();
+    let connection_slot = Arc::new(Mutex::new(None));
+    let telemetry = Arc::new(IbusTelemetry::new());
+    let (initial_validated, initial_fleet_signature) = if fleet {
+        build_effective_config(&initial_snapshot, true, &policy).map_err(IbusServiceError::Fleet)?
+    } else {
+        (
+            validate_config_for_policy(&initial_snapshot.config, &policy)?,
+            0,
+        )
+    };
     info!(
         config_state = initial_status.state,
         config_generation = initial_snapshot.generation,
+        snippet_layers = fleet,
         "IBus configuration loaded"
     );
-    let connection_slot = Arc::new(Mutex::new(None));
-    let telemetry = Arc::new(IbusTelemetry::new());
-    let initial_validated = validate_config_for_policy(&initial_snapshot.config, &policy)?;
     telemetry.config_generation_published(initial_snapshot.generation, 0);
     start_status_writer(Arc::clone(&telemetry))?;
     let factory_config = Arc::new(Mutex::new(initial_validated));
@@ -713,8 +805,16 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
             } else {
                 warn!("IBus configuration watch unavailable; using fallback polling");
             }
+            let mut watched_layer_dirs = HashSet::new();
+            // Generations count published configurations, so a layer edit
+            // advances them even when the primary file is unchanged.
+            let mut generation = initial_snapshot.generation;
+            let mut fleet_signature = initial_fleet_signature;
             let mut reload_error = None;
             loop {
+                if let Some(active_watcher) = watcher.as_mut().filter(|_| fleet) {
+                    watch_new_layer_dirs(active_watcher, &mut watched_layer_dirs);
+                }
                 if watcher.is_some() {
                     let _ = watch_receiver.recv_timeout(Duration::from_secs(30));
                 } else {
@@ -746,75 +846,92 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                         }
                     }
                 }
+                let mut primary_changed = false;
                 while reload_receiver.try_recv().is_ok() {
-                    let snapshot = reload_store.snapshot();
-                    let validated = match validate_config_for_policy(
-                        &snapshot.config,
-                        &reload_policy,
-                    ) {
-                        Ok(validated) => validated,
-                        Err(error) => {
-                            warn!(
-                                config_generation = snapshot.generation,
-                                config_error = %error.safe_summary(),
-                                "IBus configuration generation rejected after administrator policy"
-                            );
+                    primary_changed = true;
+                }
+                let layers_changed =
+                    fleet && FleetConfig::standard_source_signature() != fleet_signature;
+                if !primary_changed && !layers_changed {
+                    continue;
+                }
+                let snapshot = reload_store.snapshot();
+                let next_generation = generation.wrapping_add(1);
+                let validated =
+                    match build_effective_config(&snapshot, fleet, &reload_policy) {
+                        Ok((validated, signature)) => {
+                            fleet_signature = signature;
+                            validated
+                        }
+                        Err(summary) => {
+                            // Do not retry the same broken layers on every
+                            // wakeup; the next edit changes the signature.
+                            if fleet {
+                                fleet_signature = FleetConfig::standard_source_signature();
+                            }
+                            if reload_error.as_deref() != Some(summary.as_str()) {
+                                warn!(
+                                    config_error = %summary,
+                                    "IBus configuration rejected; keeping previous configuration"
+                                );
+                                reload_error = Some(summary);
+                            }
                             continue;
                         }
                     };
-                    if let Ok(mut current) = reload_validated_config.lock() {
-                        let publish = publish_config_generation(
-                            &mut current,
-                            &reload_config_generation,
-                            &reload_instances,
-                            Arc::clone(&validated),
-                            snapshot.generation,
-                        );
-                        match publish {
-                            Ok(()) => {
-                                reload_telemetry
-                                    .config_generation_published(snapshot.generation, 0);
-                                reload_error = None;
-                            }
-                            Err((error_id, mismatches, detail)) => {
-                                let mismatches = if mismatches == 0 {
-                                    reload_telemetry.snapshot().engines as usize
-                                } else {
-                                    mismatches
-                                };
-                                reload_telemetry.config_generation_failed(
-                                    snapshot.generation,
-                                    error_id,
-                                    mismatches,
+                generation = next_generation;
+                if let Ok(mut current) = reload_validated_config.lock() {
+                    let publish = publish_config_generation(
+                        &mut current,
+                        &reload_config_generation,
+                        &reload_instances,
+                        Arc::clone(&validated),
+                        generation,
+                    );
+                    match publish {
+                        Ok(()) => {
+                            reload_telemetry.config_generation_published(generation, 0);
+                            if reload_error.take().is_some() {
+                                info!(
+                                    config_generation = generation,
+                                    "IBus configuration reload recovered"
                                 );
-                                if reload_error.as_deref() != Some(error_id) {
-                                    warn!(
-                                        problem_id = error_id,
-                                        config_generation = snapshot.generation,
-                                        context_mismatches = mismatches,
-                                        error = detail,
-                                        "IBus configuration generation handoff failed; retaining previous published generation"
-                                    );
-                                }
-                                reload_error = Some(error_id.to_owned());
                             }
                         }
-                    } else {
-                        let error_id = "WX-IBUS-RELOAD-001";
-                        let mismatches = reload_telemetry.snapshot().engines as usize;
-                        reload_telemetry.config_generation_failed(
-                            snapshot.generation,
-                            error_id,
-                            mismatches,
-                        );
-                        warn!(
-                            problem_id = error_id,
-                            config_generation = snapshot.generation,
-                            context_mismatches = mismatches,
-                            "IBus factory config lock poisoned; retaining previous generation"
-                        );
-                        reload_error = Some(error_id.to_owned());
+                        Err((error_id, mismatches, detail)) => {
+                            let mismatches = if mismatches == 0 {
+                                reload_telemetry.snapshot().engines as usize
+                            } else {
+                                mismatches
+                            };
+                            reload_telemetry.config_generation_failed(
+                                generation,
+                                error_id,
+                                mismatches,
+                            );
+                            if reload_error.as_deref() != Some(error_id) {
+                                warn!(
+                                    problem_id = error_id,
+                                    config_generation = generation,
+                                    context_mismatches = mismatches,
+                                    error = detail,
+                                    "IBus configuration generation handoff failed; retaining previous published generation"
+                                );
+                            }
+                            reload_error = Some(error_id.to_owned());
+                        }
                     }
+                } else {
+                    let error_id = "WX-IBUS-RELOAD-001";
+                    let mismatches = reload_telemetry.snapshot().engines as usize;
+                    reload_telemetry.config_generation_failed(generation, error_id, mismatches);
+                    warn!(
+                        problem_id = error_id,
+                        config_generation = generation,
+                        context_mismatches = mismatches,
+                        "IBus factory config lock poisoned; retaining previous generation"
+                    );
+                    reload_error = Some(error_id.to_owned());
                 }
             }
         })

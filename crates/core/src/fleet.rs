@@ -32,8 +32,9 @@
 use crate::{Config, ConfigError, OrganizationPolicy};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{hash_map::DefaultHasher, BTreeMap, BTreeSet, HashMap},
     fs,
+    hash::{Hash, Hasher},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
@@ -386,6 +387,47 @@ impl FleetConfig {
             )?);
         }
         Ok(files)
+    }
+
+    /// A metadata-only signature of the files the standard fleet loader reads.
+    /// It changes when a layer file is added, removed, replaced or edited, and
+    /// never reads file contents, so it is cheap enough to poll.
+    pub fn standard_source_signature() -> u64 {
+        match Self::standard_source_files() {
+            Ok(paths) => Self::source_metadata_signature(paths),
+            Err(error) => {
+                let mut hasher = DefaultHasher::new();
+                error.to_string().hash(&mut hasher);
+                hasher.finish()
+            }
+        }
+    }
+
+    /// Metadata-only signature of `paths`, independent of their order.
+    pub fn source_metadata_signature(paths: impl IntoIterator<Item = PathBuf>) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        let mut paths: Vec<_> = paths.into_iter().collect();
+        paths.sort();
+        for path in paths {
+            path.hash(&mut hasher);
+            match fs::metadata(&path) {
+                Ok(metadata) => {
+                    b"present".hash(&mut hasher);
+                    metadata.file_type().is_file().hash(&mut hasher);
+                    metadata.len().hash(&mut hasher);
+                    metadata.modified().ok().hash(&mut hasher);
+                    metadata.ino().hash(&mut hasher);
+                    metadata.dev().hash(&mut hasher);
+                    metadata.ctime().hash(&mut hasher);
+                    metadata.ctime_nsec().hash(&mut hasher);
+                }
+                Err(error) => {
+                    b"unreadable".hash(&mut hasher);
+                    error.kind().hash(&mut hasher);
+                }
+            }
+        }
+        hasher.finish()
     }
 
     /// Return the standard fleet roots so long-running services can watch for
