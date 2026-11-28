@@ -139,7 +139,7 @@ mkdir -p "$output_dir/state"
 results="$output_dir/results.txt"
 WAYEXPAND_LIVE_LAYOUT=$live_layout WAYEXPAND_LIVE_STATE_DIR="$output_dir/state" \
     sh "$project_dir/scripts/run-certification-driver.sh" \
-    --driver "$project_dir/scripts/kde-live-certification-driver.sh" \
+    --driver "$project_dir/scripts/live-certification-driver.sh" \
     --compositor kde --version "$kwin_version" --backend ibus \
     --layout "$layouts" --target-apps "$apps" \
     --timeout 200 --deadline 7200 \

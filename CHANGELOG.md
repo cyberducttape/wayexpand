@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `scripts/wlroots-live-certification.sh` guides a reviewer through live
+  certification of the input-method-v2 route on a real Sway or Hyprland
+  desktop with a physical keyboard, as `scripts/kde-live-certification.sh`
+  does for IBus on KDE. It checks that the installed CLI and the running
+  daemon are the certified commit, the daemon is on input-method-v2 and the
+  window tracker is connected, then reuses the live driver (renamed
+  `scripts/live-certification-driver.sh`, now accepting either route).
 - Sway and Hyprland now follow the focused window, so `app_filter` snippets
   work there instead of always failing closed. The new
   `wayexpand-backend-ipc-window` crate reads window and workspace events

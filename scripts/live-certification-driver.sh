@@ -1,8 +1,9 @@
 #!/bin/sh
-# Certification driver for a live, physical KDE Plasma session on the IBus
-# route. Started once per matrix cell by scripts/run-certification-driver.sh,
-# which scripts/kde-live-certification.sh runs after its preflight; do not run
-# it directly.
+# Certification driver for a live, physical desktop session: KDE Plasma on
+# the IBus route, or Sway or Hyprland on the input-method-v2 route. Started
+# once per matrix cell by scripts/run-certification-driver.sh, which
+# scripts/kde-live-certification.sh or scripts/wlroots-live-certification.sh
+# runs after its preflight; do not run it directly.
 #
 # For the cells a person can perform, it opens a real GTK 3 or Qt 6 readback
 # client (scripts/certification-clients), tells the person at the physical
@@ -34,15 +35,18 @@ unverified() {
     exit 2
 }
 
-# The test snippets that scripts/kde-live-certification.sh adds for the
-# session. Keep these in sync with live_certification_snippets there.
+# The test snippets the live-certification wrappers add for the session.
+# Keep these in sync with the snippet block in both wrappers.
 long_text='WayExpand live certification: the quick brown fox jumps over the lazy dog, then the lazy dog naps while the quick brown fox counts to twenty. '
 long_text="$long_text$long_text"
 unicode_text='café ✓ naïve 日本語'
 
-[ "$backend" = ibus ] || unverified "the live driver exercises only the IBus route, not $backend"
+case "$backend" in
+    ibus | input-method-v2) ;;
+    *) unverified "the live driver exercises only the IBus and input-method-v2 routes, not $backend" ;;
+esac
 [ -n "$live_layout" ] && [ -n "$state_dir" ] ||
-    unverified 'run through scripts/kde-live-certification.sh, which sets up the live session'
+    unverified 'run through scripts/kde-live-certification.sh or scripts/wlroots-live-certification.sh, which set up the live session'
 [ "$layout" = "$live_layout" ] ||
     unverified "the session typed on layout $live_layout; switch the desktop to $layout and rerun to cover it"
 
@@ -58,7 +62,8 @@ case "$scenario" in
     printable-press-release)
         keys=';wxa'
         if [ "$client" = password ]; then
-            # IBus marks password-purpose fields sensitive; nothing may expand.
+            # Password-purpose fields are sensitive on both routes; nothing
+            # may expand.
             expected=';wxa'
         else
             expected='alpha'
@@ -85,7 +90,7 @@ case "$scenario" in
         expected="${long_text}Z"
         ;;
     focus-change-during-expansion | target-closes-during-expansion | expansion-cancellation)
-        unverified 'IBus commits the replacement in a single call; a person cannot time a focus change or close inside it'
+        unverified 'the replacement is committed in a single protocol call; a person cannot time a focus change or close inside it'
         ;;
     *)
         unverified "$scenario is not a live-typed scenario in this driver"

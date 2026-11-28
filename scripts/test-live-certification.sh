@@ -1,12 +1,12 @@
 #!/bin/sh
-# Check the live KDE certification driver and its configuration editor
+# Check the live certification driver and its configuration editor
 # without a desktop: scripted stand-ins for the readback clients write the
 # state a real client would, so the outcome rules, unverified reasons and
 # configuration restore are tested exactly as the live session uses them.
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-driver="$project_dir/scripts/kde-live-certification-driver.sh"
+driver="$project_dir/scripts/live-certification-driver.sh"
 editor="$project_dir/scripts/live-certification-config.py"
 test_dir=$(mktemp -d)
 trap 'rm -rf -- "$test_dir"' EXIT INT TERM
@@ -57,6 +57,7 @@ run_cell 2 printable-press-release browser-firefox
 run_cell 2 keyboard-hotplug gtk3-textview
 run_cell 2 focus-change-during-expansion gtk3-textview
 run_cell 2 backspace password-field
+run_cell 2 printable-press-release gtk3-textview evdev+wlroots
 
 # The outcome is the exact text the client received.
 FAKE_TEXT=alpha run_cell 0 printable-press-release gtk3-textview
@@ -71,6 +72,12 @@ long='WayExpand live certification: the quick brown fox jumps over the lazy dog,
 FAKE_TEXT="$long${long}alpha" run_cell 0 second-trigger-during-nonatomic-replacement gtk3-textview
 FAKE_TEXT="$long${long}lpha" run_cell 1 second-trigger-during-nonatomic-replacement gtk3-textview
 FAKE_TEXT="$long${long}Z" run_cell 0 modifier-during-nonatomic-replacement qt6-plaintextedit
+
+# The input-method-v2 route (Sway, Hyprland) uses the same outcome rules.
+FAKE_TEXT=alpha run_cell 0 printable-press-release gtk3-textview input-method-v2
+FAKE_TEXT=';wxa' run_cell 0 printable-press-release password-field input-method-v2
+FAKE_TEXT=alpha run_cell 1 printable-press-release password-field input-method-v2
+run_cell 2 focus-change-during-expansion qt6-plaintextedit input-method-v2
 
 # The configuration editor restores exact bytes, or removes only its block.
 config="$test_dir/expansions.toml"
@@ -103,4 +110,4 @@ if grep -F ';wxa' "$config" >/dev/null; then echo 'error: test block left behind
 grep -F ':during' "$config" >/dev/null || { echo 'error: concurrent edit lost' >&2; exit 1; }
 grep -F ':mine' "$config" >/dev/null || { echo 'error: user snippet lost' >&2; exit 1; }
 
-printf '%s\n' 'live KDE certification driver test passed'
+printf '%s\n' 'live certification driver test passed'
