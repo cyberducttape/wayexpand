@@ -96,6 +96,20 @@ fi
 config=$(printf '%s' "$status_json" | jq -r '.config_active_path // empty')
 [ -n "$config" ] && [ -f "$config" ] || fail "the daemon reports no readable configuration (${config:-none})"
 
+# Reusing an evidence directory with recovery state from an interrupted run
+# could make the EXIT trap restore a backup created by a different session.
+# Keep unrelated evidence files, but never arm cleanup over stale recovery
+# metadata or an unfinished config replacement.
+for recovery_file in \
+    "$output_dir/original-configuration.toml" \
+    "$output_dir/original-configuration.mode" \
+    "$output_dir/modified-configuration.sha256" \
+    "$output_dir/modified-configuration.sha256.tmp" \
+    "$config.live-certification.tmp"; do
+    [ ! -e "$recovery_file" ] && [ ! -L "$recovery_file" ] ||
+        fail "recovery state already exists at $recovery_file; inspect it before reusing this output directory"
+done
+
 # ---- Test snippets: appended in a marked block, removed on exit ----
 "$cli" backup >/dev/null || fail 'could not back up the configuration first'
 generation_before=$(printf '%s' "$status_json" | jq -r '.config_generation')

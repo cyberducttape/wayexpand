@@ -1148,6 +1148,7 @@ mod tests {
         ));
         std::fs::create_dir(&directory).unwrap();
         let started = directory.join("started");
+        let release = directory.join("release");
         let side_effect = directory.join("side-effect");
         let command = CommandConfig {
             action: None,
@@ -1155,8 +1156,9 @@ mod tests {
             args: vec![
                 "-c".into(),
                 format!(
-                    "printf started > '{}'; sleep 0.5; printf ran > '{}'",
+                    "printf started > '{}'; while [ ! -e '{}' ]; do sleep 0.01; done; printf ran > '{}'",
                     started.display(),
+                    release.display(),
                     side_effect.display()
                 ),
             ],
@@ -1188,10 +1190,10 @@ mod tests {
         generation.store(8, Ordering::Release);
 
         assert_eq!(worker.join().unwrap(), Err(CommandError::StaleInput));
-        // Wait beyond the child's scheduled side effect so the assertion also
-        // proves the process did not merely return early while leaving it
-        // alive in the background.
-        thread::sleep(Duration::from_millis(700));
+        // If cancellation returned while leaving a child alive, releasing it
+        // now makes its side effect observable without relying on sleep timing.
+        std::fs::write(&release, b"release").unwrap();
+        thread::sleep(Duration::from_millis(50));
         assert!(
             !side_effect.exists(),
             "the process group continued after its input generation became stale"
